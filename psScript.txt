@@ -1,0 +1,88 @@
+# --- Configuration ---
+$sourcePath = "C:\PHIS\Abbey Landry\Grade 7"
+$currentYear = "2025-2026"
+$destinationFolderName = "Done"
+$inputCsvName = "Validation_Results.csv"   # C# Output
+$outputCsvName = "Upload_to_PHIS.csv"      # Final Upload Format
+
+# --- Path Logic ---
+$dirName = Split-Path $sourcePath -Leaf
+$outputPath = Join-Path -Path $sourcePath -ChildPath $destinationFolderName
+$inputCsvPath = Join-Path -Path $outputPath -ChildPath $inputCsvName
+$outputCsvPath = Join-Path -Path $outputPath -ChildPath $outputCsvName
+
+# 1. Load the Validation Results
+if (Test-Path $inputCsvPath) {
+    # Encoding UTF8 is critical for the French accents in the CSV
+    $validationData = Import-Csv -Path $inputCsvPath -Encoding UTF8
+    Write-Host "Successfully loaded validation data." -ForegroundColor Green
+} else {
+    Write-Error "CRITICAL: Could not find $inputCsvPath. Run the C# tool first."
+    return
+}
+
+# Ensure Output Directory exists
+if (!(Test-Path -Path $outputPath)) { 
+    New-Item -ItemType Directory -Path $outputPath | Out-Null 
+}
+
+$uploadData = @()
+
+# 2. Process only the Validated Rows
+foreach ($row in $validationData) {
+    # Check for True (Import-Csv treats these as strings)
+    if ($row.FileFound -eq 'True' -and $row.IsMatch -eq 'True') {
+        
+        $clientId = $row.ClientID
+        $firstName = $row."First Name"
+        $lastName = $row."Last Name"
+        $pageCount = $row.PageCount  # <--- NEW: Captured from your C# column
+        
+        $pdfPath = Join-Path $sourcePath "$clientId.pdf"
+
+        # Define Vaccine Types based on Grade
+        $vaxTypes = @()
+        if ($dirName -eq "Grade 7") {
+            $vaxTypes = @(
+                @{ Name = "HPV9"; Desc = "Consent HPV9" },
+                @{ Name = "Tdap"; Desc = "Consent Tdap" }
+            )
+        } elseif ($dirName -eq "Grade 9") {
+            $vaxTypes = @( @{ Name = "MenCACYW135"; Desc = "Consent MenC-ACYW-135" } )
+        }
+
+        foreach ($vax in $vaxTypes) {
+            $docTitle = "${clientId}_consent_$($vax.Name)_$currentYear"
+            $destinationFile = Join-Path $outputPath "$docTitle.pdf"
+            
+            # Physical File Action
+            if (Test-Path $pdfPath) {
+                Copy-Item -Path $pdfPath -Destination $destinationFile -Force
+            }
+
+            # Build the Object for the PHIS Upload CSV
+            $uploadData += [PSCustomObject]@{ 
+                "ClientID"       = $clientId
+                "Last Name"      = $lastName
+                "First Name"     = $firstName
+                "Document Title" = $docTitle
+                "Description"    = $vax.Desc
+                "NbPage"         = $pageCount  # <--- NEW: Crucial for 'feuille rose' detection
+                "Status"         = ""          # Empty for robot/manual fill
+            }
+        }
+        Write-Host "Prepped: $clientId ($firstName $lastName) - Pages: $pageCount" -ForegroundColor Cyan
+    }
+    else {
+        Write-Host "Skipping $clientId - Match: $($row.IsMatch), Found: $($row.FileFound)" -ForegroundColor Gray
+    }
+}
+
+# 3. Export to final CSV
+$uploadData | Export-Csv -Path $outputCsvPath -NoTypeInformation -Encoding UTF8
+
+Write-Host "`n====================================================" -ForegroundColor Yellow
+Write-Host "PHIS Upload Ready!" -ForegroundColor Green
+Write-Host "Output File: $outputCsvPath" -ForegroundColor White
+Write-Host "Note: Review rows where NbPage > 1 for 'feuille rose' handling." -ForegroundColor Cyan
+Write-Host "====================================================" -ForegroundColor Yellow
