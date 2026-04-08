@@ -22,6 +22,11 @@ namespace CsvProcessor
         private readonly Dictionary<string, object?> _additionalColumns;
         private readonly List<EncodingConfiguration> _encodingConfigs;
 
+
+       
+
+        
+
         public CsvReader(IConfiguration config)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
@@ -102,6 +107,12 @@ namespace CsvProcessor
                 Directory.CreateDirectory(outputDir);
                 Console.WriteLine($"Created output directory: {outputDir}");
             }
+
+
+
+           
+
+           
         }
 
         /// <summary>

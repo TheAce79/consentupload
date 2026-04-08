@@ -39,6 +39,12 @@ namespace CsvProcessor
         private readonly bool _useMedicareNumberAsConfirmation;
         private readonly double _medicareNumberBoostScore;
 
+        // ADD nullable fields that get initialized lazily
+        private int? _firstNameIdx;
+        private int? _lastNameIdx;
+        private int? _medicareIdx;
+        private int? _clientIdIdx;
+        private bool _columnIndicesInitialized = false;
 
         public FindClientId(IConfiguration config)
         {
@@ -177,6 +183,9 @@ namespace CsvProcessor
                 Console.WriteLine($"   4. Set ChromeDriverPath in appsettings.json if using custom location");
                 throw;
             }
+
+
+           
         }
 
 
@@ -296,9 +305,6 @@ namespace CsvProcessor
         }
 
 
-
-
-
         private string? SearchClientByDob(StudentRecord student)
         {
             try
@@ -334,7 +340,11 @@ namespace CsvProcessor
                 Console.WriteLine($"      Looking for: {student.FirstName} {student.LastName}");
                 if (!string.IsNullOrWhiteSpace(student.MedicareNumber))
                 {
-                    Console.WriteLine($"      Medicare #: {student.MedicareNumber}");
+                    Console.WriteLine($"      Medicare #: {student.MedicareNumber} (available for verification)");
+                }
+                else
+                {
+                    Console.WriteLine($"      Medicare #: Not available - using name matching only");
                 }
 
                 // Click search button
@@ -373,9 +383,15 @@ namespace CsvProcessor
                     return null;
                 }
 
+                // ✅ INITIALIZE COLUMN INDICES ON FIRST SEARCH
+                if (!_columnIndicesInitialized)
+                {
+                    InitializeColumnIndices();
+                }
+
                 if (resultRows.Count == 1)
                 {
-                    // Single result - verify with fuzzy matching + Medicare number
+                    // Single result - verify with name matching (Medicare as secondary confirmation)
                     var match = ExtractResultRowData(resultRows[0]);
                     var (finalScore, nameScore, medicareMatch) = CalculateMatchScore(student, match);
 
@@ -384,20 +400,31 @@ namespace CsvProcessor
                     Console.WriteLine($"      CSV:  {student.FirstName} {student.LastName} | Medicare: {student.MedicareNumber ?? "N/A"}");
                     Console.WriteLine($"      Name match score: {nameScore:F2}%");
 
+                    // Show Medicare status
                     if (medicareMatch)
                     {
-                        Console.WriteLine($"      ✅ Medicare number MATCH (+{_medicareNumberBoostScore}% bonus)");
+                        Console.WriteLine($"      ✅ Medicare number MATCH (confidence boost: +{_medicareNumberBoostScore}%)");
                     }
                     else if (!string.IsNullOrWhiteSpace(student.MedicareNumber) && !string.IsNullOrWhiteSpace(match.MedicareNumber))
                     {
-                        Console.WriteLine($"      ❌ Medicare number MISMATCH");
+                        Console.WriteLine($"      ⚠️  Medicare number MISMATCH (possible data entry error)");
+                    }
+                    else if (string.IsNullOrWhiteSpace(student.MedicareNumber))
+                    {
+                        Console.WriteLine($"      ℹ️  Medicare # not available in CSV - relying on name match");
                     }
 
                     Console.WriteLine($"      Final score: {finalScore:F2}%");
 
-                    if (finalScore >= _singleResultThreshold)
+                    // Decision logic: Name score is primary, Medicare is confidence booster
+                    if (nameScore >= _singleResultThreshold)
                     {
-                        Console.WriteLine($"   ✅ Confirmed match - Client ID: {match.ClientId}");
+                        Console.WriteLine($"   ✅ Confirmed match by NAME - Client ID: {match.ClientId}");
+                        return match.ClientId;
+                    }
+                    else if (medicareMatch && nameScore >= 60)
+                    {
+                        Console.WriteLine($"   ✅ Confirmed match by MEDICARE (name score marginal: {nameScore:F2}%) - Client ID: {match.ClientId}");
                         return match.ClientId;
                     }
                     else
@@ -408,7 +435,7 @@ namespace CsvProcessor
                 }
                 else
                 {
-                    // Multiple results - use fuzzy matching + Medicare number to find best
+                    // Multiple results - prioritize name matching, use Medicare as tiebreaker
                     Console.WriteLine($"   ⚠️  Multiple results found ({resultRows.Count}), applying smart matching...");
 
                     var matches = new List<(PhisSearchResult result, double finalScore, double nameScore, bool medicareMatch)>();
@@ -422,7 +449,7 @@ namespace CsvProcessor
                             matches.Add((result, finalScore, nameScore, medicareMatch));
 
                             string medicareStatus = medicareMatch ? "✅ Medicare Match" :
-                                (!string.IsNullOrWhiteSpace(student.MedicareNumber) && !string.IsNullOrWhiteSpace(result.MedicareNumber) ? "❌ Medicare Mismatch" : "⚪ Medicare N/A");
+                                (!string.IsNullOrWhiteSpace(student.MedicareNumber) && !string.IsNullOrWhiteSpace(result.MedicareNumber) ? "❌ Medicare Mismatch" : "⚪ No Medicare");
 
                             Console.WriteLine($"      {i + 1}. ID: {result.ClientId} | {result.FirstName} {result.LastName}");
                             Console.WriteLine($"         Name Score: {nameScore:F2}% | {medicareStatus} | Final: {finalScore:F2}%");
@@ -433,31 +460,72 @@ namespace CsvProcessor
                         }
                     }
 
-                    // Sort by final score (which includes Medicare bonus)
-                    var bestMatch = matches.OrderByDescending(m => m.finalScore).FirstOrDefault();
+                    if (matches.Count == 0)
+                    {
+                        Console.WriteLine($"   ⚠️  Could not extract any valid results - manual review needed");
+                        return null;
+                    }
 
-                    // If Medicare number matches, we can be more confident
-                    if (bestMatch.medicareMatch && bestMatch.nameScore >= 70)
+                    // ═══════════════════════════════════════════════════════════════
+                    // MATCHING STRATEGY (Priority Order):
+                    // 1. Best name match (>= multipleResultsThreshold)
+                    // 2. Medicare match with reasonable name score (>= 70%)
+                    // 3. Name match above manual review threshold
+                    // 4. Medicare match as last resort (if name scores all low)
+                    // ═══════════════════════════════════════════════════════════════
+
+                    // Sort by NAME SCORE first (primary criteria)
+                    var sortedByName = matches.OrderByDescending(m => m.nameScore).ToList();
+                    var bestNameMatch = sortedByName.First();
+
+                    // Check if we have a Medicare match
+                    var medicareMatches = matches.Where(m => m.medicareMatch).ToList();
+                    var bestMedicareMatch = medicareMatches.OrderByDescending(m => m.nameScore).FirstOrDefault();
+
+                    // Strategy 1: Strong name match (>= 85% by default)
+                    if (bestNameMatch.nameScore >= _multipleResultsThreshold)
                     {
-                        Console.WriteLine($"   ✅ Medicare # confirmed match - Client ID: {bestMatch.result.ClientId} | Score: {bestMatch.finalScore:F2}%");
-                        return bestMatch.result.ClientId;
+                        Console.WriteLine($"   ✅ Strong NAME match - Client ID: {bestNameMatch.result.ClientId} | Score: {bestNameMatch.nameScore:F2}%");
+
+                        // Warn if Medicare conflicts
+                        if (bestMedicareMatch.result != null &&
+                            bestMedicareMatch.result.ClientId != bestNameMatch.result.ClientId)
+                        {
+                            Console.WriteLine($"   ⚠️  WARNING: Medicare match found for different client (ID: {bestMedicareMatch.result.ClientId})");
+                            Console.WriteLine($"      This may indicate a data entry error in Medicare number");
+                        }
+
+                        return bestNameMatch.result.ClientId;
                     }
-                    else if (bestMatch.finalScore >= _multipleResultsThreshold)
+
+                    // Strategy 2: Medicare match with decent name score (>= 70%)
+                    if (bestMedicareMatch.result != null && bestMedicareMatch.nameScore >= 70)
                     {
-                        Console.WriteLine($"   ✅ High confidence match - Client ID: {bestMatch.result.ClientId} | Score: {bestMatch.finalScore:F2}%");
-                        return bestMatch.result.ClientId;
+                        Console.WriteLine($"   ✅ Medicare # confirmed match - Client ID: {bestMedicareMatch.result.ClientId}");
+                        Console.WriteLine($"      Name score: {bestMedicareMatch.nameScore:F2}% (Medicare verification provides confidence)");
+                        return bestMedicareMatch.result.ClientId;
                     }
-                    else if (bestMatch.finalScore >= _manualReviewThreshold)
+
+                    // Strategy 3: Moderate name match (>= 70% manual review threshold)
+                    if (bestNameMatch.nameScore >= _manualReviewThreshold)
                     {
-                        Console.WriteLine($"   ⚠️  Possible match (score: {bestMatch.finalScore:F2}%) - needs manual review");
-                        Console.WriteLine($"      Client ID: {bestMatch.result.ClientId} | {bestMatch.result.FirstName} {bestMatch.result.LastName}");
-                        return null;
+                        Console.WriteLine($"   ✅ Moderate NAME match - Client ID: {bestNameMatch.result.ClientId} | Score: {bestNameMatch.nameScore:F2}%");
+                        return bestNameMatch.result.ClientId;
                     }
-                    else
+
+                    // Strategy 4: Last resort - Medicare match even if name is weak
+                    if (bestMedicareMatch.result != null)
                     {
-                        Console.WriteLine($"   ⚠️  No confident match found (best score: {bestMatch.finalScore:F2}%) - manual review needed");
-                        return null;
+                        Console.WriteLine($"   ⚠️  Medicare match with LOW name score - Client ID: {bestMedicareMatch.result.ClientId}");
+                        Console.WriteLine($"      Name score: {bestMedicareMatch.nameScore:F2}% (possible name spelling variation)");
+                        Console.WriteLine($"      Accepting based on Medicare verification - REVIEW RECOMMENDED");
+                        return bestMedicareMatch.result.ClientId;
                     }
+
+                    // No confident match found
+                    Console.WriteLine($"   ⚠️  No confident match found (best name score: {bestNameMatch.nameScore:F2}%)");
+                    Console.WriteLine($"      Manual review required");
+                    return null;
                 }
             }
             catch (NoSuchElementException ex)
@@ -478,79 +546,131 @@ namespace CsvProcessor
         }
 
 
+
+
+
         /// <summary>
-        /// Extracts data from a search result row (including Medicare number if present)
+        /// Initializes column indices from the PHIS results table (called after first successful search)
+        /// </summary>
+        private void InitializeColumnIndices()
+        {
+            if (_columnIndicesInitialized) return;
+
+            try
+            {
+                var phisHeaders = _config.GetSection("PhisAutomation:ColumnHeaders");
+
+                _clientIdIdx = GetColumnIndexByName(phisHeaders["ClientId"] ?? "Client ID");
+                _firstNameIdx = GetColumnIndexByName(phisHeaders["FirstName"] ?? "First Name");
+                _lastNameIdx = GetColumnIndexByName(phisHeaders["LastName"] ?? "Last Name");
+
+                // Medicare/Health Card is optional
+                try
+                {
+                    _medicareIdx = GetColumnIndexByName(phisHeaders["Medicare"] ?? "Health Card Number");
+                }
+                catch
+                {
+                    Console.WriteLine("   ⚠️  Medicare/Health Card column not found - matching will use names only");
+                    _medicareIdx = null;
+                }
+
+                _columnIndicesInitialized = true;
+                Console.WriteLine($"✅ Column indices initialized: ClientID={_clientIdIdx}, FirstName={_firstNameIdx}, LastName={_lastNameIdx}, Medicare={_medicareIdx?.ToString() ?? "N/A"}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Failed to initialize column indices: {ex.Message}");
+                throw;
+            }
+        }
+
+
+
+
+        private int GetColumnIndexByName(string columnName)
+        {
+            try
+            {
+                // Wait for the table to be present
+                var table = _wait.Until(d => d.FindElement(By.Id("form:dataTable:dataTable")));
+
+                // Find the table header row
+                var headerRow = table.FindElement(By.CssSelector("thead tr"));
+                var headers = headerRow.FindElements(By.TagName("th"));
+
+                for (int i = 0; i < headers.Count; i++)
+                {
+                    var headerText = headers[i].Text.Trim();
+
+                    // Match the column name (case-insensitive)
+                    if (headerText.Equals(columnName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine($"Found column '{columnName}' at index {i}");
+                        return i;
+                    }
+                }
+
+                throw new Exception($"Column '{columnName}' not found in table headers");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error finding column index for '{columnName}': {ex.Message}");
+                throw;
+            }
+        }
+
+
+        /// <summary>
+        /// Extracts data from a search result row using dynamic column indices
         /// </summary>
         private PhisSearchResult ExtractResultRowData(IWebElement row)
         {
             var cells = row.FindElements(By.TagName("td"));
 
+            if (!_columnIndicesInitialized)
+            {
+                throw new InvalidOperationException("Column indices not initialized. Call InitializeColumnIndices() first.");
+            }
+
             var result = new PhisSearchResult
             {
-                ClientId = cells[0].Text.Trim()
+                ClientId = cells[_clientIdIdx!.Value].Text.Trim(),
+                FirstName = cells[_firstNameIdx!.Value].Text.Trim(),
+                LastName = cells[_lastNameIdx!.Value].Text.Trim()
             };
 
-            // Extract name (column 1 or columns 1-2)
-            if (cells.Count >= 2)
+            // Extract Medicare number if column exists
+            if (_medicareIdx.HasValue && _medicareIdx.Value < cells.Count)
             {
-                var nameText = cells[1].Text.Trim();
+                var medicareText = cells[_medicareIdx.Value].Text.Trim();
 
-                if (nameText.Contains(","))
+                // Validate it looks like a Medicare number (digits, spaces, dashes only)
+                if (!string.IsNullOrWhiteSpace(medicareText) &&
+                    medicareText.All(c => char.IsDigit(c) || c == '-' || c == ' '))
                 {
-                    var nameParts = nameText.Split(',');
-                    result.LastName = nameParts[0].Trim();
-                    result.FirstName = nameParts.Length > 1 ? nameParts[1].Trim() : "";
+                    result.MedicareNumber = NormalizeMedicareNumber(medicareText);
                 }
-                else if (cells.Count >= 3)
-                {
-                    result.LastName = cells[1].Text.Trim();
-                    result.FirstName = cells[2].Text.Trim();
-                }
-                else
-                {
-                    var nameParts = nameText.Split(' ', 2);
-                    result.FirstName = nameParts.Length > 0 ? nameParts[0] : "";
-                    result.LastName = nameParts.Length > 1 ? nameParts[1] : "";
-                }
-            }
-
-            // Try to extract Medicare number (usually in column 3 or 4)
-            // Adjust the column index based on actual table structure
-            try
-            {
-                if (cells.Count >= 4)
-                {
-                    // Try DOB column first (column 2), then Medicare (column 3)
-                    var medicareCandidate = cells[3].Text.Trim();
-
-                    // Medicare numbers are typically 12 digits in New Brunswick
-                    if (!string.IsNullOrWhiteSpace(medicareCandidate) &&
-                        medicareCandidate.All(c => char.IsDigit(c) || c == '-' || c == ' '))
-                    {
-                        result.MedicareNumber = NormalizeMedicareNumber(medicareCandidate);
-                    }
-                }
-            }
-            catch
-            {
-                // Medicare number extraction failed - not critical
             }
 
             return result;
         }
 
 
-
         /// <summary>
-        /// Calculates overall match score including name fuzzy matching and Medicare number verification
+        /// Calculates overall match score with NAME PRIORITY over Medicare number
+        /// Medicare is used as:
+        /// 1. Tiebreaker when multiple results have similar name scores
+        /// 2. Confirmation boost for already good name matches
+        /// 3. Last resort when name matching fails
         /// Returns: (finalScore, nameScore, medicareMatch)
         /// </summary>
         private (double finalScore, double nameScore, bool medicareMatch) CalculateMatchScore(StudentRecord student, PhisSearchResult phisResult)
         {
-            // Calculate name similarity
+            // Calculate name similarity (this is the PRIMARY matching criteria)
             double nameScore = CalculateNameMatchScore(student, phisResult);
 
-            // Check Medicare number match
+            // Check Medicare number match (SECONDARY criteria)
             bool medicareMatch = false;
 
             if (_useMedicareNumberAsConfirmation &&
@@ -563,16 +683,20 @@ namespace CsvProcessor
                 medicareMatch = csvMedicare.Equals(phisMedicare, StringComparison.OrdinalIgnoreCase);
             }
 
-            // Calculate final score with Medicare bonus
+            // Calculate final score
             double finalScore = nameScore;
-            if (medicareMatch)
+
+            // Only apply Medicare boost if:
+            // 1. Medicare numbers match AND
+            // 2. Name score is already reasonable (>= 60%)
+            // This prevents Medicare from overriding bad name matches
+            if (medicareMatch && nameScore >= 60)
             {
                 finalScore = Math.Min(100, nameScore + _medicareNumberBoostScore);
             }
 
             return (finalScore, nameScore, medicareMatch);
         }
-
 
 
         /// <summary>
