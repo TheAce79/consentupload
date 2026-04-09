@@ -22,14 +22,47 @@ namespace CsvProcessor
 
             try
             {
-                // Create and run CSV processor
-                var csvReader = new CsvReader(configuration);
-                csvReader.ProcessCsv();
+                // ✅ RENAMED: CsvReader → StudentCsvProcessor
+                var csvProcessor = new StudentCsvProcessor(configuration);
+
+                // Check if output CSV already exists
+                string outputPath = Path.Combine(
+                    configuration["CsvProcessing:OutputCsvPath"] ?? "",
+                    configuration["CsvProcessing:OutputCsvFileName"] ?? ""
+                );
+
+                if (File.Exists(outputPath))
+                {
+                    Console.WriteLine($"ℹ️  Output CSV already exists: {outputPath}");
+                    Console.WriteLine($"   File will NOT be reprocessed.\n");
+                }
+                else
+                {
+                    Console.WriteLine($"📄 Processing source CSV...\n");
+                    csvProcessor.ProcessCsv();
+                    Console.WriteLine($"\n✅ CSV processing complete! Output: {outputPath}");
+                }
 
                 // Show preview
-                csvReader.PreviewCsv(5);
+                csvProcessor.PreviewCsv(5);
 
-                Console.WriteLine("\n✅ Processing complete!");
+                // ✅ START CLIENT ID SEARCH
+                Console.WriteLine("\n🚀 Starting Client ID search automation...\n");
+
+                using (var finder = new FindClientId(configuration))
+                {
+                    // Login to PHIS
+                    if (!finder.InitiateLogin())
+                    {
+                        Console.WriteLine("❌ Login failed. Cannot proceed with search.");
+                        return;
+                    }
+
+                    // Search for all unprocessed students
+                    finder.SearchAllClientsInCsv();
+                }
+
+                Console.WriteLine("\n✅ All done! Check the CSV for results.");
             }
             catch (Exception ex)
             {

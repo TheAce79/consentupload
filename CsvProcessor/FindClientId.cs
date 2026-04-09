@@ -8,9 +8,28 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using Microsoft.Extensions.Configuration;
+using CsvHelper;
+using CsvHelper.Configuration;
+using System.Globalization;
+using CsvHelper.TypeConversion;
 
 namespace CsvProcessor
 {
+    /// <summary>
+    /// Status of Client ID search for a student record
+    /// </summary>
+    public enum ClientIdStatus
+    {
+        /// <summary>Not yet searched</summary>
+        NotProcessed = 0,
+
+        /// <summary>Client ID found successfully</summary>
+        Found = 1,
+
+        /// <summary>Error occurred or no match found - needs manual review</summary>
+        NeedsManualReview = 2
+    }
+
     public class FindClientId : IDisposable
     {
 
@@ -25,6 +44,9 @@ namespace CsvProcessor
         private readonly string _password;
         private readonly bool _manualLoginMode;
         private readonly int _manualLoginWaitSeconds;
+
+        // ✅ ADD THIS
+        private readonly int _saveProgressEveryNRecords;
 
         // Fuzzy matching configuration
         private readonly bool _fuzzyMatchingEnabled;
@@ -46,6 +68,9 @@ namespace CsvProcessor
         private int? _clientIdIdx;
         private bool _columnIndicesInitialized = false;
 
+        private List<StudentRecord>? _currentStudentList; // ✅ ADD THIS
+        private bool _shutdownRequested = false;          // ✅ ADD THIS
+
         public FindClientId(IConfiguration config)
         {
             _config = config;
@@ -55,6 +80,10 @@ namespace CsvProcessor
                 _config["CsvProcessing:OutputCsvPath"] ?? "",
                 _config["CsvProcessing:OutputCsvFileName"] ?? ""
             );
+
+
+            // ✅ ADD THIS
+            _saveProgressEveryNRecords = _config.GetValue<int>("CsvProcessing:SaveProgressEveryNRecords", 1);
 
             _username = _config["PhisAutomation:Username"] ?? "";
             _password = _config["PhisAutomation:Password"] ?? "";
@@ -88,6 +117,11 @@ namespace CsvProcessor
             {
                 Console.WriteLine($"   Manual login wait time: {_manualLoginWaitSeconds} seconds");
             }
+
+            // ✅ ADD THIS
+            Console.WriteLine($"\n💾 Progress saving configuration:");
+            Console.WriteLine($"   Save CSV every: {_saveProgressEveryNRecords} record(s)");
+            Console.WriteLine($"   Atomic file replacement: Enabled ✅");
 
             Console.WriteLine($"\n🔍 Fuzzy matching configuration:");
             Console.WriteLine($"   Enabled: {_fuzzyMatchingEnabled}");
@@ -185,7 +219,8 @@ namespace CsvProcessor
             }
 
 
-           
+            // ✅ ADD THIS: Register Ctrl+C handler
+            Console.CancelKeyPress += OnShutdownRequested;
         }
 
 
@@ -305,7 +340,11 @@ namespace CsvProcessor
         }
 
 
-        private string? SearchClientByDob(StudentRecord student)
+        /// <summary>
+        /// Searches for a client by DOB and returns match result
+        /// Returns: (clientId, bestMatchInfo)
+        /// </summary>
+        private (string? clientId, string? bestMatchInfo) SearchClientByDob(StudentRecord student)
         {
             try
             {
@@ -380,7 +419,7 @@ namespace CsvProcessor
                     {
                         Console.WriteLine($"   ⚠️  No results found for DOB: {student.DateOfBirth}");
                     }
-                    return null;
+                    return (null, null);
                 }
 
                 // ✅ INITIALIZE COLUMN INDICES ON FIRST SEARCH
@@ -416,21 +455,25 @@ namespace CsvProcessor
 
                     Console.WriteLine($"      Final score: {finalScore:F2}%");
 
+                    // Format best match info
+                    string bestMatchInfo = $"{match.FirstName}#{match.LastName}#{match.ClientId}#{finalScore:F1}%";
+
                     // Decision logic: Name score is primary, Medicare is confidence booster
                     if (nameScore >= _singleResultThreshold)
                     {
                         Console.WriteLine($"   ✅ Confirmed match by NAME - Client ID: {match.ClientId}");
-                        return match.ClientId;
+                        return (match.ClientId, null); // Success - no need for best match
                     }
                     else if (medicareMatch && nameScore >= 60)
                     {
                         Console.WriteLine($"   ✅ Confirmed match by MEDICARE (name score marginal: {nameScore:F2}%) - Client ID: {match.ClientId}");
-                        return match.ClientId;
+                        return (match.ClientId, null); // Success - no need for best match
                     }
                     else
                     {
                         Console.WriteLine($"   ⚠️  Score too low ({finalScore:F2}% < {_singleResultThreshold}%) - needs manual review");
-                        return null;
+                        Console.WriteLine($"   💡 Best match suggestion: {bestMatchInfo}");
+                        return (null, bestMatchInfo); // Failed - provide best match for manual review
                     }
                 }
                 else
@@ -463,20 +506,15 @@ namespace CsvProcessor
                     if (matches.Count == 0)
                     {
                         Console.WriteLine($"   ⚠️  Could not extract any valid results - manual review needed");
-                        return null;
+                        return (null, null);
                     }
-
-                    // ═══════════════════════════════════════════════════════════════
-                    // MATCHING STRATEGY (Priority Order):
-                    // 1. Best name match (>= multipleResultsThreshold)
-                    // 2. Medicare match with reasonable name score (>= 70%)
-                    // 3. Name match above manual review threshold
-                    // 4. Medicare match as last resort (if name scores all low)
-                    // ═══════════════════════════════════════════════════════════════
 
                     // Sort by NAME SCORE first (primary criteria)
                     var sortedByName = matches.OrderByDescending(m => m.nameScore).ToList();
                     var bestNameMatch = sortedByName.First();
+
+                    // Format best match info for the top candidate
+                    string bestMatchInfo = $"{bestNameMatch.result.FirstName}#{bestNameMatch.result.LastName}#{bestNameMatch.result.ClientId}#{bestNameMatch.finalScore:F1}%";
 
                     // Check if we have a Medicare match
                     var medicareMatches = matches.Where(m => m.medicareMatch).ToList();
@@ -495,7 +533,7 @@ namespace CsvProcessor
                             Console.WriteLine($"      This may indicate a data entry error in Medicare number");
                         }
 
-                        return bestNameMatch.result.ClientId;
+                        return (bestNameMatch.result.ClientId, null);
                     }
 
                     // Strategy 2: Medicare match with decent name score (>= 70%)
@@ -503,14 +541,14 @@ namespace CsvProcessor
                     {
                         Console.WriteLine($"   ✅ Medicare # confirmed match - Client ID: {bestMedicareMatch.result.ClientId}");
                         Console.WriteLine($"      Name score: {bestMedicareMatch.nameScore:F2}% (Medicare verification provides confidence)");
-                        return bestMedicareMatch.result.ClientId;
+                        return (bestMedicareMatch.result.ClientId, null);
                     }
 
                     // Strategy 3: Moderate name match (>= 70% manual review threshold)
                     if (bestNameMatch.nameScore >= _manualReviewThreshold)
                     {
                         Console.WriteLine($"   ✅ Moderate NAME match - Client ID: {bestNameMatch.result.ClientId} | Score: {bestNameMatch.nameScore:F2}%");
-                        return bestNameMatch.result.ClientId;
+                        return (bestNameMatch.result.ClientId, null);
                     }
 
                     // Strategy 4: Last resort - Medicare match even if name is weak
@@ -519,33 +557,32 @@ namespace CsvProcessor
                         Console.WriteLine($"   ⚠️  Medicare match with LOW name score - Client ID: {bestMedicareMatch.result.ClientId}");
                         Console.WriteLine($"      Name score: {bestMedicareMatch.nameScore:F2}% (possible name spelling variation)");
                         Console.WriteLine($"      Accepting based on Medicare verification - REVIEW RECOMMENDED");
-                        return bestMedicareMatch.result.ClientId;
+                        return (bestMedicareMatch.result.ClientId, null);
                     }
 
-                    // No confident match found
+                    // No confident match found - return best suggestion
                     Console.WriteLine($"   ⚠️  No confident match found (best name score: {bestNameMatch.nameScore:F2}%)");
                     Console.WriteLine($"      Manual review required");
-                    return null;
+                    Console.WriteLine($"   💡 Best match suggestion: {bestMatchInfo}");
+                    return (null, bestMatchInfo);
                 }
             }
             catch (NoSuchElementException ex)
             {
                 Console.WriteLine($"   ❌ Element not found: {ex.Message}");
-                return null;
+                return (null, null);
             }
             catch (WebDriverTimeoutException ex)
             {
                 Console.WriteLine($"   ❌ Timeout: {ex.Message}");
-                return null;
+                return (null, null);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"   ❌ Search error: {ex.Message}");
-                return null;
+                return (null, null);
             }
         }
-
-
 
 
 
@@ -855,42 +892,236 @@ namespace CsvProcessor
         private List<StudentRecord> ReadProcessedCsv()
         {
             var students = new List<StudentRecord>();
-            var lines = File.ReadAllLines(_processedCsvPath, Encoding.UTF8);
 
-            if (lines.Length == 0) return students;
-
-            var header = lines[0].Split(',');
-            var colMap = header.Select((name, index) => new { name, index })
-                               .ToDictionary(x => x.name, x => x.index);
-
-            for (int i = 1; i < lines.Length; i++)
+            try
             {
-                var values = lines[i].Split(',');
-
-                students.Add(new StudentRecord
+                using var reader = new StreamReader(_processedCsvPath, Encoding.UTF8);
+                using var csv = new CsvHelper.CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
                 {
-                    LastName = values[colMap["Last Name"]],
-                    FirstName = values[colMap["First Name"]],
-                    School = values[colMap["School"]],
-                    Grade = values[colMap["Grade"]],
-                    DateOfBirth = values[colMap["Date of Birth"]],
-                    MedicareNumber = values[colMap["Medicare Number"]],
-                    ConsentStatus = values[colMap["Consent Status"]],
-                    Tdap = values[colMap["Tdap"]],
-                    HPV = values[colMap["HPV"]],
-                    ClientId = values[colMap["ClientId"]],
-                    IsFileRoseDefaut = bool.Parse(values[colMap["IsFileRoseDefaut"]])
+                    HasHeaderRecord = true,
+                    MissingFieldFound = null,  // Ignore missing fields (backward compatibility)
+                    HeaderValidated = null,     // Ignore header validation errors
+                    TrimOptions = TrimOptions.Trim
                 });
+
+                // Map CSV columns to StudentRecord properties
+                csv.Context.RegisterClassMap<StudentRecordMap>();
+
+                students = csv.GetRecords<StudentRecord>().ToList();
+
+                Console.WriteLine($"✅ Loaded {students.Count} student records from CSV");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error reading CSV: {ex.Message}");
+                throw;
             }
 
             return students;
         }
 
+
+        /// <summary>
+        /// Handles Ctrl+C gracefully by saving progress before exit
+        /// </summary>
+        private void OnShutdownRequested(object? sender, ConsoleCancelEventArgs e)
+        {
+            if (_shutdownRequested) return; // Already handling shutdown
+
+            Console.WriteLine("\n\n⚠️  Shutdown requested (Ctrl+C detected)");
+            Console.WriteLine("💾 Saving progress before exit...");
+
+            e.Cancel = true; // Prevent immediate termination
+            _shutdownRequested = true;
+
+            // Save current progress
+            if (_currentStudentList != null)
+            {
+                try
+                {
+                    UpdateCsvRecord(_currentStudentList);
+                    Console.WriteLine("✅ Progress saved successfully!");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ Failed to save progress: {ex.Message}");
+                }
+            }
+
+            Console.WriteLine("👋 Exiting safely...");
+            Environment.Exit(0);
+        }
+
+        public void SearchAllClientsInCsv()
+        {
+            var students = ReadProcessedCsv();
+            _currentStudentList = students; // ✅ ADD THIS
+
+            // Filter only unprocessed records
+            var unprocessedStudents = students.Where(s => s.ClientIdStatus == ClientIdStatus.NotProcessed).ToList();
+
+            Console.WriteLine($"\n📊 Processing Summary:");
+            Console.WriteLine($"   Total students: {students.Count}");
+            Console.WriteLine($"   Already processed: {students.Count(s => s.ClientIdStatus == ClientIdStatus.Found)}");
+            Console.WriteLine($"   Needs manual review: {students.Count(s => s.ClientIdStatus == ClientIdStatus.NeedsManualReview)}");
+            Console.WriteLine($"   Not yet processed: {unprocessedStudents.Count}");
+
+            if (unprocessedStudents.Count == 0)
+            {
+                Console.WriteLine("\n✅ All students have been processed!");
+                return;
+            }
+
+            Console.WriteLine($"\n🔍 Starting Client ID search for {unprocessedStudents.Count} students...");
+            Console.WriteLine($"💡 TIP: Press Ctrl+C to save progress and exit gracefully\n");
+
+            int successCount = 0;
+            int manualReviewCount = 0;
+            int errorCount = 0;
+
+            for (int i = 0; i < unprocessedStudents.Count; i++)
+            {
+                // ✅ CHECK FOR SHUTDOWN REQUEST
+                if (_shutdownRequested)
+                {
+                    Console.WriteLine("\n⚠️  Shutdown in progress...");
+                    break;
+                }
+
+                var student = unprocessedStudents[i];
+
+                Console.WriteLine($"\n[{i + 1}/{unprocessedStudents.Count}] Processing: {student.FirstName} {student.LastName}");
+
+                try
+                {
+                    // Search for Client ID
+                    var (clientId, bestMatchInfo) = SearchClientByDob(student);
+
+                    if (!string.IsNullOrWhiteSpace(clientId))
+                    {
+                        // Success - update record
+                        student.ClientId = clientId;
+                        student.ClientIdStatus = ClientIdStatus.Found;
+                        student.BestMatch = string.Empty;
+                        successCount++;
+                        Console.WriteLine($"✅ Client ID found: {clientId}");
+                    }
+                    else
+                    {
+                        // No match or low confidence - needs manual review
+                        student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
+                        student.BestMatch = bestMatchInfo ?? string.Empty;
+                        manualReviewCount++;
+                        Console.WriteLine($"⚠️  Marked for manual review");
+
+                        if (!string.IsNullOrWhiteSpace(bestMatchInfo))
+                        {
+                            Console.WriteLine($"   💡 Best match saved: {bestMatchInfo}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Error occurred - mark for manual review
+                    student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
+                    student.BestMatch = string.Empty;
+                    errorCount++;
+                    Console.WriteLine($"❌ Error: {ex.Message}");
+                }
+
+                // SAVE PROGRESS PERIODICALLY (CONFIGURABLE)
+                int recordsProcessed = i + 1;
+                if (recordsProcessed % _saveProgressEveryNRecords == 0)
+                {
+                    Console.WriteLine($"\n💾 Saving progress ({recordsProcessed}/{unprocessedStudents.Count} records processed)...");
+                    UpdateCsvRecord(students);
+                }
+
+                // Delay between searches to avoid overloading PHIS
+                if (i < unprocessedStudents.Count - 1)
+                {
+                    Thread.Sleep(_delayBetweenSearchesMs);
+                }
+            }
+
+            // FINAL SAVE
+            Console.WriteLine($"\n💾 Performing final save...");
+            UpdateCsvRecord(students);
+
+            // Final summary
+            Console.WriteLine("\n" + new string('═', 60));
+            Console.WriteLine("📊 SEARCH COMPLETE - Final Summary");
+            Console.WriteLine(new string('═', 60));
+            Console.WriteLine($"✅ Successfully found: {successCount}");
+            Console.WriteLine($"⚠️  Needs manual review: {manualReviewCount}");
+            Console.WriteLine($"❌ Errors: {errorCount}");
+            Console.WriteLine($"📝 Total processed: {successCount + manualReviewCount + errorCount}");
+            Console.WriteLine(new string('═', 60) + "\n");
+        }
+
+
+
+        /// <summary>
+        /// Updates the entire CSV file with current student records using CsvHelper
+        /// Uses atomic file replacement to prevent corruption if crash occurs during write
+        /// </summary>
+        private void UpdateCsvRecord(List<StudentRecord> allStudents)
+        {
+            string tempFile = _processedCsvPath + ".tmp";
+
+            try
+            {
+                // ✅ STEP 1: Write to temporary file
+                using (var writer = new StreamWriter(tempFile, false, Encoding.UTF8))
+                using (var csv = new CsvHelper.CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture)
+                {
+                    HasHeaderRecord = true
+                }))
+                {
+                    // Register the class map
+                    csv.Context.RegisterClassMap<StudentRecordMap>();
+
+                    // Write all records
+                    csv.WriteRecords(allStudents);
+                }
+
+                // ✅ STEP 2: Atomically replace the old file with the new one
+                // This is crash-safe: if the process crashes here, the original file is still intact
+                File.Move(tempFile, _processedCsvPath, overwrite: true);
+
+                Console.WriteLine($"   ✅ CSV progress saved ({allStudents.Count} records)");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ⚠️  Warning: Could not update CSV: {ex.Message}");
+
+                // Clean up temporary file if it exists
+                if (File.Exists(tempFile))
+                {
+                    try
+                    {
+                        File.Delete(tempFile);
+                    }
+                    catch
+                    {
+                        // Ignore cleanup errors
+                    }
+                }
+            }
+        }
+
+
         public void Dispose()
         {
+            // Unregister the Ctrl+C handler
+            Console.CancelKeyPress -= OnShutdownRequested;
+
             _driver?.Quit();
             _driver?.Dispose();
         }
+
+
+
 
 
         /// <summary>
@@ -936,5 +1167,73 @@ namespace CsvProcessor
         public string HPV { get; set; } = string.Empty;
         public string ClientId { get; set; } = string.Empty;
         public bool IsFileRoseDefaut { get; set; }
+
+        /// <summary>
+        /// Status of Client ID search (0=NotProcessed, 1=Found, 2=NeedsManualReview)
+        /// </summary>
+        public ClientIdStatus ClientIdStatus { get; set; } = ClientIdStatus.NotProcessed;
+
+        /// <summary>
+        /// Best match suggestion for manual review (Format: FirstName#LastName#ClientID#Score)
+        /// Only populated when ClientIdStatus = NeedsManualReview
+        /// </summary>
+        public string BestMatch { get; set; } = string.Empty;
+
     }
+
+
+    /// <summary>
+    /// CsvHelper mapping for StudentRecord
+    /// Maps CSV column names to class properties
+    /// </summary>
+    public sealed class StudentRecordMap : ClassMap<StudentRecord>
+    {
+        public StudentRecordMap()
+        {
+            Map(m => m.LastName).Name("Last Name");
+            Map(m => m.FirstName).Name("First Name");
+            Map(m => m.School).Name("School");
+            Map(m => m.Grade).Name("Grade");
+            Map(m => m.DateOfBirth).Name("Date of Birth");
+            Map(m => m.MedicareNumber).Name("Medicare Number");
+            Map(m => m.ConsentStatus).Name("Consent Status");
+            Map(m => m.Tdap).Name("Tdap");
+            Map(m => m.HPV).Name("HPV");
+            Map(m => m.ClientId).Name("ClientId");
+            Map(m => m.IsFileRoseDefaut).Name("IsFileRoseDefaut");
+            Map(m => m.ClientIdStatus).Name("ClientIdStatus")
+                .TypeConverter<ClientIdStatusConverter>();
+            Map(m => m.BestMatch).Name("BestMatch").Optional(); // Optional for backward compatibility
+        }
+    }
+
+    /// <summary>
+    /// Custom converter for ClientIdStatus enum
+    /// </summary>
+    public class ClientIdStatusConverter : CsvHelper.TypeConversion.DefaultTypeConverter
+    {
+        public override object ConvertFromString(string? text, IReaderRow row, MemberMapData memberMapData)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return ClientIdStatus.NotProcessed;
+
+            if (int.TryParse(text, out int value))
+            {
+                return (ClientIdStatus)value;
+            }
+
+            return ClientIdStatus.NotProcessed;
+        }
+
+        public override string ConvertToString(object? value, IWriterRow row, MemberMapData memberMapData)
+        {
+            if (value is ClientIdStatus status)
+            {
+                return ((int)status).ToString();
+            }
+
+            return "0";
+        }
+    }
+
+
 }

@@ -1,4 +1,5 @@
-﻿using System;
+﻿
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -8,7 +9,7 @@ using Microsoft.Extensions.Configuration;
 
 namespace CsvProcessor
 {
-    public class CsvReader
+    public class StudentCsvProcessor
     {
         // Add this field at the top of the class
         private readonly string[] _inputDateFormats;
@@ -22,12 +23,7 @@ namespace CsvProcessor
         private readonly Dictionary<string, object?> _additionalColumns;
         private readonly List<EncodingConfiguration> _encodingConfigs;
 
-
-       
-
-        
-
-        public CsvReader(IConfiguration config)
+        public StudentCsvProcessor(IConfiguration config)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
 
@@ -56,7 +52,6 @@ namespace CsvProcessor
                 ?? new[] { "dd/MM/yyyy", "MM/dd/yyyy", "yyyy-MM-dd" };
 
             Console.WriteLine($"📅 Configured to parse input dates using {_inputDateFormats.Length} format(s): {string.Join(", ", _inputDateFormats)}");
-
 
             _lastNameColumn = _config["CsvProcessing:LastNameColumn"] ?? "Last Name";
 
@@ -107,12 +102,6 @@ namespace CsvProcessor
                 Directory.CreateDirectory(outputDir);
                 Console.WriteLine($"Created output directory: {outputDir}");
             }
-
-
-
-           
-
-           
         }
 
         /// <summary>
@@ -234,6 +223,19 @@ namespace CsvProcessor
                 }
             }
 
+            // ✅ ADD CLIENT ID TRACKING COLUMNS
+            if (!newHeader.Contains("ClientIdStatus"))
+            {
+                newHeader.Add("ClientIdStatus");
+                Console.WriteLine($"   ➕ Adding column: ClientIdStatus");
+            }
+
+            if (!newHeader.Contains("BestMatch"))
+            {
+                newHeader.Add("BestMatch");
+                Console.WriteLine($"   ➕ Adding column: BestMatch");
+            }
+
             // Parse data rows
             var records = new List<CsvRecord>();
             for (int i = 1; i < lines.Count; i++)
@@ -257,6 +259,17 @@ namespace CsvProcessor
                     record[columnName] = defaultValue?.ToString() ?? string.Empty;
                 }
 
+                // ✅ INITIALIZE CLIENT ID TRACKING COLUMNS
+                if (!record.Properties.ContainsKey("ClientIdStatus"))
+                {
+                    record["ClientIdStatus"] = "0"; // NotProcessed
+                }
+
+                if (!record.Properties.ContainsKey("BestMatch"))
+                {
+                    record["BestMatch"] = string.Empty;
+                }
+
                 records.Add(record);
             }
 
@@ -277,13 +290,12 @@ namespace CsvProcessor
                         DateTime parsedDate;
                         bool parsed = false;
 
-
                         // Try parsing with configured input formats
                         foreach (var format in _inputDateFormats)
                         {
                             if (DateTime.TryParseExact(originalDate, format,
-                                System.Globalization.CultureInfo.InvariantCulture,
-                                System.Globalization.DateTimeStyles.None,
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.None,
                                 out parsedDate))
                             {
                                 record[_dateOfBirthColumn] = parsedDate.ToString(_dateFormat);
@@ -328,7 +340,7 @@ namespace CsvProcessor
             if (failedDates.Count > 0)
             {
                 Console.WriteLine($"\n⚠ Failed to parse {failedDates.Count} date(s):");
-                foreach (var date in failedDates.Take(5)) // Show first 5 failed dates
+                foreach (var date in failedDates.Take(5))
                 {
                     Console.WriteLine($"     - '{date}'");
                 }
@@ -351,10 +363,8 @@ namespace CsvProcessor
             Console.WriteLine($"\n✅ CSV processing complete!");
             Console.WriteLine($"   Output file: {_outputCsvPath}");
             Console.WriteLine($"   Total records: {sortedRecords.Count}");
-
-
+            Console.WriteLine($"   Ready for Client ID search automation");
         }
-
 
         /// <summary>
         /// Writes the processed records to a new CSV file
@@ -401,7 +411,6 @@ namespace CsvProcessor
                 Console.WriteLine($"   {verifyLines[1]}");
             }
         }
-
 
         /// <summary>
         /// Escapes CSV values that contain commas, quotes, or newlines
