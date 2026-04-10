@@ -20,9 +20,11 @@ namespace CsvProcessor
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
                 .Build();
 
+            FindClientId? finder = null; // ✅ DECLARE OUTSIDE TRY BLOCK
+
             try
             {
-                // ✅ RENAMED: CsvReader → StudentCsvProcessor
+                // Create CSV processor
                 var csvProcessor = new StudentCsvProcessor(configuration);
 
                 // Check if output CSV already exists
@@ -49,18 +51,17 @@ namespace CsvProcessor
                 // ✅ START CLIENT ID SEARCH
                 Console.WriteLine("\n🚀 Starting Client ID search automation...\n");
 
-                using (var finder = new FindClientId(configuration))
-                {
-                    // Login to PHIS
-                    if (!finder.InitiateLogin())
-                    {
-                        Console.WriteLine("❌ Login failed. Cannot proceed with search.");
-                        return;
-                    }
+                finder = new FindClientId(configuration); // ✅ ASSIGN TO OUTER VARIABLE
 
-                    // Search for all unprocessed students
-                    finder.SearchAllClientsInCsv();
+                // Login to PHIS
+                if (!finder.InitiateLogin())
+                {
+                    Console.WriteLine("❌ Login failed. Cannot proceed with search.");
+                    return;
                 }
+
+                // Search for all unprocessed students
+                finder.SearchAllClientsInCsv();
 
                 Console.WriteLine("\n✅ All done! Check the CSV for results.");
             }
@@ -68,6 +69,23 @@ namespace CsvProcessor
             {
                 Console.WriteLine($"\n❌ ERROR: {ex.Message}");
                 Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            }
+            finally
+            {
+                // ✅ ENSURE CLEANUP HAPPENS EVEN IF EXCEPTION OCCURS
+                if (finder != null)
+                {
+                    Console.WriteLine("\n🧹 Cleaning up resources...");
+                    try
+                    {
+                        finder.Dispose();
+                        Console.WriteLine("✅ ChromeDriver disposed successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"⚠️  Warning: Cleanup error: {ex.Message}");
+                    }
+                }
             }
 
             Console.WriteLine("\nPress any key to exit...");

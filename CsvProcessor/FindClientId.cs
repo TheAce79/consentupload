@@ -48,6 +48,12 @@ namespace CsvProcessor
         // ✅ ADD THIS
         private readonly int _saveProgressEveryNRecords;
 
+
+        // ✅ ADD SESSION TIMEOUT TRACKING
+        private readonly int _sessionTimeoutMinutes;
+        private readonly bool _sessionRefreshEnabled;
+        private DateTime _lastSessionActivity;
+
         // Fuzzy matching configuration
         private readonly bool _fuzzyMatchingEnabled;
         private readonly double _singleResultThreshold;
@@ -88,6 +94,12 @@ namespace CsvProcessor
             _username = _config["PhisAutomation:Username"] ?? "";
             _password = _config["PhisAutomation:Password"] ?? "";
 
+            // ✅ LOAD SESSION TIMEOUT CONFIGURATION
+            _sessionTimeoutMinutes = _config.GetValue<int>("PhisAutomation:SessionTimeoutMinutes", 20);
+            _sessionRefreshEnabled = _config.GetValue<bool>("PhisAutomation:SessionRefreshEnabled", true);
+            _lastSessionActivity = DateTime.Now;
+
+
             // Load timing configurations
             _waitSeconds = _config.GetValue<int>("PhisAutomation:WebDriverWaitSeconds", 10);
             _delayBetweenSearchesMs = _config.GetValue<int>("PhisAutomation:DelayBetweenSearchesMs", 1000);
@@ -117,6 +129,13 @@ namespace CsvProcessor
             {
                 Console.WriteLine($"   Manual login wait time: {_manualLoginWaitSeconds} seconds");
             }
+
+
+            // ✅ DISPLAY SESSION TIMEOUT CONFIGURATION
+            Console.WriteLine($"\n🔐 Session management:");
+            Console.WriteLine($"   Session timeout: {_sessionTimeoutMinutes} minutes");
+            Console.WriteLine($"   Auto-refresh: {(_sessionRefreshEnabled ? "Enabled ✅" : "Disabled ❌")}");
+
 
             // ✅ ADD THIS
             Console.WriteLine($"\n💾 Progress saving configuration:");
@@ -221,6 +240,12 @@ namespace CsvProcessor
 
             // ✅ ADD THIS: Register Ctrl+C handler
             Console.CancelKeyPress += OnShutdownRequested;
+
+            // ✅ ADD THIS: Register Ctrl+C handler
+            Console.CancelKeyPress += OnShutdownRequested;
+
+            // ✅ ADD THIS: Handle application exit
+            AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         }
 
 
@@ -348,9 +373,19 @@ namespace CsvProcessor
         {
             try
             {
+                // ✅ CHECK SESSION VALIDITY BEFORE SEARCH
+                if (!EnsureSessionValid())
+                {
+                    Console.WriteLine($"   ❌ Session validation failed - skipping search");
+                    return (null, null);
+                }
+
                 // Navigate to client search page
                 string searchUrl = _config["PhisAutomation:SearchUrl"] ?? "https://phisisp.gnb.ca/phsdsm/ClientWeb/pages/search/clientSearch.xhtml";
                 _driver.Navigate().GoToUrl(searchUrl);
+
+                // ✅ UPDATE SESSION ACTIVITY AFTER NAVIGATION
+                UpdateSessionActivity();
 
                 // Wait for the DOB input field
                 _wait.Until(d => d.FindElement(By.Id("form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input")));
@@ -390,6 +425,9 @@ namespace CsvProcessor
                 var searchButton = _driver.FindElement(By.Id("actionMenuSearch:commandButtonId"));
                 searchButton.Click();
 
+                // ✅ UPDATE SESSION ACTIVITY AFTER SEARCH CLICK
+                UpdateSessionActivity();
+
                 // Wait for AJAX response
                 Thread.Sleep(_pageLoadDelayMs);
 
@@ -403,6 +441,13 @@ namespace CsvProcessor
                 catch (WebDriverTimeoutException)
                 {
                     Console.WriteLine("   ⚠️  Timeout waiting for search results");
+
+                    // ✅ CHECK IF SESSION EXPIRED DURING WAIT
+                    if (IsSessionExpired())
+                    {
+                        Console.WriteLine("   ❌ Session expired while waiting for results");
+                        return (null, null);
+                    }
                 }
 
                 // Get results
@@ -419,6 +464,9 @@ namespace CsvProcessor
                     {
                         Console.WriteLine($"   ⚠️  No results found for DOB: {student.DateOfBirth}");
                     }
+
+                    // ✅ UPDATE SESSION ACTIVITY EVEN ON NO RESULTS
+                    UpdateSessionActivity();
                     return (null, null);
                 }
 
@@ -458,22 +506,25 @@ namespace CsvProcessor
                     // Format best match info
                     string bestMatchInfo = $"{match.FirstName}#{match.LastName}#{match.ClientId}#{finalScore:F1}%";
 
+                    // ✅ UPDATE SESSION ACTIVITY AFTER PROCESSING RESULT
+                    UpdateSessionActivity();
+
                     // Decision logic: Name score is primary, Medicare is confidence booster
                     if (nameScore >= _singleResultThreshold)
                     {
                         Console.WriteLine($"   ✅ Confirmed match by NAME - Client ID: {match.ClientId}");
-                        return (match.ClientId, null); // Success - no need for best match
+                        return (match.ClientId, null);
                     }
                     else if (medicareMatch && nameScore >= 60)
                     {
                         Console.WriteLine($"   ✅ Confirmed match by MEDICARE (name score marginal: {nameScore:F2}%) - Client ID: {match.ClientId}");
-                        return (match.ClientId, null); // Success - no need for best match
+                        return (match.ClientId, null);
                     }
                     else
                     {
                         Console.WriteLine($"   ⚠️  Score too low ({finalScore:F2}% < {_singleResultThreshold}%) - needs manual review");
                         Console.WriteLine($"   💡 Best match suggestion: {bestMatchInfo}");
-                        return (null, bestMatchInfo); // Failed - provide best match for manual review
+                        return (null, bestMatchInfo);
                     }
                 }
                 else
@@ -506,6 +557,8 @@ namespace CsvProcessor
                     if (matches.Count == 0)
                     {
                         Console.WriteLine($"   ⚠️  Could not extract any valid results - manual review needed");
+                        // ✅ UPDATE SESSION ACTIVITY EVEN ON FAILURE
+                        UpdateSessionActivity();
                         return (null, null);
                     }
 
@@ -519,6 +572,9 @@ namespace CsvProcessor
                     // Check if we have a Medicare match
                     var medicareMatches = matches.Where(m => m.medicareMatch).ToList();
                     var bestMedicareMatch = medicareMatches.OrderByDescending(m => m.nameScore).FirstOrDefault();
+
+                    // ✅ UPDATE SESSION ACTIVITY AFTER PROCESSING ALL RESULTS
+                    UpdateSessionActivity();
 
                     // Strategy 1: Strong name match (>= 85% by default)
                     if (bestNameMatch.nameScore >= _multipleResultsThreshold)
@@ -569,11 +625,25 @@ namespace CsvProcessor
             }
             catch (NoSuchElementException ex)
             {
+                // ✅ CHECK IF SESSION EXPIRED
+                if (IsSessionExpired())
+                {
+                    Console.WriteLine($"   ❌ Session expired during search");
+                    return (null, null);
+                }
+
                 Console.WriteLine($"   ❌ Element not found: {ex.Message}");
                 return (null, null);
             }
             catch (WebDriverTimeoutException ex)
             {
+                // ✅ CHECK IF SESSION EXPIRED
+                if (IsSessionExpired())
+                {
+                    Console.WriteLine($"   ❌ Session expired (timeout)");
+                    return (null, null);
+                }
+
                 Console.WriteLine($"   ❌ Timeout: {ex.Message}");
                 return (null, null);
             }
@@ -583,6 +653,7 @@ namespace CsvProcessor
                 return (null, null);
             }
         }
+
 
 
 
@@ -952,10 +1023,28 @@ namespace CsvProcessor
             Environment.Exit(0);
         }
 
+
+
+        // ✅ ADD THIS METHOD
+        private void OnProcessExit(object? sender, EventArgs e)
+        {
+            Console.WriteLine("\n🛑 Application exiting - cleaning up ChromeDriver...");
+            try
+            {
+                _driver?.Quit();
+                _driver?.Dispose();
+            }
+            catch
+            {
+                // Ignore errors during emergency cleanup
+            }
+        }
+
+
         public void SearchAllClientsInCsv()
         {
             var students = ReadProcessedCsv();
-            _currentStudentList = students; // ✅ ADD THIS
+            _currentStudentList = students;
 
             // Filter only unprocessed records
             var unprocessedStudents = students.Where(s => s.ClientIdStatus == ClientIdStatus.NotProcessed).ToList();
@@ -972,16 +1061,30 @@ namespace CsvProcessor
                 return;
             }
 
+            // ✅ ESTIMATE COMPLETION TIME AND WARN ABOUT SESSION TIMEOUT
+            double estimatedMinutes = (unprocessedStudents.Count * _delayBetweenSearchesMs) / 60000.0;
+            Console.WriteLine($"\n⏱️  Estimated processing time: {estimatedMinutes:F1} minutes");
+
+            if (estimatedMinutes > _sessionTimeoutMinutes && !_sessionRefreshEnabled)
+            {
+                Console.WriteLine($"   ⚠️  WARNING: Processing may exceed session timeout ({_sessionTimeoutMinutes} min)");
+                Console.WriteLine($"   💡 Consider enabling SessionRefreshEnabled in appsettings.json");
+            }
+            else if (_sessionRefreshEnabled && estimatedMinutes > _sessionTimeoutMinutes)
+            {
+                Console.WriteLine($"   ✅ Auto-refresh enabled - session will be kept alive");
+            }
+
             Console.WriteLine($"\n🔍 Starting Client ID search for {unprocessedStudents.Count} students...");
             Console.WriteLine($"💡 TIP: Press Ctrl+C to save progress and exit gracefully\n");
 
             int successCount = 0;
             int manualReviewCount = 0;
             int errorCount = 0;
+            int sessionRefreshCount = 0;
 
             for (int i = 0; i < unprocessedStudents.Count; i++)
             {
-                // ✅ CHECK FOR SHUTDOWN REQUEST
                 if (_shutdownRequested)
                 {
                     Console.WriteLine("\n⚠️  Shutdown in progress...");
@@ -989,6 +1092,14 @@ namespace CsvProcessor
                 }
 
                 var student = unprocessedStudents[i];
+
+                // ✅ SHOW SESSION STATUS EVERY 10 RECORDS
+                if (i > 0 && i % 10 == 0)
+                {
+                    var timeSinceLastActivity = DateTime.Now - _lastSessionActivity;
+                    var timeRemaining = TimeSpan.FromMinutes(_sessionTimeoutMinutes) - timeSinceLastActivity;
+                    Console.WriteLine($"\n⏱️  Session time remaining: {timeRemaining.TotalMinutes:F1} minutes");
+                }
 
                 Console.WriteLine($"\n[{i + 1}/{unprocessedStudents.Count}] Processing: {student.FirstName} {student.LastName}");
 
@@ -999,7 +1110,6 @@ namespace CsvProcessor
 
                     if (!string.IsNullOrWhiteSpace(clientId))
                     {
-                        // Success - update record
                         student.ClientId = clientId;
                         student.ClientIdStatus = ClientIdStatus.Found;
                         student.BestMatch = string.Empty;
@@ -1008,7 +1118,6 @@ namespace CsvProcessor
                     }
                     else
                     {
-                        // No match or low confidence - needs manual review
                         student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
                         student.BestMatch = bestMatchInfo ?? string.Empty;
                         manualReviewCount++;
@@ -1022,14 +1131,13 @@ namespace CsvProcessor
                 }
                 catch (Exception ex)
                 {
-                    // Error occurred - mark for manual review
                     student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
                     student.BestMatch = string.Empty;
                     errorCount++;
                     Console.WriteLine($"❌ Error: {ex.Message}");
                 }
 
-                // SAVE PROGRESS PERIODICALLY (CONFIGURABLE)
+                // SAVE PROGRESS PERIODICALLY
                 int recordsProcessed = i + 1;
                 if (recordsProcessed % _saveProgressEveryNRecords == 0)
                 {
@@ -1037,7 +1145,7 @@ namespace CsvProcessor
                     UpdateCsvRecord(students);
                 }
 
-                // Delay between searches to avoid overloading PHIS
+                // Delay between searches
                 if (i < unprocessedStudents.Count - 1)
                 {
                     Thread.Sleep(_delayBetweenSearchesMs);
@@ -1056,9 +1164,12 @@ namespace CsvProcessor
             Console.WriteLine($"⚠️  Needs manual review: {manualReviewCount}");
             Console.WriteLine($"❌ Errors: {errorCount}");
             Console.WriteLine($"📝 Total processed: {successCount + manualReviewCount + errorCount}");
+            if (sessionRefreshCount > 0)
+            {
+                Console.WriteLine($"🔄 Session refreshes: {sessionRefreshCount}");
+            }
             Console.WriteLine(new string('═', 60) + "\n");
         }
-
 
 
         /// <summary>
@@ -1115,9 +1226,126 @@ namespace CsvProcessor
         {
             // Unregister the Ctrl+C handler
             Console.CancelKeyPress -= OnShutdownRequested;
+            AppDomain.CurrentDomain.ProcessExit -= OnProcessExit; // ✅ ADD THIS
 
-            _driver?.Quit();
-            _driver?.Dispose();
+            // Cleanup ChromeDriver
+            try
+            {
+                _driver?.Quit();
+                _driver?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️  ChromeDriver disposal error: {ex.Message}");
+            }
+
+        }
+
+
+
+
+        /// <summary>
+        /// Checks if session is about to expire and refreshes it if needed
+        /// Returns true if session is valid/refreshed, false if refresh failed
+        /// </summary>
+        private bool EnsureSessionValid()
+        {
+            if (!_sessionRefreshEnabled) return true;
+
+            var timeSinceLastActivity = DateTime.Now - _lastSessionActivity;
+            var timeUntilTimeout = TimeSpan.FromMinutes(_sessionTimeoutMinutes) - timeSinceLastActivity;
+
+            // Refresh session if less than 2 minutes remaining (safety buffer)
+            if (timeUntilTimeout.TotalMinutes < 2)
+            {
+                Console.WriteLine($"\n⚠️  Session timeout approaching ({timeUntilTimeout.TotalMinutes:F1} minutes remaining)");
+                Console.WriteLine($"🔄 Refreshing session...");
+
+                try
+                {
+                    // Navigate to a simple page to keep session alive
+                    string searchUrl = _config["PhisAutomation:SearchUrl"] ?? "https://phisisp.gnb.ca/phsdsm/ClientWeb/pages/search/clientSearch.xhtml";
+                    _driver.Navigate().GoToUrl(searchUrl);
+
+                    Thread.Sleep(1000); // Give page time to load
+
+                    // Check if we're still logged in
+                    if (IsSessionExpired())
+                    {
+                        Console.WriteLine($"❌ Session expired - attempting re-login...");
+
+                        // Reset column indices as we might be on a different page
+                        _columnIndicesInitialized = false;
+
+                        // Re-login
+                        bool loginSuccess = InitiateLogin();
+                        if (!loginSuccess)
+                        {
+                            Console.WriteLine($"❌ Re-login failed");
+                            return false;
+                        }
+
+                        Console.WriteLine($"✅ Session restored successfully");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"✅ Session refreshed successfully");
+                    }
+
+                    _lastSessionActivity = DateTime.Now;
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ Session refresh failed: {ex.Message}");
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Checks if the PHIS session has expired
+        /// </summary>
+        private bool IsSessionExpired()
+        {
+            try
+            {
+                var currentUrl = _driver.Url.ToLowerInvariant();
+
+                // Check if we've been redirected to login page
+                if (currentUrl.Contains("login") || currentUrl.Contains("signin"))
+                {
+                    return true;
+                }
+
+                // Try to find a common element that exists when logged in
+                try
+                {
+                    _driver.FindElement(By.Id("form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input"));
+                    return false; // Element found, session is valid
+                }
+                catch
+                {
+                    // Element not found, might be on error/timeout page
+                    return true;
+                }
+            }
+            catch
+            {
+                // If any error occurs, assume session is expired
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Updates the last session activity timestamp
+        /// Call this after every successful PHIS interaction
+        /// </summary>
+        private void UpdateSessionActivity()
+        {
+            _lastSessionActivity = DateTime.Now;
         }
 
 
