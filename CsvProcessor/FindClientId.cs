@@ -387,56 +387,234 @@ namespace CsvProcessor
                 // ✅ UPDATE SESSION ACTIVITY AFTER NAVIGATION
                 UpdateSessionActivity();
 
-                // Wait for the DOB input field
-                _wait.Until(d => d.FindElement(By.Id("form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input")));
+                // ✅ WAIT FOR PRIMEFACES TO FULLY LOAD
+                Thread.Sleep(2000); // Give PrimeFaces time to initialize
 
-                // Select DOB radio button
+                // ✅ HANDLE DOB RADIO BUTTON SELECTION WITH AJAX WAIT
                 try
                 {
-                    var dobRadioButton = _driver.FindElement(By.CssSelector("input[name='form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:selectOneRadio'][value='DOB']"));
-                    if (!dobRadioButton.Selected)
+                    Console.WriteLine("   🔘 Selecting DOB radio button...");
+
+                    // Find the DOB radio button (the actual hidden input)
+                    var dobRadioButton = _driver.FindElement(By.CssSelector(
+                        "input[name='form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:selectOneRadio'][value='DOB']"));
+
+                    // Click using JavaScript to trigger PrimeFaces AJAX
+                    IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+                    js.ExecuteScript("arguments[0].click();", dobRadioButton);
+
+                    Console.WriteLine("   ⏳ Waiting for PrimeFaces AJAX to complete...");
+
+                    // ✅ WAIT FOR AJAX TO COMPLETE - Check for PrimeFaces queue to be empty
+                    bool ajaxCompleted = _wait.Until(d =>
                     {
-                        dobRadioButton.Click();
+                        try
+                        {
+                            // ✅ SAFE: Handle potential null return from ExecuteScript
+                            IJavaScriptExecutor jsExec = (IJavaScriptExecutor)_driver;
+                            var ajaxResult = jsExec.ExecuteScript(
+                                "return typeof PrimeFaces !== 'undefined' && " +
+                                "typeof PrimeFaces.ajax !== 'undefined' && " +
+                                "typeof PrimeFaces.ajax.Queue !== 'undefined' && " +
+                                "PrimeFaces.ajax.Queue.isEmpty();"
+                            );
+
+                            // Convert to bool safely, defaulting to false if null
+                            bool ajaxActive = ajaxResult is bool result && result;
+
+                            // Also check if DOB field is enabled (not disabled)
+                            var dobField = d.FindElement(By.Id(
+                                "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input"));
+
+                            bool isEnabled = dobField.Enabled && !dobField.GetAttribute("class").Contains("ui-state-disabled");
+
+                            return ajaxActive && isEnabled;
+                        }
+                        catch
+                        {
+                            return false;
+                        }
+                    });
+
+                    if (ajaxCompleted)
+                    {
+                        Console.WriteLine("   ✅ AJAX completed, DOB field is now enabled");
+                    }
+                    else
+                    {
+                        Console.WriteLine("   ⚠️  AJAX timeout, attempting to continue anyway");
+                    }
+
+                    // Extra safety delay
+                    Thread.Sleep(1000);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"   ⚠️  DOB radio button error: {ex.Message}");
+                    Console.WriteLine("   ℹ️  Attempting to continue with search...");
+                }
+
+                // ✅ WAIT FOR DOB INPUT FIELD TO BE FULLY INTERACTABLE
+                IWebElement? dobField = null;
+                try
+                {
+                    dobField = _wait.Until(d =>
+                    {
+                        try
+                        {
+                            var element = d.FindElement(By.Id(
+                                "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input"));
+
+                            // Check if element is displayed, enabled, and not disabled by CSS class
+                            bool isReady = element.Displayed &&
+                                           element.Enabled &&
+                                           !element.GetAttribute("class").Contains("ui-state-disabled") &&
+                                           !element.GetAttribute("disabled").Equals("true");
+
+                            return isReady ? element : null;
+                        }
+                        catch
+                        {
+                            return null;
+                        }
+                    });
+                }
+                catch (WebDriverTimeoutException)
+                {
+                    Console.WriteLine("   ❌ DOB field never became interactable");
+                    return (null, null);
+                }
+
+                if (dobField == null)
+                {
+                    Console.WriteLine("   ❌ DOB field not accessible");
+                    return (null, null);
+                }
+
+                // ✅ CLEAR AND ENTER DOB WITH EXPLICIT WAITS
+                try
+                {
+                    // Clear field
+                    dobField.Clear();
+                    Thread.Sleep(300);
+
+                    // Enter date
+                    dobField.SendKeys(student.DateOfBirth);
+                    Thread.Sleep(500);
+
+                    // Verify the date was entered correctly
+                    string enteredValue = dobField.GetAttribute("value");
+                    if (string.IsNullOrWhiteSpace(enteredValue))
+                    {
+                        Console.WriteLine("   ⚠️  DOB field is empty after input, retrying...");
+                        dobField.Clear();
+                        Thread.Sleep(300);
+                        dobField.SendKeys(student.DateOfBirth);
                         Thread.Sleep(500);
                     }
+
+                    Console.WriteLine($"   🔍 Searching with DOB: {student.DateOfBirth}");
+                    Console.WriteLine($"      Looking for: {student.FirstName} {student.LastName}");
+                    if (!string.IsNullOrWhiteSpace(student.MedicareNumber))
+                    {
+                        Console.WriteLine($"      Medicare #: {student.MedicareNumber} (available for verification)");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"      Medicare #: Not available - using name matching only");
+                    }
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    Console.WriteLine("   ℹ️  DOB radio button handling skipped");
+                    Console.WriteLine($"   ❌ Failed to enter DOB: {ex.Message}");
+                    return (null, null);
                 }
 
-                // Enter DOB
-                var dobField = _driver.FindElement(By.Id("form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input"));
-                dobField.Clear();
-                dobField.SendKeys(student.DateOfBirth);
-
-                Console.WriteLine($"   🔍 Searching with DOB: {student.DateOfBirth}");
-                Console.WriteLine($"      Looking for: {student.FirstName} {student.LastName}");
-                if (!string.IsNullOrWhiteSpace(student.MedicareNumber))
+                // ✅ CLICK SEARCH BUTTON
+                try
                 {
-                    Console.WriteLine($"      Medicare #: {student.MedicareNumber} (available for verification)");
-                }
-                else
-                {
-                    Console.WriteLine($"      Medicare #: Not available - using name matching only");
-                }
+                    var searchButton = _wait.Until(d =>
+                    {
+                        try
+                        {
+                            var btn = d.FindElement(By.Id("actionMenuSearch:commandButtonId"));
+                            return btn.Displayed && btn.Enabled ? btn : null;
+                        }
+                        catch
+                        {
+                            return null;
+                        }
+                    });
 
-                // Click search button
-                var searchButton = _driver.FindElement(By.Id("actionMenuSearch:commandButtonId"));
-                searchButton.Click();
+                    if (searchButton == null)
+                    {
+                        Console.WriteLine("   ❌ Search button not found or not clickable");
+                        return (null, null);
+                    }
+
+                    // Click search button
+                    IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+                    try
+                    {
+                        searchButton.Click();
+                        Console.WriteLine("   🔎 Search button clicked");
+                    }
+                    catch
+                    {
+                        // Fallback to JavaScript click
+                        js.ExecuteScript("arguments[0].click();", searchButton);
+                        Console.WriteLine("   🔎 Search button clicked (via JavaScript)");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"   ❌ Failed to click search button: {ex.Message}");
+                    return (null, null);
+                }
 
                 // ✅ UPDATE SESSION ACTIVITY AFTER SEARCH CLICK
                 UpdateSessionActivity();
 
-                // Wait for AJAX response
+                // ✅ WAIT FOR SEARCH RESULTS WITH AJAX AWARENESS
+                Console.WriteLine("   ⏳ Waiting for search results...");
                 Thread.Sleep(_pageLoadDelayMs);
 
                 try
                 {
+                    // Wait for either results or error messages
                     _wait.Until(d =>
-                        d.FindElements(By.CssSelector("tbody[id*='dataTable_data'] tr[data-rk]")).Count > 0 ||
-                        d.FindElements(By.CssSelector(".ui-messages-error, .ui-messages-info, .ui-messages-warn")).Count > 0
-                    );
+                    {
+                        try
+                        {
+                            // Check if AJAX is complete
+                            IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+
+                            // ✅ SAFE: Handle potential null return from ExecuteScript
+                            var ajaxResult = js.ExecuteScript(
+                                "return typeof PrimeFaces !== 'undefined' && " +
+                                "typeof PrimeFaces.ajax !== 'undefined' && " +
+                                "typeof PrimeFaces.ajax.Queue !== 'undefined' && " +
+                                "PrimeFaces.ajax.Queue.isEmpty();"
+                            );
+
+                            // Convert to bool safely, defaulting to false if null
+                            bool ajaxDone = ajaxResult is bool result && result;
+
+                            // Check for results or messages
+                            bool hasResults = d.FindElements(By.CssSelector("tbody[id*='dataTable_data'] tr[data-rk]")).Count > 0;
+                            bool hasMessages = d.FindElements(By.CssSelector(".ui-messages-error, .ui-messages-info, .ui-messages-warn")).Count > 0;
+
+                            return ajaxDone && (hasResults || hasMessages);
+                        }
+                        catch
+                        {
+                            // If JavaScript fails, just check for results/messages
+                            bool hasResults = d.FindElements(By.CssSelector("tbody[id*='dataTable_data'] tr[data-rk]")).Count > 0;
+                            bool hasMessages = d.FindElements(By.CssSelector(".ui-messages-error, .ui-messages-info, .ui-messages-warn")).Count > 0;
+
+                            return hasResults || hasMessages;
+                        }
+                    });
                 }
                 catch (WebDriverTimeoutException)
                 {
@@ -653,8 +831,6 @@ namespace CsvProcessor
                 return (null, null);
             }
         }
-
-
 
 
         /// <summary>
