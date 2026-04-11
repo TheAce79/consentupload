@@ -249,18 +249,65 @@ namespace ConsentSyncCore.Services.Browser
         private void DisplayTroubleshootingTips()
         {
             Console.WriteLine($"\n💡 TROUBLESHOOTING TIPS:");
-            Console.WriteLine($"   1. Ensure chromedriver.exe is in the same folder as your .exe");
-            Console.WriteLine($"   2. Download from: https://googlechromelabs.github.io/chrome-for-testing/");
-            Console.WriteLine($"   3. ChromeDriver version MUST match your Chrome browser version");
-            Console.WriteLine($"   4. Check Chrome version: chrome://version");
-            Console.WriteLine($"   5. Set ChromeDriverPath in appsettings.json if using custom location");
-            Console.WriteLine($"   6. Run as administrator if you get permission errors");
+            Console.WriteLine($"\n   STEP 1: Check Chrome Version");
+            Console.WriteLine($"   - Open Chrome and go to: chrome://version/");
+
+            var chromeVersion = GetChromeVersion();
+            if (chromeVersion != null)
+            {
+                var majorVersion = chromeVersion.Split('.')[0];
+                Console.WriteLine($"   - Your Chrome version: {chromeVersion}");
+                Console.WriteLine($"   - You need ChromeDriver version: {majorVersion}.x.x");
+            }
+
+            Console.WriteLine($"\n   STEP 2: Download Matching ChromeDriver");
+            Console.WriteLine($"   - Visit: https://googlechromelabs.github.io/chrome-for-testing/");
+            Console.WriteLine($"   - Download chromedriver-win64.zip for your Chrome version");
+
+            Console.WriteLine($"\n   STEP 3: Extract to Project Folder");
+            Console.WriteLine($"   - Extract chromedriver.exe to:");
+            Console.WriteLine($"     {AppContext.BaseDirectory}");
+
+            Console.WriteLine($"\n   STEP 4: Verify Installation");
+            var chromeDriverPath = Path.Combine(AppContext.BaseDirectory, "chromedriver.exe");
+            if (File.Exists(chromeDriverPath))
+            {
+                Console.WriteLine($"   ✅ ChromeDriver found: {chromeDriverPath}");
+
+                try
+                {
+                    var driverVersion = System.Diagnostics.FileVersionInfo.GetVersionInfo(chromeDriverPath);
+                    Console.WriteLine($"   📦 ChromeDriver version: {driverVersion.FileVersion}");
+                }
+                catch { }
+            }
+            else
+            {
+                Console.WriteLine($"   ❌ ChromeDriver NOT found: {chromeDriverPath}");
+            }
+
             Console.WriteLine($"\n   Current Configuration:");
-            Console.WriteLine($"   - Portable Chrome: {_chromeConfig.UsePortableChrome}");
-            Console.WriteLine($"   - Chrome Path: {_chromeConfig.PortableChromePath}");
-            Console.WriteLine($"   - Driver Path: {_chromeConfig.ChromeDriverPath}");
-            Console.WriteLine($"   - Debugger Mode: {_chromeConfig.UseDebuggerMode}");
+            Console.WriteLine($"   - UsePortableChrome: {_chromeConfig.UsePortableChrome}");
+
+            if (_chromeConfig.UsePortableChrome && !string.IsNullOrWhiteSpace(_chromeConfig.PortableChromePath))
+            {
+                Console.WriteLine($"   - Portable Chrome Path: {_chromeConfig.PortableChromePath}");
+                Console.WriteLine($"   - Portable Chrome Exists: {File.Exists(_chromeConfig.PortableChromePath)}");
+            }
+            else
+            {
+                Console.WriteLine($"   - Using System Chrome: Yes");
+            }
+
+            Console.WriteLine($"   - ChromeDriverPath: {_chromeConfig.ChromeDriverPath ?? "(default - same as exe)"}");
+            Console.WriteLine($"   - DebuggerMode: {_chromeConfig.UseDebuggerMode}");
+
+            Console.WriteLine($"\n   Additional Tips:");
+            Console.WriteLine($"   - Ensure Chrome is closed before running");
+            Console.WriteLine($"   - Run Visual Studio Code as Administrator if needed");
+            Console.WriteLine($"   - Check Windows Firewall/Antivirus isn't blocking");
         }
+
 
         /// <summary>
         /// Display current Chrome configuration
@@ -326,6 +373,45 @@ namespace ConsentSyncCore.Services.Browser
 
 
 
+
+
+        /// <summary>
+        /// Get system Chrome version
+        /// </summary>
+        public static string? GetChromeVersion()
+        {
+            try
+            {
+                // Check common Chrome installation paths
+                string[] chromePaths = [
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "Google\\Chrome\\Application\\chrome.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                "Google\\Chrome\\Application\\chrome.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Google\\Chrome\\Application\\chrome.exe")
+                ];
+
+                foreach (var chromePath in chromePaths)
+                {
+                    if (File.Exists(chromePath))
+                    {
+                        var versionInfo = System.Diagnostics.FileVersionInfo.GetVersionInfo(chromePath);
+                        Console.WriteLine($"✅ Chrome found: {chromePath}");
+                        Console.WriteLine($"   Version: {versionInfo.FileVersion}");
+                        return versionInfo.FileVersion;
+                    }
+                }
+
+                Console.WriteLine("⚠️  Chrome not found in standard locations");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Failed to detect Chrome version: {ex.Message}");
+                return null;
+            }
+        }
 
 
 
