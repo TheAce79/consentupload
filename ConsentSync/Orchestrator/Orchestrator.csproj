@@ -18,4 +18,8 @@
     <ProjectReference Include="..\CsvProcessing\CsvProcessing.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Phase1\Search\" />
+  </ItemGroup>
+
 </Project>
