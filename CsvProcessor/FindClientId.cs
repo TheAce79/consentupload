@@ -1,17 +1,18 @@
-﻿using OpenQA.Selenium;
+﻿using CsvHelper;
+using CsvHelper.Configuration;
+using CsvHelper.TypeConversion;
+using Microsoft.Extensions.Configuration;
+using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Support.UI;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Threading;
-using Microsoft.Extensions.Configuration;
-using CsvHelper;
-using CsvHelper.Configuration;
-using System.Globalization;
-using CsvHelper.TypeConversion;
 
 namespace CsvProcessor
 {
@@ -369,7 +370,12 @@ namespace CsvProcessor
         /// Searches for a client by DOB and returns match result
         /// Returns: (clientId, bestMatchInfo)
         /// </summary>
-        private (string? clientId, string? bestMatchInfo) SearchClientByDob(StudentRecord student)
+        /// 
+        /// <summary>
+        /// Searches for a client by DOB and returns match result
+        /// Returns: (clientId, bestMatchInfo)
+        /// </summary>
+        private async Task<(string? clientId, string? bestMatchInfo)> SearchClientByDob(StudentRecord student)
         {
             try
             {
@@ -380,255 +386,38 @@ namespace CsvProcessor
                     return (null, null);
                 }
 
-                // Navigate to client search page
-                string searchUrl = _config["PhisAutomation:SearchUrl"] ?? "https://phisisp.gnb.ca/phsdsm/ClientWeb/pages/search/clientSearch.xhtml";
-                _driver.Navigate().GoToUrl(searchUrl);
+                Console.WriteLine($"   🔍 Searching with DOB: {student.DateOfBirth}");
+                Console.WriteLine($"      Looking for: {student.FirstName} {student.LastName}");
+                if (!string.IsNullOrWhiteSpace(student.MedicareNumber))
+                {
+                    Console.WriteLine($"      Medicare #: {student.MedicareNumber} (available for verification)");
+                }
+                else
+                {
+                    Console.WriteLine($"      Medicare #: Not available - using name matching only");
+                }
 
-                // ✅ UPDATE SESSION ACTIVITY AFTER NAVIGATION
+                // ✅ USE NEW METHOD TO PERFORM SEARCH AND GET RESULTS
+                string xmlResponse;
+                try
+                {
+                    xmlResponse = await PerformDobSearchAndGetResponse(student.DateOfBirth);
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("Session expired"))
+                {
+                    Console.WriteLine($"   ❌ Session expired during search");
+                    return (null, null);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"   ❌ Search failed: {ex.Message}");
+                    return (null, null);
+                }
+
+                // ✅ UPDATE SESSION ACTIVITY AFTER SEARCH
                 UpdateSessionActivity();
 
-                // ✅ WAIT FOR PRIMEFACES TO FULLY LOAD
-                Thread.Sleep(2000); // Give PrimeFaces time to initialize
-
-                // ✅ HANDLE DOB RADIO BUTTON SELECTION WITH AJAX WAIT
-                try
-                {
-                    Console.WriteLine("   🔘 Selecting DOB radio button...");
-
-                    // Find the DOB radio button (the actual hidden input)
-                    var dobRadioButton = _driver.FindElement(By.CssSelector(
-                        "input[name='form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:selectOneRadio'][value='DOB']"));
-
-                    // Click using JavaScript to trigger PrimeFaces AJAX
-                    IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
-                    js.ExecuteScript("arguments[0].click();", dobRadioButton);
-
-                    Console.WriteLine("   ⏳ Waiting for PrimeFaces AJAX to complete...");
-
-                    // ✅ WAIT FOR AJAX TO COMPLETE - Check for PrimeFaces queue to be empty
-                    bool ajaxCompleted = _wait.Until(d =>
-                    {
-                        try
-                        {
-                            // ✅ SAFE: Handle potential null return from ExecuteScript
-                            IJavaScriptExecutor jsExec = (IJavaScriptExecutor)_driver;
-                            var ajaxResult = jsExec.ExecuteScript(
-                                "return typeof PrimeFaces !== 'undefined' && " +
-                                "typeof PrimeFaces.ajax !== 'undefined' && " +
-                                "typeof PrimeFaces.ajax.Queue !== 'undefined' && " +
-                                "PrimeFaces.ajax.Queue.isEmpty();"
-                            );
-
-                            // Convert to bool safely, defaulting to false if null
-                            bool ajaxActive = ajaxResult is bool result && result;
-
-                            // Also check if DOB field is enabled (not disabled)
-                            var dobField = d.FindElement(By.Id(
-                                "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input"));
-
-                            bool isEnabled = dobField.Enabled && !dobField.GetAttribute("class").Contains("ui-state-disabled");
-
-                            return ajaxActive && isEnabled;
-                        }
-                        catch
-                        {
-                            return false;
-                        }
-                    });
-
-                    if (ajaxCompleted)
-                    {
-                        Console.WriteLine("   ✅ AJAX completed, DOB field is now enabled");
-                    }
-                    else
-                    {
-                        Console.WriteLine("   ⚠️  AJAX timeout, attempting to continue anyway");
-                    }
-
-                    // Extra safety delay
-                    Thread.Sleep(1000);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"   ⚠️  DOB radio button error: {ex.Message}");
-                    Console.WriteLine("   ℹ️  Attempting to continue with search...");
-                }
-
-                // ✅ WAIT FOR DOB INPUT FIELD TO BE FULLY INTERACTABLE
-                IWebElement? dobField = null;
-                try
-                {
-                    dobField = _wait.Until(d =>
-                    {
-                        try
-                        {
-                            var element = d.FindElement(By.Id(
-                                "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input"));
-
-                            // Check if element is displayed, enabled, and not disabled by CSS class
-                            bool isReady = element.Displayed &&
-                                           element.Enabled &&
-                                           !element.GetAttribute("class").Contains("ui-state-disabled") &&
-                                           !element.GetAttribute("disabled").Equals("true");
-
-                            return isReady ? element : null;
-                        }
-                        catch
-                        {
-                            return null;
-                        }
-                    });
-                }
-                catch (WebDriverTimeoutException)
-                {
-                    Console.WriteLine("   ❌ DOB field never became interactable");
-                    return (null, null);
-                }
-
-                if (dobField == null)
-                {
-                    Console.WriteLine("   ❌ DOB field not accessible");
-                    return (null, null);
-                }
-
-                // ✅ CLEAR AND ENTER DOB WITH EXPLICIT WAITS
-                try
-                {
-                    // Clear field
-                    dobField.Clear();
-                    Thread.Sleep(300);
-
-                    // Enter date
-                    dobField.SendKeys(student.DateOfBirth);
-                    Thread.Sleep(500);
-
-                    // Verify the date was entered correctly
-                    string enteredValue = dobField.GetAttribute("value");
-                    if (string.IsNullOrWhiteSpace(enteredValue))
-                    {
-                        Console.WriteLine("   ⚠️  DOB field is empty after input, retrying...");
-                        dobField.Clear();
-                        Thread.Sleep(300);
-                        dobField.SendKeys(student.DateOfBirth);
-                        Thread.Sleep(500);
-                    }
-
-                    Console.WriteLine($"   🔍 Searching with DOB: {student.DateOfBirth}");
-                    Console.WriteLine($"      Looking for: {student.FirstName} {student.LastName}");
-                    if (!string.IsNullOrWhiteSpace(student.MedicareNumber))
-                    {
-                        Console.WriteLine($"      Medicare #: {student.MedicareNumber} (available for verification)");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"      Medicare #: Not available - using name matching only");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"   ❌ Failed to enter DOB: {ex.Message}");
-                    return (null, null);
-                }
-
-                // ✅ CLICK SEARCH BUTTON
-                try
-                {
-                    var searchButton = _wait.Until(d =>
-                    {
-                        try
-                        {
-                            var btn = d.FindElement(By.Id("actionMenuSearch:commandButtonId"));
-                            return btn.Displayed && btn.Enabled ? btn : null;
-                        }
-                        catch
-                        {
-                            return null;
-                        }
-                    });
-
-                    if (searchButton == null)
-                    {
-                        Console.WriteLine("   ❌ Search button not found or not clickable");
-                        return (null, null);
-                    }
-
-                    // Click search button
-                    IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
-                    try
-                    {
-                        searchButton.Click();
-                        Console.WriteLine("   🔎 Search button clicked");
-                    }
-                    catch
-                    {
-                        // Fallback to JavaScript click
-                        js.ExecuteScript("arguments[0].click();", searchButton);
-                        Console.WriteLine("   🔎 Search button clicked (via JavaScript)");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"   ❌ Failed to click search button: {ex.Message}");
-                    return (null, null);
-                }
-
-                // ✅ UPDATE SESSION ACTIVITY AFTER SEARCH CLICK
-                UpdateSessionActivity();
-
-                // ✅ WAIT FOR SEARCH RESULTS WITH AJAX AWARENESS
-                Console.WriteLine("   ⏳ Waiting for search results...");
-                Thread.Sleep(_pageLoadDelayMs);
-
-                try
-                {
-                    // Wait for either results or error messages
-                    _wait.Until(d =>
-                    {
-                        try
-                        {
-                            // Check if AJAX is complete
-                            IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
-
-                            // ✅ SAFE: Handle potential null return from ExecuteScript
-                            var ajaxResult = js.ExecuteScript(
-                                "return typeof PrimeFaces !== 'undefined' && " +
-                                "typeof PrimeFaces.ajax !== 'undefined' && " +
-                                "typeof PrimeFaces.ajax.Queue !== 'undefined' && " +
-                                "PrimeFaces.ajax.Queue.isEmpty();"
-                            );
-
-                            // Convert to bool safely, defaulting to false if null
-                            bool ajaxDone = ajaxResult is bool result && result;
-
-                            // Check for results or messages
-                            bool hasResults = d.FindElements(By.CssSelector("tbody[id*='dataTable_data'] tr[data-rk]")).Count > 0;
-                            bool hasMessages = d.FindElements(By.CssSelector(".ui-messages-error, .ui-messages-info, .ui-messages-warn")).Count > 0;
-
-                            return ajaxDone && (hasResults || hasMessages);
-                        }
-                        catch
-                        {
-                            // If JavaScript fails, just check for results/messages
-                            bool hasResults = d.FindElements(By.CssSelector("tbody[id*='dataTable_data'] tr[data-rk]")).Count > 0;
-                            bool hasMessages = d.FindElements(By.CssSelector(".ui-messages-error, .ui-messages-info, .ui-messages-warn")).Count > 0;
-
-                            return hasResults || hasMessages;
-                        }
-                    });
-                }
-                catch (WebDriverTimeoutException)
-                {
-                    Console.WriteLine("   ⚠️  Timeout waiting for search results");
-
-                    // ✅ CHECK IF SESSION EXPIRED DURING WAIT
-                    if (IsSessionExpired())
-                    {
-                        Console.WriteLine("   ❌ Session expired while waiting for results");
-                        return (null, null);
-                    }
-                }
-
-                // Get results
+                // ✅ PARSE THE RESULTS FROM THE PAGE SOURCE
                 var resultRows = _driver.FindElements(By.CssSelector("tbody[id*='dataTable_data'] tr[data-rk]"));
 
                 if (resultRows.Count == 0)
@@ -643,7 +432,6 @@ namespace CsvProcessor
                         Console.WriteLine($"   ⚠️  No results found for DOB: {student.DateOfBirth}");
                     }
 
-                    // ✅ UPDATE SESSION ACTIVITY EVEN ON NO RESULTS
                     UpdateSessionActivity();
                     return (null, null);
                 }
@@ -684,7 +472,6 @@ namespace CsvProcessor
                     // Format best match info
                     string bestMatchInfo = $"{match.FirstName}#{match.LastName}#{match.ClientId}#{finalScore:F1}%";
 
-                    // ✅ UPDATE SESSION ACTIVITY AFTER PROCESSING RESULT
                     UpdateSessionActivity();
 
                     // Decision logic: Name score is primary, Medicare is confidence booster
@@ -735,7 +522,6 @@ namespace CsvProcessor
                     if (matches.Count == 0)
                     {
                         Console.WriteLine($"   ⚠️  Could not extract any valid results - manual review needed");
-                        // ✅ UPDATE SESSION ACTIVITY EVEN ON FAILURE
                         UpdateSessionActivity();
                         return (null, null);
                     }
@@ -751,7 +537,6 @@ namespace CsvProcessor
                     var medicareMatches = matches.Where(m => m.medicareMatch).ToList();
                     var bestMedicareMatch = medicareMatches.OrderByDescending(m => m.nameScore).FirstOrDefault();
 
-                    // ✅ UPDATE SESSION ACTIVITY AFTER PROCESSING ALL RESULTS
                     UpdateSessionActivity();
 
                     // Strategy 1: Strong name match (>= 85% by default)
@@ -803,7 +588,6 @@ namespace CsvProcessor
             }
             catch (NoSuchElementException ex)
             {
-                // ✅ CHECK IF SESSION EXPIRED
                 if (IsSessionExpired())
                 {
                     Console.WriteLine($"   ❌ Session expired during search");
@@ -815,7 +599,6 @@ namespace CsvProcessor
             }
             catch (WebDriverTimeoutException ex)
             {
-                // ✅ CHECK IF SESSION EXPIRED
                 if (IsSessionExpired())
                 {
                     Console.WriteLine($"   ❌ Session expired (timeout)");
@@ -831,6 +614,8 @@ namespace CsvProcessor
                 return (null, null);
             }
         }
+
+
 
 
         /// <summary>
@@ -1217,7 +1002,7 @@ namespace CsvProcessor
         }
 
 
-        public void SearchAllClientsInCsv()
+        public async Task SearchAllClientsInCsvAsync()
         {
             var students = ReadProcessedCsv();
             _currentStudentList = students;
@@ -1281,8 +1066,8 @@ namespace CsvProcessor
 
                 try
                 {
-                    // Search for Client ID
-                    var (clientId, bestMatchInfo) = SearchClientByDob(student);
+                    // ✅ NOW USING ASYNC SEARCH METHOD
+                    var (clientId, bestMatchInfo) = await SearchClientByDob(student);
 
                     if (!string.IsNullOrWhiteSpace(clientId))
                     {
@@ -1324,7 +1109,7 @@ namespace CsvProcessor
                 // Delay between searches
                 if (i < unprocessedStudents.Count - 1)
                 {
-                    Thread.Sleep(_delayBetweenSearchesMs);
+                    await Task.Delay(_delayBetweenSearchesMs);
                 }
             }
 
@@ -1346,6 +1131,7 @@ namespace CsvProcessor
             }
             Console.WriteLine(new string('═', 60) + "\n");
         }
+
 
 
         /// <summary>
@@ -1415,6 +1201,171 @@ namespace CsvProcessor
                 Console.WriteLine($"⚠️  ChromeDriver disposal error: {ex.Message}");
             }
 
+        }
+
+
+
+        /// <summary>
+        /// Performs DOB search and reads results directly from the table
+        /// Uses simple page source extraction instead of network interception
+        /// </summary>
+        private async Task<string> PerformDobSearchAndGetResponse(string dateOfBirth)
+        {
+            try
+            {
+                // Ensure we're on the search page
+                await EnsureOnSearchPage();
+
+                // Clear any previous search
+                await ClearSearchForm();
+
+                // Enter DOB in the search field
+                var dobInput = _driver.FindElement(By.Id("form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input"));
+                dobInput.Clear();
+                dobInput.SendKeys(dateOfBirth);
+
+                Console.WriteLine($"   ✏️  Entered DOB: {dateOfBirth}");
+
+                // Click search button
+                var searchButton = _driver.FindElement(By.Id("actionMenuSearch:commandButtonId"));
+                searchButton.Click();
+
+                Console.WriteLine($"   🔍 Clicked Search button, waiting for results...");
+
+                // Wait for results table to appear or update
+                await Task.Delay(2000);
+
+                // Wait for the specific results table with actual data
+                var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(10));
+                wait.Until(d =>
+                {
+                    try
+                    {
+                        var tbody = d.FindElement(By.Id("form:dataTable:dataTable_data"));
+                        var rows = tbody.FindElements(By.XPath(".//tr[@role='row']"));
+                        return rows.Count > 0; // Wait until at least one row appears
+                    }
+                    catch
+                    {
+                        // Check for "no results" message
+                        var messages = d.FindElements(By.CssSelector(".ui-messages-info, .ui-messages-warn"));
+                        return messages.Count > 0; // Return true if we have a message
+                    }
+                });
+
+                // Get the page source (contains the full table HTML)
+                var pageSource = _driver.PageSource;
+
+                // Wrap in XML structure for consistent parsing
+                // Using CDATA to avoid escaping issues
+                var wrappedXml = $@"<?xml version=""1.0"" encoding=""UTF-8""?>
+                <partial-response id=""j_id__v_0"">
+                    <changes>
+                        <update id=""form""><![CDATA[{pageSource}]]></update>
+                    </changes>
+                </partial-response>";
+
+                Console.WriteLine($"   ✅ Search completed, extracted results from page");
+                return wrappedXml;
+            }
+            catch (WebDriverTimeoutException)
+            {
+                Console.WriteLine($"   ⚠️  Timeout waiting for search results");
+
+                // Check if session expired
+                if (IsSessionExpired())
+                {
+                    Console.WriteLine($"   ❌ Session expired during search");
+                    throw new InvalidOperationException("Session expired");
+                }
+
+                // Return empty result
+                return CreateEmptyResponse();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Error performing DOB search: {ex.Message}");
+                throw;
+            }
+        }
+
+        // <summary>
+        /// Ensures we're on the client search page
+        /// </summary>
+        private async Task EnsureOnSearchPage()
+        {
+            try
+            {
+                // Check if we're already on the search page
+                var searchForm = _driver.FindElements(By.Id("form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input"));
+
+                if (searchForm.Count > 0)
+                {
+                    return; // Already on search page
+                }
+
+                // Navigate to search page
+                Console.WriteLine($"   🔄 Navigating to search page...");
+
+                string searchUrl = _config["PhisAutomation:SearchUrl"] ?? "https://phisisp.gnb.ca/phsdsm/ClientWeb/pages/search/clientSearch.xhtml";
+                _driver.Navigate().GoToUrl(searchUrl);
+
+                await Task.Delay(1000);
+
+                // Wait for page to load
+                var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(10));
+                wait.Until(d => d.FindElements(By.Id("form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input")).Count > 0);
+
+                Console.WriteLine($"   ✅ On search page");
+
+                // Update session activity
+                UpdateSessionActivity();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ⚠️  Could not navigate to search page: {ex.Message}");
+                throw;
+            }
+        }
+
+
+        // <summary>
+        /// Clears the search form before entering new criteria
+        /// </summary>
+        private async Task ClearSearchForm()
+        {
+            try
+            {
+                // Click the Reset button to clear form
+                var resetButton = _driver.FindElements(By.Id("actionMenuReset:commandButtonId"));
+
+                if (resetButton.Count > 0)
+                {
+                    resetButton[0].Click();
+                    await Task.Delay(1000);
+                    Console.WriteLine($"   🧹 Cleared search form");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ⚠️  Could not clear form: {ex.Message}");
+                // Don't throw - clearing is optional
+            }
+        }
+
+
+
+        // <summary>
+        /// Creates an empty XML response when no results are found
+        /// </summary>
+        private string CreateEmptyResponse()
+        {
+            return @"<?xml version=""1.0"" encoding=""UTF-8""?>
+            <partial-response id=""j_id__v_0"">
+                <changes>
+                    <update id=""form""><![CDATA[<div>No results found</div>]]></update>
+                </changes>
+            </partial-response>";
         }
 
 
@@ -1552,9 +1503,17 @@ namespace CsvProcessor
     public class PhisSearchResult
     {
         public string ClientId { get; set; } = string.Empty;
+
+        public string? MedicareNumber { get; set; }
+
         public string FirstName { get; set; } = string.Empty;
         public string LastName { get; set; } = string.Empty;
-        public string? MedicareNumber { get; set; }
+
+        public string MiddleName { get; set; } = "";
+        public string Gender { get; set; } = "";
+        public string DateOfBirth { get; set; } = "";
+        public string HealthRegion { get; set; } = "";
+        public string ActiveStatus { get; set; } = "";
     }
 
 

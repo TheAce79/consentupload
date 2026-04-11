@@ -1,11 +1,12 @@
 ﻿using Microsoft.Extensions.Configuration;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace CsvProcessor
 {
     class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             // Register encoding provider for legacy encodings (Windows-1252, etc.)
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -61,7 +62,7 @@ namespace CsvProcessor
                 }
 
                 // Search for all unprocessed students
-                finder.SearchAllClientsInCsv();
+               await finder.SearchAllClientsInCsvAsync();
 
                 Console.WriteLine("\n✅ All done! Check the CSV for results.");
             }
