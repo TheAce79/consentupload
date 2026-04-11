@@ -216,24 +216,138 @@ namespace ConsentSyncCore.Services.Phis
 
 
         /// <summary>
-        /// Execute DOB search
+        /// Execute DOB search - now with correct date format (yyyy/MM/dd)
         /// </summary>
         private async Task ExecuteDobSearchAsync(string dateOfBirth)
         {
-            // Select DOB radio button (if needed)
-            await SelectSearchCriteriaTypeAsync("DOB");
+            try
+            {
+                // Select DOB radio button (if needed)
+                await SelectSearchCriteriaTypeAsync("DOB");
 
-            // Find and fill DOB input
-            var dobInput = _driver.FindElement(By.Id(
-                "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input"));
+                // Convert date from CSV format (yyyy-MM-dd) to PHIS format (yyyy/MM/dd)
+                string phisFormattedDate = ConvertDateForPhis(dateOfBirth);
 
-            dobInput.Clear();
-            dobInput.SendKeys(dateOfBirth);
+                if (string.IsNullOrEmpty(phisFormattedDate))
+                {
+                    Console.WriteLine($"   ❌ Invalid date format: {dateOfBirth}");
+                    throw new ArgumentException($"Invalid date format: {dateOfBirth}");
+                }
 
-            Console.WriteLine($"   ✏️  Entered DOB");
+                Console.WriteLine($"   📅 Original DOB: {dateOfBirth}");
+                Console.WriteLine($"   📅 PHIS format: {phisFormattedDate}");
 
-            // Click search
-            await ClickSearchButtonAsync();
+                // Find and fill DOB input using JavaScript (PrimeFaces calendar requires this)
+                var dobInputId = "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input";
+
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+
+                // Use JavaScript to set the value and trigger PrimeFaces events
+                js.ExecuteScript($@"
+            var input = document.getElementById('{dobInputId}');
+            if (input) {{
+                input.value = '{phisFormattedDate}';
+                
+                // Trigger PrimeFaces calendar events
+                var changeEvent = new Event('change', {{ bubbles: true }});
+                input.dispatchEvent(changeEvent);
+                
+                var inputEvent = new Event('input', {{ bubbles: true }});
+                input.dispatchEvent(inputEvent);
+                
+                // Trigger blur to ensure PrimeFaces processes the value
+                var blurEvent = new Event('blur', {{ bubbles: true }});
+                input.dispatchEvent(blurEvent);
+            }}
+        ");
+
+                Console.WriteLine($"   ✏️  Entered DOB via JavaScript");
+
+                // Give PrimeFaces time to process
+                await Task.Delay(800);
+
+                // Verify the value was actually set
+                var setValue = (string)js.ExecuteScript($"return document.getElementById('{dobInputId}').value;");
+                if (setValue != phisFormattedDate)
+                {
+                    Console.WriteLine($"   ⚠️  WARNING: DOB value mismatch!");
+                    Console.WriteLine($"      Expected: {phisFormattedDate}");
+                    Console.WriteLine($"      Got: {setValue}");
+
+                    // Fallback: Try direct SendKeys
+                    var dobInput = _driver.FindElement(By.Id(dobInputId));
+                    dobInput.Clear();
+                    dobInput.SendKeys(phisFormattedDate);
+                    await Task.Delay(500);
+
+                    // Re-verify
+                    setValue = dobInput.GetAttribute("value");
+                    Console.WriteLine($"      After SendKeys: {setValue}");
+                }
+                else
+                {
+                    Console.WriteLine($"   ✅ DOB value confirmed: {setValue}");
+                }
+
+                // Click search
+                await ClickSearchButtonAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Error in ExecuteDobSearchAsync: {ex.Message}");
+                throw;
+            }
+        }
+
+
+
+
+        /// <summary>
+        /// Convert date from CSV format (yyyy-MM-dd) to PHIS format (yyyy/MM/dd)
+        /// </summary>
+        private string ConvertDateForPhis(string csvDate)
+        {
+            try
+            {
+                // Handle null/empty
+                if (string.IsNullOrWhiteSpace(csvDate))
+                    return string.Empty;
+
+                // If already in correct format, return as-is
+                if (csvDate.Contains("/") && csvDate.Length == 10)
+                    return csvDate;
+
+                // Parse from CSV format (yyyy-MM-dd)
+                if (DateTime.TryParseExact(csvDate, "yyyy-MM-dd",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateTime parsedDate))
+                {
+                    // Format for PHIS: yyyy/MM/dd
+                    return parsedDate.ToString("yyyy/MM/dd");
+                }
+
+                // Try alternative formats just in case
+                string[] alternativeFormats = { "yyyy-M-d", "yyyy/M/d", "dd/MM/yyyy", "MM/dd/yyyy" };
+                foreach (var format in alternativeFormats)
+                {
+                    if (DateTime.TryParseExact(csvDate, format,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None,
+                        out parsedDate))
+                    {
+                        return parsedDate.ToString("yyyy/MM/dd");
+                    }
+                }
+
+                Console.WriteLine($"   ⚠️  Failed to parse date: {csvDate}");
+                return string.Empty;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Date conversion error: {ex.Message}");
+                return string.Empty;
+            }
         }
 
 
