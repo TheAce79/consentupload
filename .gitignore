@@ -6,3 +6,7 @@
 /PdfReader/obj
 /PhisUploadRecord/bin
 /PhisUploadRecord/obj
+/ConsentSync/.vs
+/ConsentSync/ConsentSyncCore/bin
+obj
+bin
