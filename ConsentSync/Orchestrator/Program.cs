@@ -267,7 +267,24 @@ namespace Orchestrator
         /// </summary>
         static void PrintHeader()
         {
-            Console.Clear();
+            // Only clear if running in a real console (not VS Code Debug Console)
+            if (!Console.IsOutputRedirected && !Console.IsErrorRedirected)
+            {
+                try
+                {
+                    Console.Clear();
+                }
+                catch (IOException)
+                {
+                    // Fallback to newlines if clear fails
+                    Console.WriteLine("\n\n\n");
+                }
+            }
+            else
+            {
+                Console.WriteLine("\n\n\n");
+            }
+
             Console.WriteLine("╔════════════════════════════════════════════════════════════════════╗");
             Console.WriteLine("║                    ConsentSync Orchestrator                        ║");
             Console.WriteLine("║                   Complete 3-Phase Workflow                        ║");
