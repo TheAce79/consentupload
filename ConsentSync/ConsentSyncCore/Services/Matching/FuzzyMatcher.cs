@@ -27,16 +27,23 @@ namespace ConsentSyncCore.Services.Matching
         public FuzzyMatcher(FuzzyMatchingConfig? config = null)
         {
             _config = config ?? ConfigurationService.GetFuzzyMatchingConfig();
+
+            // Log configuration on startup
+            Console.WriteLine($"\n🔍 Fuzzy Matcher Configuration:");
+            Console.WriteLine($"   Compound name matching: {_config.TreatCompoundNamesAsPartialMatch}");
+            Console.WriteLine($"   Space-separated compounds: {_config.TreatSpaceSeparatedNamesAsCompound}");
+            Console.WriteLine($"   Compound match score: {_config.CompoundNameMatchScore}%");
+            Console.WriteLine($"   Min compound ratio: {_config.MinimumCompoundMatchRatio:P0}");
         }
 
 
         #region Public API
 
 
-        /// <summary>
-        /// Calculate match score between a student and a PHIS search result
-        /// Returns: (finalScore, nameScore, medicareMatch)
-        /// </summary>
+            /// <summary>
+            /// Calculate match score between a student and a PHIS search result
+            /// Returns: (finalScore, nameScore, medicareMatch)
+            /// </summary>
         public (double finalScore, double nameScore, bool medicareMatch) CalculateMatchScore(
             StudentRecord student,
             PhisSearchResult phisResult)
@@ -152,10 +159,17 @@ namespace ConsentSyncCore.Services.Matching
 
 
 
+
+
         /// <summary>
         /// Calculate similarity between two names
-        /// Handles compound names like "Jean-Marie" vs "Jean"
+        /// Handles compound names (hyphenated OR space-separated based on config)
+        /// Examples:
+        ///   - "Jean-Marie" vs "Jean" → 95%
+        ///   - "Mohammad Jaabir" vs "Jaabir" → 95%
+        ///   - "Emile André" vs "Emile" → 95%
         /// </summary>
+        /// 
         private double CalculateNameSimilarity(string name1, string name2)
         {
             if (string.IsNullOrEmpty(name1) && string.IsNullOrEmpty(name2))
@@ -167,26 +181,110 @@ namespace ConsentSyncCore.Services.Matching
             if (name1.Equals(name2, StringComparison.OrdinalIgnoreCase))
                 return 1.0;
 
-            // Handle compound names (Jean-Marie vs Jean)
+            // Handle compound names (if enabled in config)
             if (_config.TreatCompoundNamesAsPartialMatch)
             {
-                var parts1 = name1.Split('-');
-                var parts2 = name2.Split('-');
+                var parts1 = SplitCompoundName(name1);
+                var parts2 = SplitCompoundName(name2);
 
-                if (parts1.Length == 1 && parts2.Length > 1)
+                // Case 1: "Mohammad Jaabir" vs "Jaabir"
+                if (parts1.Length > 1 && parts2.Length == 1)
                 {
-                    if (parts2[0].Equals(name1, StringComparison.OrdinalIgnoreCase))
-                        return 0.95; // 95% match for compound name
+                    foreach (var part in parts1)
+                    {
+                        if (part.Equals(name2, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var score = _config.CompoundNameMatchScore / 100.0;
+                            Console.WriteLine($"      Compound match: '{name1}' contains '{name2}' → {score * 100:F1}%");
+                            return score;
+                        }
+                    }
                 }
-                else if (parts2.Length == 1 && parts1.Length > 1)
+
+                // Case 2: "Jaabir" vs "Mohammad Jaabir"
+                if (parts2.Length > 1 && parts1.Length == 1)
                 {
-                    if (parts1[0].Equals(name2, StringComparison.OrdinalIgnoreCase))
-                        return 0.95;
+                    foreach (var part in parts2)
+                    {
+                        if (part.Equals(name1, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var score = _config.CompoundNameMatchScore / 100.0;
+                            Console.WriteLine($"      Compound match: '{name2}' contains '{name1}' → {score * 100:F1}%");
+                            return score;
+                        }
+                    }
+                }
+
+                // Case 3: Both are compound - check overlap
+                if (parts1.Length > 1 && parts2.Length > 1)
+                {
+                    int matchCount = 0;
+                    int minParts = Math.Min(parts1.Length, parts2.Length);
+
+                    for (int i = 0; i < minParts; i++)
+                    {
+                        if (parts1[i].Equals(parts2[i], StringComparison.OrdinalIgnoreCase))
+                        {
+                            matchCount++;
+                        }
+                    }
+
+                    if (matchCount > 0)
+                    {
+                        double matchRatio = (double)matchCount / Math.Max(parts1.Length, parts2.Length);
+
+                        if (matchRatio >= _config.MinimumCompoundMatchRatio)
+                        {
+                            var score = matchRatio * (_config.CompoundNameMatchScore / 100.0);
+                            Console.WriteLine($"      Partial compound: {matchCount}/{Math.Max(parts1.Length, parts2.Length)} parts → {score * 100:F1}%");
+                            return score;
+                        }
+                    }
                 }
             }
 
+            // Fallback to Levenshtein distance
             return CalculateStringSimilarity(name1, name2);
         }
+
+
+
+        /// <summary>
+        /// Split compound name by hyphens, spaces, or both
+        /// Examples:
+        ///   "Jean-Marie" → ["Jean", "Marie"]
+        ///   "Mohammad Jaabir" → ["Mohammad", "Jaabir"]
+        ///   "Marie-Claire Louise" → ["Marie", "Claire", "Louise"]
+        /// </summary>
+        /// <summary>
+        /// Split compound name by hyphens and/or spaces (based on config)
+        /// </summary>
+        private string[] SplitCompoundName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return Array.Empty<string>();
+
+            // Determine delimiters based on configuration
+            char[] delimiters;
+
+            if (_config.TreatSpaceSeparatedNamesAsCompound)
+            {
+                // Split by both hyphens AND spaces
+                delimiters = new[] { '-', ' ' };
+            }
+            else
+            {
+                // Split by hyphens only (original behavior)
+                delimiters = new[] { '-' };
+            }
+
+            return name.Split(delimiters, StringSplitOptions.RemoveEmptyEntries)
+                       .Select(part => part.Trim())
+                       .Where(part => !string.IsNullOrEmpty(part))
+                       .ToArray();
+        }
+
+
 
 
 

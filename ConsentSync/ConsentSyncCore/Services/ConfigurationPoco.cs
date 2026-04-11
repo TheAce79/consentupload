@@ -163,6 +163,12 @@ namespace ConsentSyncCore.Services
         public bool TreatCompoundNamesAsPartialMatch { get; set; }
         public bool UseMedicareNumberAsConfirmation { get; set; }
         public double MedicareNumberBoostScore { get; set; }
+
+
+        // ✅ NEW - Add these properties
+        public bool TreatSpaceSeparatedNamesAsCompound { get; set; }
+        public double CompoundNameMatchScore { get; set; }
+        public double MinimumCompoundMatchRatio { get; set; }
     }
 
 
