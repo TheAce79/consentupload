@@ -108,6 +108,21 @@ namespace ConsentSyncCore.Services
 
 
 
+        /// <summary>
+        /// Get School Context configuration (shared across all phases)
+        /// </summary>
+        public static SchoolContextConfig GetSchoolContextConfig()
+        {
+            var config = GetConfiguration();
+            return new SchoolContextConfig
+            {
+                SchoolName = config["SchoolContext:SchoolName"] ?? "",
+                Grade = config["SchoolContext:Grade"] ?? "",
+                SchoolYear = config["SchoolContext:SchoolYear"] ?? "2025-2026"
+            };
+        }
+
+
         #region Phase 1 Configuration
 
 
@@ -167,11 +182,11 @@ namespace ConsentSyncCore.Services
                 DebugOutputDir = config["Phase2:PdfProcessing:DebugOutputDir"] ?? "",
 
                 UseFuzzyMatching = config.GetValue<bool>("Phase2:PdfProcessing:UseFuzzyMatching", true),
-                ErrorOutputDir = config["Phase2:PdfProcessing:ErrorOutputDir"] ?? "",
+                ErrorOutputDir = config["Phase2:Download:ErrorOutputDir"] ?? "",
 
                 ValidationResultsCsv = config["Phase2:Output:ValidationResultsCsv"] ?? "Validation_Results.csv",
                 UploadCsv = config["Phase2:Output:UploadCsv"] ?? "Upload_to_PHIS.csv",
-                CurrentYear = config["Phase2:Output:CurrentYear"] ?? "2025-2026"
+               
             };
         }
 

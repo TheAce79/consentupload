@@ -22,12 +22,14 @@ namespace Orchestrator.Phase2
         private readonly IConfiguration _config;
         private readonly Phase2Config _phase2Config;
         private readonly StudentCsvRepository _csvRepo;
-        private readonly FuzzyMatcher _fuzzyMatcher;  
+        private readonly FuzzyMatcher _fuzzyMatcher;
+        private readonly SchoolContextConfig _schoolContext;
 
         public Phase2Orchestrator(IConfiguration? config = null)
         {
             _config = config ?? ConfigurationService.GetConfiguration();
             _phase2Config = ConfigurationService.GetPhase2Config();
+            _schoolContext = ConfigurationService.GetSchoolContextConfig();
             _csvRepo = new StudentCsvRepository(_config);
             _fuzzyMatcher = new FuzzyMatcher(); 
         }
@@ -359,7 +361,7 @@ namespace Orchestrator.Phase2
             List<UploadRecord> uploadRecords)
         {
             int filesGenerated = 0;
-            var schoolYear = _phase2Config.CurrentYear;
+            var schoolYear = _schoolContext.SchoolYear;
             var grade = student.Grade.Trim();
 
             // Determine vaccine types based on grade

@@ -7,6 +7,18 @@ using System.Threading.Tasks;
 namespace ConsentSyncCore.Services
 {
 
+
+    /// <summary>
+    /// School context configuration (shared across all phases)
+    /// </summary>
+    public class SchoolContextConfig
+    {
+        public string SchoolName { get; set; } = string.Empty;
+        public string Grade { get; set; } = string.Empty;
+        public string SchoolYear { get; set; } = string.Empty;
+    }
+
+
     /// <summary>
     /// CSV Processing configuration
     /// </summary>
@@ -86,7 +98,7 @@ namespace ConsentSyncCore.Services
         // Output
         public string ValidationResultsCsv { get; set; } = string.Empty;
         public string UploadCsv { get; set; } = string.Empty;
-        public string CurrentYear { get; set; } = string.Empty;
+
     }
 
 

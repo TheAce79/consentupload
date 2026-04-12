@@ -2,6 +2,7 @@
 using CsvProcessing;
 using Microsoft.Extensions.Configuration;
 using Orchestrator.Phase1;
+using Orchestrator.Phase2;
 using System.Text;
 
 
@@ -205,6 +206,7 @@ namespace Orchestrator
             }
         }
 
+
         /// <summary>
         /// Execute Phase 2: Download consent PDFs from Vitalite
         /// </summary>
@@ -212,17 +214,21 @@ namespace Orchestrator
         {
             try
             {
-                Console.WriteLine("🚧 Phase 2 implementation coming soon...");
-                Console.WriteLine("📥 This phase will:");
-                Console.WriteLine("   1. Login to Vitalite website");
-                Console.WriteLine("   2. Search for student consent forms");
-                Console.WriteLine("   3. Download PDFs");
-                Console.WriteLine("   4. Extract names from PDFs");
-                Console.WriteLine("   5. Rename to ClientID_VaccineType.pdf format");
-                Console.WriteLine("   6. Split multi-page PDFs if needed");
-                Console.WriteLine("   7. Generate Upload_to_PHIS.csv");
+                var orchestrator = new Phase2Orchestrator(config);
+                var result = await orchestrator.RunAsync();
 
-                await Task.CompletedTask;
+                if (result.HasErrors)
+                {
+                    Console.WriteLine("\n❌ Phase 2 completed with errors");
+                }
+                else if (result.FailedToMatch > 0)
+                {
+                    Console.WriteLine($"\n⚠️  Phase 2 completed - {result.FailedToMatch} files need manual review");
+                }
+                else
+                {
+                    Console.WriteLine("\n✅ Phase 2 completed successfully!");
+                }
             }
             catch (Exception ex)
             {
