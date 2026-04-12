@@ -137,7 +137,7 @@ namespace ConsentSyncCore.Services.Matching
         /// <summary>
         /// Calculate fuzzy name match score (0-100) between two name pairs
         /// </summary>
-        private double CalculateNameMatchScore(
+        public double CalculateNameMatchScore(
             string firstName1,
             string lastName1,
             string firstName2,

@@ -166,6 +166,9 @@ namespace ConsentSyncCore.Services
                 DebugMode = config.GetValue<bool>("Phase2:PdfProcessing:DebugMode", false),
                 DebugOutputDir = config["Phase2:PdfProcessing:DebugOutputDir"] ?? "",
 
+                UseFuzzyMatching = config.GetValue<bool>("Phase2:PdfProcessing:UseFuzzyMatching", true),
+                ErrorOutputDir = config["Phase2:PdfProcessing:ErrorOutputDir"] ?? "",
+
                 ValidationResultsCsv = config["Phase2:Output:ValidationResultsCsv"] ?? "Validation_Results.csv",
                 UploadCsv = config["Phase2:Output:UploadCsv"] ?? "Upload_to_PHIS.csv",
                 CurrentYear = config["Phase2:Output:CurrentYear"] ?? "2025-2026"
@@ -359,6 +362,7 @@ namespace ConsentSyncCore.Services
 
 
 
+
         /// <summary>
         /// Get PDF Extraction configuration (for Phase 2)
         /// </summary>
@@ -372,11 +376,31 @@ namespace ConsentSyncCore.Services
                 FirstNameKeywords = config.GetSection("PdfExtraction:FirstNameKeywords").Get<string[]>()
                     ?? new[] { "PRÉNOM", "PRENOM", "GIVEN" },
                 ExcludeKeywords = config.GetSection("PdfExtraction:ExcludeKeywords").Get<string[]>()
-                    ?? new[] { "PRÉFÉRÉ", "PREFERRED", "DATE" },
+                    ?? new[] { "PRÉFÉRÉ", "PREFERRED", "DATE", "SEXE", "GENDER", "SEX" },
                 FieldLabelWords = config.GetSection("PdfExtraction:FieldLabelWords").Get<string[]>()
                     ?? Array.Empty<string>(),
                 SearchRange = config.GetValue<int>("PdfExtraction:SearchRange", 15),
-                MinNameLength = config.GetValue<int>("PdfExtraction:MinNameLength", 2)
+                MinNameLength = config.GetValue<int>("PdfExtraction:MinNameLength", 2),
+
+                // ✅ Add these strongly-typed patterns
+                LastNamePatterns = config.GetSection("PdfExtraction:LastNamePatterns").Get<List<NamePattern>>()
+                    ?? new List<NamePattern>
+                    {
+                new() { Words = new[] { "LAST", "NAME" }, Language = "English" },
+                new() { Words = new[] { "NOM", "DE", "FAMILLE" }, Language = "French" }
+                    },
+                FirstNamePatterns = config.GetSection("PdfExtraction:FirstNamePatterns").Get<List<NamePattern>>()
+                    ?? new List<NamePattern>
+                    {
+                new() { Words = new[] { "FIRST", "NAME" }, Language = "English" },
+                new() { Words = new[] { "PRÉNOM" }, Language = "French" }
+                    },
+                PreferredNamePatterns = config.GetSection("PdfExtraction:PreferredNamePatterns").Get<List<NamePattern>>()
+                    ?? new List<NamePattern>
+                    {
+                new() { Words = new[] { "PREFERRED", "FIRST", "NAME" }, Language = "English" },
+                new() { Words = new[] { "PRÉNOM", "PRÉFÉRÉ" }, Language = "French" }
+                    }
             };
         }
 

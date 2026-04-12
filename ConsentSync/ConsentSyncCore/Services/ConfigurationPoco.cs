@@ -70,6 +70,19 @@ namespace ConsentSyncCore.Services
         public bool DebugMode { get; set; }
         public string DebugOutputDir { get; set; } = string.Empty;
 
+
+        /// <summary>
+        /// by default, we want to use fuzzy matching for Phase 2 to maximize 
+        /// the number of records we can automatically process, but this can be disabled for testing or if you want to be more strict with matching criteria
+        /// </summary>
+        public bool UseFuzzyMatching { get; set; } = true;
+
+        /// <summary>
+        /// copy any files that fail processing to a separate directory 
+        /// for easier troubleshooting and reprocessing after issues are resolved
+        /// </summary>
+        public string ErrorOutputDir { get; set; } = string.Empty;
+
         // Output
         public string ValidationResultsCsv { get; set; } = string.Empty;
         public string UploadCsv { get; set; } = string.Empty;
@@ -203,9 +216,24 @@ namespace ConsentSyncCore.Services
         public string[] FieldLabelWords { get; set; } = Array.Empty<string>();
         public int SearchRange { get; set; }
         public int MinNameLength { get; set; }
+
+
+        // ✅ Add these strongly-typed properties
+        public List<NamePattern> LastNamePatterns { get; set; } = new();
+        public List<NamePattern> FirstNamePatterns { get; set; } = new();
+        public List<NamePattern> PreferredNamePatterns { get; set; } = new();
     }
 
 
+
+    /// <summary>
+    /// Name pattern for PDF extraction
+    /// </summary>
+    public class NamePattern
+    {
+        public string[] Words { get; set; } = Array.Empty<string>();
+        public string Language { get; set; } = string.Empty;
+    }
 
 
 
