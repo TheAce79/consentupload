@@ -103,6 +103,20 @@ namespace ConsentSyncCore.Services
 
 
     /// <summary>
+    /// Pre-Phase 3 configuration (Validation & PDF Preparation)
+    /// </summary>
+    public class PrePhase3Config
+    {
+        public bool Enabled { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public string ValidationCsvPath { get; set; } = string.Empty;
+        public string ValidationCsvFileName { get; set; } = string.Empty;
+        public string PdfSourcePath { get; set; } = string.Empty;
+        public string OutputPath { get; set; } = string.Empty;
+        public double MinMatchScoreToAutoAccept { get; set; } = 90.0;
+    }
+
+    /// <summary>
     /// Phase 3 configuration
     /// </summary>
     public class Phase3Config

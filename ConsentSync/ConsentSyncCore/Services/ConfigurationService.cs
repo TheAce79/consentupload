@@ -325,6 +325,34 @@ namespace ConsentSyncCore.Services
 
 
 
+        #region Pre-Phase 3 Configuration
+
+
+        /// <summary>
+        /// Get Pre-Phase 3 configuration with resolved paths
+        /// </summary>
+        public static PrePhase3Config GetPrePhase3Config()
+        {
+            var config = GetConfiguration();
+            return new PrePhase3Config
+            {
+                Enabled = config.GetValue<bool>("PrePhase3:Enabled", true),
+                Description = config["PrePhase3:Description"] ?? "Validate and prepare PDFs for upload",
+
+                // ✅ Resolve paths with placeholders
+                ValidationCsvPath = ResolvePath(config["PrePhase3:ValidationCsvPath"] ?? ""),
+                ValidationCsvFileName = config["PrePhase3:ValidationCsvFileName"] ?? "Validation_Results.csv",
+                PdfSourcePath = ResolvePath(config["PrePhase3:PdfSourcePath"] ?? ""),
+                OutputPath = ResolvePath(config["PrePhase3:OutputPath"] ?? ""),
+                MinMatchScoreToAutoAccept = config.GetValue<double>("PrePhase3:MinMatchScoreToAutoAccept", 90.0)
+            };
+        }
+
+
+
+        #endregion  Pre-Phase 3 Configuration
+
+
 
         #region Phase 3 Configuration
 
@@ -456,6 +484,12 @@ namespace ConsentSyncCore.Services
                 IgnoreHyphensInComparison = config.GetValue<bool>("PhisAutomation:FuzzyMatching:IgnoreHyphensInComparison", true),
                 IgnoreSpacesInComparison = config.GetValue<bool>("PhisAutomation:FuzzyMatching:IgnoreSpacesInComparison", true),
                 TreatCompoundNamesAsPartialMatch = config.GetValue<bool>("PhisAutomation:FuzzyMatching:TreatCompoundNamesAsPartialMatch", true),
+
+                // ✅ ADD THESE TWO LINES - they're missing!
+                TreatSpaceSeparatedNamesAsCompound = config.GetValue<bool>("PhisAutomation:FuzzyMatching:TreatSpaceSeparatedNamesAsCompound", true),
+                CompoundNameMatchScore = config.GetValue<double>("PhisAutomation:FuzzyMatching:CompoundNameMatchScore", 95.0),
+                MinimumCompoundMatchRatio = config.GetValue<double>("PhisAutomation:FuzzyMatching:MinimumCompoundMatchRatio", 0.5),
+
                 UseMedicareNumberAsConfirmation = config.GetValue<bool>("PhisAutomation:FuzzyMatching:UseMedicareNumberAsConfirmation", true),
                 MedicareNumberBoostScore = config.GetValue<double>("PhisAutomation:FuzzyMatching:MedicareNumberBoostScore", 20.0)
             };

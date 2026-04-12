@@ -32,7 +32,7 @@ namespace ConsentSyncCore.Models
         public string Tdap { get; set; } = string.Empty;
         public string HPV { get; set; } = string.Empty;
         public string ClientId { get; set; } = string.Empty;
-        public bool IsFileRoseDefaut { get; set; }
+        public bool IsFileRoseDefault { get; set; }
 
         /// <summary>
         /// Status of Client ID search (0=NotProcessed, 1=Found, 2=NeedsManualReview)
