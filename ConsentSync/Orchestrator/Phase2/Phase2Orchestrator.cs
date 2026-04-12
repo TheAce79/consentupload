@@ -31,7 +31,7 @@ namespace Orchestrator.Phase2
             _phase2Config = ConfigurationService.GetPhase2Config();
             _schoolContext = ConfigurationService.GetSchoolContextConfig();
             _csvRepo = new StudentCsvRepository(_config);
-            _fuzzyMatcher = new FuzzyMatcher(); 
+            _fuzzyMatcher = new FuzzyMatcher();
         }
 
 
@@ -39,9 +39,6 @@ namespace Orchestrator.Phase2
 
 
 
-        /// <summary>
-        /// Validate required folders exist
-        /// </summary>
         private bool ValidateFolders()
         {
             bool valid = true;
@@ -66,7 +63,6 @@ namespace Orchestrator.Phase2
                 Console.WriteLine($"   ✅ RenamedPath: {_phase2Config.RenamedPath}");
             }
 
-            // ✅ Add error directory validation
             if (!string.IsNullOrWhiteSpace(_phase2Config.ErrorOutputDir))
             {
                 if (!Directory.Exists(_phase2Config.ErrorOutputDir))
@@ -82,7 +78,6 @@ namespace Orchestrator.Phase2
 
             return valid;
         }
-
 
 
         /// <summary>
@@ -124,9 +119,7 @@ namespace Orchestrator.Phase2
         }
 
 
-        /// <summary>
-        /// Run Phase 2 workflow
-        /// </summary>
+
         public async Task<Phase2Result> RunAsync()
         {
             Console.WriteLine("╔════════════════════════════════════════════════════════╗");
@@ -153,8 +146,40 @@ namespace Orchestrator.Phase2
 
                 Console.WriteLine($"   ✅ Loaded {students.Count} students with Client IDs");
 
-                // Step 3: Process PDFs
-                Console.WriteLine($"\n📋 Step 3: Processing PDFs from: {_phase2Config.DownloadPath}");
+                // ✅ Step 3: Create validation records from ALL students
+                Console.WriteLine($"\n📋 Step 3: Creating validation records...");
+                var validationRecords = students.Select(s => new ValidationRecord
+                {
+                    // Copy all student fields
+                    LastName = s.LastName,
+                    FirstName = s.FirstName,
+                    School = s.School,
+                    Grade = s.Grade,
+                    DateOfBirth = s.DateOfBirth,
+                    MedicareNumber = s.MedicareNumber,
+                    ConsentStatus = s.ConsentStatus,
+                    Tdap = s.Tdap,
+                    HPV = s.HPV,
+                    ClientId = s.ClientId,
+                    IsFileRoseDefault = s.IsFileRoseDefault,
+                    ClientIdStatus = (int)s.ClientIdStatus,
+                    BestMatch = s.BestMatch,
+
+                    // Initialize validation fields
+                    FileFound = false,
+                    IsMatch = false,
+                    ExtractedName = string.Empty,
+                    NormalizedPDF = string.Empty,
+                    NormalizedCSV = NormalizeName(s.FirstName, s.LastName),
+                    IsPdfSave = false,
+                    MatchScore = 0.0,
+                    ValidationNotes = string.Empty
+                }).ToList();
+
+                Console.WriteLine($"   ✅ Created {validationRecords.Count} validation records");
+
+                // Step 4: Process PDFs
+                Console.WriteLine($"\n📋 Step 4: Processing PDFs from: {_phase2Config.DownloadPath}");
                 var pdfFiles = Directory.GetFiles(_phase2Config.DownloadPath, "*.pdf");
                 result.TotalPdfs = pdfFiles.Length;
 
@@ -162,11 +187,10 @@ namespace Orchestrator.Phase2
 
                 if (pdfFiles.Length == 0)
                 {
-                    Console.WriteLine("   ⚠️  No PDFs found. Please download PDFs to the DownloadPath folder.");
-                    return result;
+                    Console.WriteLine("   ⚠️  No PDFs found in DownloadPath.");
+                    Console.WriteLine("   💡 User will need to manually download PDFs before running Pre-Phase 3");
                 }
 
-                var uploadRecords = new List<UploadRecord>();
 
                 foreach (var pdfPath in pdfFiles)
                 {
@@ -175,7 +199,6 @@ namespace Orchestrator.Phase2
 
                     try
                     {
-                        // Extract names from PDF
                         var (firstName, lastName, pageCount) = PdfProcessor.ProcessSinglePdf(
                             pdfPath,
                             _phase2Config.DebugMode,
@@ -185,76 +208,99 @@ namespace Orchestrator.Phase2
                             firstName == "Error" || lastName == "Error")
                         {
                             Console.WriteLine($"      ❌ Failed to extract names from PDF");
-
-                            // ✅ Move to error directory
                             CopyToErrorDirectory(pdfPath, "NameExtractionFailed");
-
                             result.FailedToMatch++;
                             result.ErrorMessages.Add($"{fileName}: Name extraction failed");
+
+                            // ✅ IMPORTANT: Don't continue - we can't match if we can't extract names
                             continue;
                         }
 
                         Console.WriteLine($"      Extracted: {firstName} {lastName}");
 
+                        // ✅ Find matching validation record
+                        var (matchedRecord, matchScore) = FindBestMatchingValidationRecord(
+                            firstName,
+                            lastName,
+                            validationRecords);
 
-                        StudentRecord? matchedStudent = null;
-                        if (_phase2Config.UseFuzzyMatching)
+                        // ✅ CRITICAL FIX: Update FileFound regardless of match quality
+                        if (matchedRecord != null)
                         {
+                            // File exists AND we found a potential match in CSV
+                            matchedRecord.FileFound = true;
+                            matchedRecord.ExtractedName = $"{firstName} {lastName}";
+                            matchedRecord.NormalizedPDF = NormalizeName(firstName, lastName);
+                            matchedRecord.MatchScore = matchScore;
 
-                            // ✅ ENHANCED: Use fuzzy matching instead of exact match
-                            matchedStudent = FindBestMatchingStudent(
-                               firstName,
-                               lastName,
-                               students);
+                            // ✅ IsMatch depends on the match score threshold (85%)
+                            matchedRecord.IsMatch = matchScore >= 85.0;
+
+                            if (matchScore >= 100)
+                            {
+                                matchedRecord.ValidationNotes = "Exact match";
+                            }
+                            else if (matchScore >= 85.0)
+                            {
+                                matchedRecord.ValidationNotes = $"Good match ({matchScore:F1}%)";
+                            }
+                            else
+                            {
+                                matchedRecord.ValidationNotes = $"Weak match ({matchScore:F1}%) - needs review";
+                            }
+
+                            Console.WriteLine($"      ✅ Matched to Client ID: {matchedRecord.ClientId} (Score: {matchScore:F1}%)");
+                            Console.WriteLine($"         FileFound: {matchedRecord.FileFound}");
+                            Console.WriteLine($"         IsMatch: {matchedRecord.IsMatch}");
+
+                            result.SuccessfullyProcessed++;
                         }
                         else
                         {
-                            // Find matching student using exact name
-                            matchedStudent = students.FirstOrDefault(s =>
-                            s.FirstName.Equals(firstName, StringComparison.OrdinalIgnoreCase) &&
-                            s.LastName.Equals(lastName, StringComparison.OrdinalIgnoreCase));
-
-                        }
-
-
-                        if (matchedStudent == null)
-                        {
+                            // ✅ File exists but NO match found in CSV at all
                             Console.WriteLine($"      ⚠️  No matching student found in CSV");
+                            Console.WriteLine($"      💡 This PDF exists but doesn't match any student record");
 
-                            // ✅ Move to error directory
-                            CopyToErrorDirectory(pdfPath, "NameExtractionFailed");
+                            // ✅ Optional: Create an "orphan" validation record for this PDF
+                            var orphanRecord = new ValidationRecord
+                            {
+                                FileFound = true,
+                                IsMatch = false,
+                                ExtractedName = $"{firstName} {lastName}",
+                                NormalizedPDF = NormalizeName(firstName, lastName),
+                                NormalizedCSV = "",
+                                MatchScore = 0.0,
+                                ValidationNotes = "PDF found but no matching student in CSV",
+                                ClientId = "",
+                                FirstName = firstName,
+                                LastName = lastName,
+                                // Other fields remain empty
+                            };
 
+                            validationRecords.Add(orphanRecord);
+
+                            CopyToErrorDirectory(pdfPath, $"NoMatch_{firstName}_{lastName}");
                             result.FailedToMatch++;
                             result.ErrorMessages.Add($"{fileName}: No match for {firstName} {lastName}");
-                            continue;
                         }
-
-                        Console.WriteLine($"      ✅ Matched to Client ID: {matchedStudent.ClientId}");
-
-                        // Process based on grade
-                        var generated = await ProcessPdfForGrade(
-                            pdfPath,
-                            matchedStudent,
-                            pageCount,
-                            uploadRecords);
-
-                        result.FilesGenerated += generated;
-                        result.SuccessfullyProcessed++;
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"      ❌ Error: {ex.Message}");
+                        CopyToErrorDirectory(pdfPath, "ProcessingError");
                         result.FailedToMatch++;
                         result.ErrorMessages.Add($"{fileName}: {ex.Message}");
                     }
                 }
 
-                // Step 4: Generate Upload CSV
-                Console.WriteLine($"\n📋 Step 4: Generating Upload_to_PHIS.csv...");
-                GenerateUploadCsv(uploadRecords);
 
-                // Step 5: Display summary
-                DisplaySummary(result, uploadRecords.Count);
+
+                // Step 5: Generate Validation CSV
+                Console.WriteLine($"\n📋 Step 5: Generating Validation_Results.csv...");
+                GenerateValidationCsv(validationRecords);
+
+                // Step 6: Display summary
+                DisplaySummary(result, validationRecords);
 
                 return result;
             }
@@ -269,176 +315,207 @@ namespace Orchestrator.Phase2
 
 
 
+
+
+        ///// <summary>
+        ///// Run Phase 2 workflow
+        ///// </summary>
+        //public async Task<Phase2Result> RunAsyncOLD()
+        //{
+        //    Console.WriteLine("╔════════════════════════════════════════════════════════╗");
+        //    Console.WriteLine("║         ConsentSync - Phase 2: Process PDFs            ║");
+        //    Console.WriteLine("╚════════════════════════════════════════════════════════╝\n");
+
+        //    var result = new Phase2Result();
+
+        //    try
+        //    {
+        //        // Step 1: Validate folders
+        //        Console.WriteLine("📋 Step 1: Validating folders...");
+        //        if (!ValidateFolders())
+        //        {
+        //            result.HasErrors = true;
+        //            return result;
+        //        }
+
+        //        // Step 2: Load student CSV
+        //        Console.WriteLine("\n📋 Step 2: Loading student data...");
+        //        var students = _csvRepo.ReadAll()
+        //            .Where(s => !string.IsNullOrWhiteSpace(s.ClientId))
+        //            .ToList();
+
+        //        Console.WriteLine($"   ✅ Loaded {students.Count} students with Client IDs");
+
+        //        // Step 3: Process PDFs
+        //        Console.WriteLine($"\n📋 Step 3: Processing PDFs from: {_phase2Config.DownloadPath}");
+        //        var pdfFiles = Directory.GetFiles(_phase2Config.DownloadPath, "*.pdf");
+        //        result.TotalPdfs = pdfFiles.Length;
+
+        //        Console.WriteLine($"   Found {pdfFiles.Length} PDF files to process");
+
+        //        if (pdfFiles.Length == 0)
+        //        {
+        //            Console.WriteLine("   ⚠️  No PDFs found. Please download PDFs to the DownloadPath folder.");
+        //            return result;
+        //        }
+
+        //        var uploadRecords = new List<UploadRecord>();
+
+        //        foreach (var pdfPath in pdfFiles)
+        //        {
+        //            var fileName = Path.GetFileName(pdfPath);
+        //            Console.WriteLine($"\n   Processing: {fileName}");
+
+        //            try
+        //            {
+        //                // Extract names from PDF
+        //                var (firstName, lastName, pageCount) = PdfProcessor.ProcessSinglePdf(
+        //                    pdfPath,
+        //                    _phase2Config.DebugMode,
+        //                    _phase2Config.DebugOutputDir);
+
+        //                if (firstName == "Unknown" || lastName == "Unknown" ||
+        //                    firstName == "Error" || lastName == "Error")
+        //                {
+        //                    Console.WriteLine($"      ❌ Failed to extract names from PDF");
+
+        //                    // ✅ Move to error directory
+        //                    CopyToErrorDirectory(pdfPath, "NameExtractionFailed");
+
+        //                    result.FailedToMatch++;
+        //                    result.ErrorMessages.Add($"{fileName}: Name extraction failed");
+        //                    continue;
+        //                }
+
+        //                Console.WriteLine($"      Extracted: {firstName} {lastName}");
+
+
+        //                StudentRecord? matchedStudent = null;
+        //                if (_phase2Config.UseFuzzyMatching)
+        //                {
+
+        //                    // ✅ ENHANCED: Use fuzzy matching instead of exact match
+        //                    matchedStudent = FindBestMatchingStudent(
+        //                       firstName,
+        //                       lastName,
+        //                       students);
+        //                }
+        //                else
+        //                {
+        //                    // Find matching student using exact name
+        //                    matchedStudent = students.FirstOrDefault(s =>
+        //                    s.FirstName.Equals(firstName, StringComparison.OrdinalIgnoreCase) &&
+        //                    s.LastName.Equals(lastName, StringComparison.OrdinalIgnoreCase));
+
+        //                }
+
+
+        //                if (matchedStudent == null)
+        //                {
+        //                    Console.WriteLine($"      ⚠️  No matching student found in CSV");
+
+        //                    // ✅ Move to error directory
+        //                    CopyToErrorDirectory(pdfPath, "NameExtractionFailed");
+
+        //                    result.FailedToMatch++;
+        //                    result.ErrorMessages.Add($"{fileName}: No match for {firstName} {lastName}");
+        //                    continue;
+        //                }
+
+        //                Console.WriteLine($"      ✅ Matched to Client ID: {matchedStudent.ClientId}");
+
+        //                // Process based on grade
+        //                var generated = await ProcessPdfForGrade(
+        //                    pdfPath,
+        //                    matchedStudent,
+        //                    pageCount,
+        //                    uploadRecords);
+
+        //                result.FilesGenerated += generated;
+        //                result.SuccessfullyProcessed++;
+        //            }
+        //            catch (Exception ex)
+        //            {
+        //                Console.WriteLine($"      ❌ Error: {ex.Message}");
+        //                result.FailedToMatch++;
+        //                result.ErrorMessages.Add($"{fileName}: {ex.Message}");
+        //            }
+        //        }
+
+        //        // Step 4: Generate Upload CSV
+        //        Console.WriteLine($"\n📋 Step 4: Generating Upload_to_PHIS.csv...");
+        //        GenerateUploadCsv(uploadRecords);
+
+        //        // Step 5: Display summary
+        //        DisplaySummary(result, uploadRecords.Count);
+
+        //        return result;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Console.WriteLine($"\n❌ FATAL ERROR: {ex.Message}");
+        //        Console.WriteLine($"Stack trace: {ex.StackTrace}");
+        //        result.HasErrors = true;
+        //        return result;
+        //    }
+        //}
+
+
+
+
+
         /// <summary>
-        /// ✅ NEW: Find best matching student using fuzzy matching
-        /// Handles accents (Félix vs F lix) and minor spelling variations
+        /// ✅ Find best matching validation record using fuzzy matching
+        /// Returns the best match even if score is below threshold
         /// </summary>
-        private StudentRecord? FindBestMatchingStudent(
+        private (ValidationRecord? record, double score) FindBestMatchingValidationRecord(
             string pdfFirstName,
             string pdfLastName,
-            List<StudentRecord> students)
+            List<ValidationRecord> records)
         {
-            // First try exact match (fastest)
-            var exactMatch = students.FirstOrDefault(s =>
-                s.FirstName.Equals(pdfFirstName, StringComparison.OrdinalIgnoreCase) &&
-                s.LastName.Equals(pdfLastName, StringComparison.OrdinalIgnoreCase));
+            // Try exact match first
+            var exactMatch = records.FirstOrDefault(r =>
+                r.FirstName.Equals(pdfFirstName, StringComparison.OrdinalIgnoreCase) &&
+                r.LastName.Equals(pdfLastName, StringComparison.OrdinalIgnoreCase));
 
             if (exactMatch != null)
             {
                 Console.WriteLine($"         Exact match found");
-                return exactMatch;
+                return (exactMatch, 100.0);
             }
 
-            // Use fuzzy matching for accented names
+            // Use fuzzy matching
             Console.WriteLine($"         No exact match - using fuzzy matching...");
 
-            var matches = students
-                .Select(s =>
+            var matches = records
+                .Select(r =>
                 {
-                    var nameScore = _fuzzyMatcher.CalculateNameMatchScore(
-                        pdfFirstName,
-                        pdfLastName,
-                        s.FirstName,
-                        s.LastName);
-
-                    return new { Student = s, Score = nameScore };
+                    var score = _fuzzyMatcher.CalculateNameMatchScore(
+                        pdfFirstName, pdfLastName,
+                        r.FirstName, r.LastName);
+                    return new { Record = r, Score = score };
                 })
-                .Where(m => m.Score >= 80.0)  // 80% threshold for Phase 2
+                .Where(m => m.Score >= 60.0)  // ✅ Lower threshold to 60% to catch weak matches
                 .OrderByDescending(m => m.Score)
                 .ToList();
 
             if (matches.Count == 0)
             {
-                Console.WriteLine($"         No fuzzy matches found (threshold: 80%)");
-                return null;
+                Console.WriteLine($"         No matches found (even at 60% threshold)");
+                return (null, 0.0);
             }
 
             var bestMatch = matches.First();
-            Console.WriteLine($"         Fuzzy match: {bestMatch.Student.FirstName} {bestMatch.Student.LastName} (score: {bestMatch.Score:F1}%)");
+            Console.WriteLine($"         Fuzzy match: {bestMatch.Record.FirstName} {bestMatch.Record.LastName} (score: {bestMatch.Score:F1}%)");
 
-            // If score is very high (>= 95%), auto-accept
-            if (bestMatch.Score >= 95.0)
-            {
-                Console.WriteLine($"         ✅ High confidence match - auto-accepted");
-                return bestMatch.Student;
-            }
-
-            // If multiple similar scores, be cautious
-            if (matches.Count > 1)
-            {
-                var secondBest = matches[1];
-                var scoreDiff = bestMatch.Score - secondBest.Score;
-
-                if (scoreDiff < 5.0)
-                {
-                    Console.WriteLine($"         ⚠️  Ambiguous: {matches.Count} similar matches (diff: {scoreDiff:F1}%)");
-                    Console.WriteLine($"            1. {bestMatch.Student.FirstName} {bestMatch.Student.LastName} ({bestMatch.Score:F1}%)");
-                    Console.WriteLine($"            2. {secondBest.Student.FirstName} {secondBest.Student.LastName} ({secondBest.Score:F1}%)");
-                    return null;  // Too ambiguous - require manual review
-                }
-            }
-
-            // Accept best match if score is good
-            if (bestMatch.Score >= 85.0)
-            {
-                Console.WriteLine($"         ✅ Good match - accepted");
-                return bestMatch.Student;
-            }
-
-            Console.WriteLine($"         ⚠️  Score too low ({bestMatch.Score:F1}% < 85%)");
-            return null;
+            // ✅ Return the best match regardless of score
+            // The caller will decide if IsMatch should be true based on threshold
+            return (bestMatch.Record, bestMatch.Score);
         }
 
 
 
-        /// <summary>
-        /// Process PDF based on student's grade
-        /// </summary>
-        private async Task<int> ProcessPdfForGrade(
-            string sourcePdfPath,
-            StudentRecord student,
-            int pageCount,
-            List<UploadRecord> uploadRecords)
-        {
-            int filesGenerated = 0;
-            var schoolYear = _schoolContext.SchoolYear;
-            var grade = student.Grade.Trim();
-
-            // Determine vaccine types based on grade
-            string[] vaccineTypes;
-
-            if (grade == "7" || grade.Contains("Grade 7", StringComparison.OrdinalIgnoreCase))
-            {
-                vaccineTypes = new[] { "HPV9", "Tdap" };
-                Console.WriteLine($"      Grade 7 detected → Generating 2 files (HPV9, Tdap)");
-            }
-            else if (grade == "9" || grade.Contains("Grade 9", StringComparison.OrdinalIgnoreCase))
-            {
-                vaccineTypes = new[] { "MenCACYW135" };
-                Console.WriteLine($"      Grade 9 detected → Generating 1 file (MenCACYW135)");
-            }
-            else
-            {
-                Console.WriteLine($"      ⚠️  Unknown grade: {grade} - defaulting to no vaccines");
-                return 0;
-            }
-
-            // Generate file for each vaccine type
-            foreach (var vaccineType in vaccineTypes)
-            {
-                var documentTitle = $"{student.ClientId}_consent{vaccineType}_{schoolYear}";
-                var newFileName = $"{documentTitle}.pdf";
-                var destinationPath = Path.Combine(_phase2Config.RenamedPath, newFileName);
-
-                // Copy and rename file
-                File.Copy(sourcePdfPath, destinationPath, overwrite: true);
-                Console.WriteLine($"         → Created: {newFileName}");
-
-                // Add to upload records
-                uploadRecords.Add(new UploadRecord
-                {
-                    ClientID = student.ClientId,
-                    LastName = student.LastName,
-                    FirstName = student.FirstName,
-                    DocumentTitle = documentTitle,
-                    Description = $"Consent{vaccineType}",
-                    IsFeuilleRose = false,
-                    Status = "",
-                    IsFeuilleRoseUpload = false
-                });
-
-                filesGenerated++;
-            }
-
-            await Task.CompletedTask;
-            return filesGenerated;
-        }
-
-
-        /// <summary>
-        /// Generate Upload_to_PHIS.csv
-        /// </summary>
-        private void GenerateUploadCsv(List<UploadRecord> records)
-        {
-            var outputPath = Path.Combine(_phase2Config.RenamedPath, _phase2Config.UploadCsv);
-
-            using (var writer = new StreamWriter(outputPath, false, Encoding.UTF8))
-            using (var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture)))
-            {
-                csv.Context.RegisterClassMap<UploadRecordMap>();
-                csv.WriteRecords(records);
-            }
-
-            Console.WriteLine($"   ✅ Generated: {outputPath}");
-            Console.WriteLine($"   📊 Total records: {records.Count}");
-        }
-
-
-
-        /// <summary>
-        /// Display final summary
-        /// </summary>
-        private void DisplaySummary(Phase2Result result, int uploadRecordCount)
+        private void DisplaySummary(Phase2Result result, List<ValidationRecord> validationRecords)
         {
             Console.WriteLine("\n" + new string('═', 60));
             Console.WriteLine("📊 PHASE 2 COMPLETE - Final Summary");
@@ -446,26 +523,77 @@ namespace Orchestrator.Phase2
             Console.WriteLine($"Total PDFs found: {result.TotalPdfs}");
             Console.WriteLine($"✅ Successfully processed: {result.SuccessfullyProcessed}");
             Console.WriteLine($"❌ Failed to match: {result.FailedToMatch}");
-            Console.WriteLine($"📄 Files generated: {result.FilesGenerated}");
-            Console.WriteLine($"📋 Upload records created: {uploadRecordCount}");
+            Console.WriteLine($"\n📋 Validation CSV Statistics:");
+            Console.WriteLine($"   Total students: {validationRecords.Count}");
+            Console.WriteLine($"   Files found: {validationRecords.Count(r => r.FileFound)}");
+            Console.WriteLine($"   Files missing: {validationRecords.Count(r => !r.FileFound)}");
+            Console.WriteLine($"   Matched: {validationRecords.Count(r => r.IsMatch)}");
+            Console.WriteLine($"   Needs review: {validationRecords.Count(r => !r.FileFound || !r.IsMatch)}");
             Console.WriteLine(new string('═', 60));
 
             if (result.ErrorMessages.Count > 0)
             {
-                Console.WriteLine($"\n⚠️  Errors encountered:");
+                Console.WriteLine($"\n⚠️  Errors:");
                 foreach (var error in result.ErrorMessages.Take(10))
                 {
                     Console.WriteLine($"   - {error}");
                 }
-                if (result.ErrorMessages.Count > 10)
+            }
+
+            Console.WriteLine($"\n✅ Next Step: Review Validation_Results.csv");
+            Console.WriteLine($"   - Fix records where FileFound=false or IsMatch=false");
+            Console.WriteLine($"   - Then run Pre-Phase 3 to process validated records");
+        }
+
+
+        /// <summary>
+        /// ✅ Normalize name for comparison (removes accents, uppercases)
+        /// </summary>
+        private string NormalizeName(string firstName, string lastName)
+        {
+            var normalizedFirst = RemoveAccents(firstName.Trim().ToUpperInvariant());
+            var normalizedLast = RemoveAccents(lastName.Trim().ToUpperInvariant());
+            return $"{normalizedFirst} {normalizedLast}";
+        }
+
+        private string RemoveAccents(string text)
+        {
+            var normalizedString = text.Normalize(NormalizationForm.FormD);
+            var stringBuilder = new StringBuilder();
+
+            foreach (var c in normalizedString)
+            {
+                var unicodeCategory = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
+                if (unicodeCategory != System.Globalization.UnicodeCategory.NonSpacingMark)
                 {
-                    Console.WriteLine($"   ... and {result.ErrorMessages.Count - 10} more");
+                    stringBuilder.Append(c);
                 }
             }
 
-            if (result.SuccessfullyProcessed > 0)
+            return stringBuilder.ToString().Normalize(NormalizationForm.FormC);
+        }
+
+        /// <summary>
+        /// ✅ Generate Validation_Results.csv for manual review
+        /// </summary>
+        private void GenerateValidationCsv(List<ValidationRecord> records)
+        {
+            var outputPath = Path.Combine(_phase2Config.RenamedPath, _phase2Config.ValidationResultsCsv);
+
+            using (var writer = new StreamWriter(outputPath, false, Encoding.UTF8))
+            using (var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture)))
             {
-                Console.WriteLine($"\n✅ Ready for Phase 3: Upload to PHIS");
+                csv.Context.RegisterClassMap<ValidationRecordMap>();
+                csv.WriteRecords(records);
+            }
+
+            Console.WriteLine($"   ✅ Generated: {outputPath}");
+            Console.WriteLine($"   📊 Total records: {records.Count}");
+
+            var needsReview = records.Count(r => !r.FileFound || !r.IsMatch);
+            if (needsReview > 0)
+            {
+                Console.WriteLine($"   ⚠️  {needsReview} records need manual review (FileFound=false or IsMatch=false)");
             }
         }
 

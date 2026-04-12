@@ -3,6 +3,7 @@ using CsvProcessing;
 using Microsoft.Extensions.Configuration;
 using Orchestrator.Phase1;
 using Orchestrator.Phase2;
+using Orchestrator.PrePhase3;
 using System.Text;
 
 
@@ -127,6 +128,32 @@ namespace Orchestrator
                 }
 
                 // ═══════════════════════════════════════════════════════
+                // PRE-PHASE 3: Validate and Prepare for Upload
+                // ═══════════════════════════════════════════════════════
+                var prePhase3Config = ConfigurationService.GetPrePhase3Config();
+
+                if (prePhase3Config.Enabled)
+                {
+                    Console.WriteLine("\n" + new string('═', 70));
+                    Console.WriteLine($"📋 PRE-PHASE 3: {prePhase3Config.Description}");
+                    Console.WriteLine(new string('═', 70));
+
+                    if (!ConfirmPhase("Pre-Phase 3"))
+                    {
+                        Console.WriteLine("⏭️  Pre-Phase 3 skipped");
+                    }
+                    else
+                    {
+                        await RunPrePhase3Async(config);
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("\n⏭️  Pre-Phase 3 disabled in configuration");
+                }
+
+
+                // ═══════════════════════════════════════════════════════
                 // PHASE 3: Upload Documents to PHIS
                 // ═══════════════════════════════════════════════════════
                 if (phase3Config.Enabled)
@@ -236,6 +263,44 @@ namespace Orchestrator
             }
         }
 
+
+
+
+
+
+
+        /// <summary>
+        /// Execute Pre-Phase 3: Validate and prepare PDFs for upload
+        /// </summary>
+        static async Task RunPrePhase3Async(IConfiguration config)
+        {
+            try
+            {
+                var orchestrator = new PrePhase3Orchestrator(config);
+                var result = await orchestrator.RunAsync();
+
+                if (result.HasErrors)
+                {
+                    Console.WriteLine("\n❌ Pre-Phase 3 completed with errors");
+                }
+                else if (result.SkippedMissingPdf > 0)
+                {
+                    Console.WriteLine($"\n⚠️  Pre-Phase 3 completed - {result.SkippedMissingPdf} PDFs missing");
+                }
+                else
+                {
+                    Console.WriteLine("\n✅ Pre-Phase 3 completed successfully!");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Pre-Phase 3 error: {ex.Message}");
+            }
+        }
+
+
+
+
         /// <summary>
         /// Execute Phase 3: Upload documents to PHIS
         /// </summary>
@@ -260,6 +325,13 @@ namespace Orchestrator
                 Console.WriteLine($"❌ Phase 3 error: {ex.Message}");
             }
         }
+
+
+
+
+
+
+
 
         #endregion Phase Execution
 
