@@ -69,7 +69,7 @@ namespace Orchestrator.Phase1
                 Console.WriteLine("📋 Step 1: Loading processed CSV...");
                 if (!_csvRepo.ProcessedCsvExists())
                 {
-                    Console.WriteLine("❌ Processed CSV not found. Please run pre-processing first.");
+                    Console.WriteLine("❌ Processed CSV not found. Please run  first.");
                     return result;
                 }
 

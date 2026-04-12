@@ -22,39 +22,38 @@ namespace CsvProcessing
         private readonly Dictionary<string, object?> _additionalColumns;
         private readonly List<EncodingConfiguration> _encodingConfigs;
 
+
+
         public StudentCsvProcessor(IConfiguration config)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
 
-            // Load CSV processing configuration
-            string csvPath = _config["CsvProcessing:InputCsvPath"]
-                ?? throw new InvalidOperationException("CsvProcessing:InputCsvPath is not configured");
+            // ✅ FIX: Use ConfigurationService to get resolved paths instead of reading raw config
+            var csvConfig = ConsentSyncCore.Services.ConfigurationService.GetCsvConfig();
 
-            string csvFileName = _config["CsvProcessing:InputCsvFileName"]
-                ?? throw new InvalidOperationException("CsvProcessing:InputCsvFileName is not configured");
+            // ✅ Paths are now pre-resolved by ConfigurationService
+            _inputCsvPath = Path.Combine(csvConfig.InputCsvPath, csvConfig.InputCsvFileName);
+            _outputCsvPath = Path.Combine(csvConfig.OutputCsvPath, csvConfig.OutputCsvFileName);
 
-            _inputCsvPath = Path.Combine(csvPath, csvFileName);
+            // ✅ DEBUG: Verify paths are resolved
+            Console.WriteLine($"\n📁 StudentCsvProcessor Initialized:");
+            Console.WriteLine($"   Input Path:  {_inputCsvPath}");
+            Console.WriteLine($"   Output Path: {_outputCsvPath}");
 
-            string outputPath = _config["CsvProcessing:OutputCsvPath"]
-                ?? throw new InvalidOperationException("CsvProcessing:OutputCsvPath is not configured");
+            if (_inputCsvPath.Contains("{") || _outputCsvPath.Contains("{"))
+            {
+                Console.WriteLine($"   ⚠️  WARNING: Placeholders still present!");
+                throw new InvalidOperationException("Path placeholders were not resolved. Check ConfigurationService.ResolvePath()");
+            }
 
-            string outputFileName = _config["CsvProcessing:OutputCsvFileName"]
-                ?? throw new InvalidOperationException("CsvProcessing:OutputCsvFileName is not configured");
-
-            _outputCsvPath = Path.Combine(outputPath, outputFileName);
-
-            _dateOfBirthColumn = _config["CsvProcessing:DateOfBirthColumn"] ?? "Date of Birth";
-            _dateFormat = _config["CsvProcessing:DateFormat"] ?? "yyyy-MM-dd";
-
-            // Load input date formats from configuration
-            _inputDateFormats = _config.GetSection("CsvProcessing:InputDateFormats").Get<string[]>()
-                ?? new[] { "dd/MM/yyyy", "MM/dd/yyyy", "yyyy-MM-dd" };
+            _dateOfBirthColumn = csvConfig.DateOfBirthColumn;
+            _dateFormat = csvConfig.DateFormat;
+            _inputDateFormats = csvConfig.InputDateFormats;
+            _lastNameColumn = csvConfig.LastNameColumn;
 
             Console.WriteLine($"📅 Configured to parse input dates using {_inputDateFormats.Length} format(s): {string.Join(", ", _inputDateFormats)}");
 
-            _lastNameColumn = _config["CsvProcessing:LastNameColumn"] ?? "Last Name";
-
-            // Load additional columns from configuration
+            // Load additional columns from configuration (still need raw config for this)
             _additionalColumns = new Dictionary<string, object?>();
             var additionalColumnsSection = _config.GetSection("CsvProcessing:AdditionalColumns");
             foreach (var column in additionalColumnsSection.GetChildren())
@@ -99,7 +98,11 @@ namespace CsvProcessing
             if (!string.IsNullOrEmpty(outputDir) && !Directory.Exists(outputDir))
             {
                 Directory.CreateDirectory(outputDir);
-                Console.WriteLine($"Created output directory: {outputDir}");
+                Console.WriteLine($"✅ Created output directory: {outputDir}");
+            }
+            else if (!string.IsNullOrEmpty(outputDir))
+            {
+                Console.WriteLine($"✅ Output directory exists: {outputDir}");
             }
         }
 
