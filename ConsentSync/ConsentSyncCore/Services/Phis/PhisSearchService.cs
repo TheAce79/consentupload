@@ -1,4 +1,5 @@
 ﻿using ConsentSyncCore.Models;
+using ConsentSyncCore.Services.Matching;
 using Microsoft.Extensions.Configuration;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Support.UI;
@@ -206,6 +207,64 @@ namespace ConsentSyncCore.Services.Phis
         }
 
 
+
+        /// <summary>
+        /// Search by Medicare Number
+        /// Returns matching results for fuzzy matching
+        /// </summary>
+        public async Task<SearchResult> SearchByMedicareAsync(string medicareNumber)
+        {
+            try
+            {
+                // Check session validity
+                if (!_sessionManager.EnsureSessionValid())
+                {
+                    return SearchResult.Failed("Session validation failed");
+                }
+
+                Console.WriteLine($"   🔍 Searching by Medicare: {medicareNumber}");
+
+                // Navigate to search page
+                await EnsureOnSearchPageAsync();
+
+                // Clear previous search
+                await ClearSearchFormAsync();
+
+                // Perform Medicare search
+                await ExecuteMedicareSearchAsync(medicareNumber);
+
+                // Wait for results
+                await WaitForSearchResultsAsync();
+
+                // Extract all results
+                var results = _resultExtractor.ExtractAllResults(_driver);
+
+                // Update session activity
+                _sessionManager.UpdateActivity();
+
+                if (results.Count == 0)
+                {
+                    Console.WriteLine($"   ⚠️  No results found for Medicare: {medicareNumber}");
+                    return SearchResult.NoResults();
+                }
+
+                Console.WriteLine($"   📊 Found {results.Count} result(s)");
+
+                return SearchResult.IsSuccess(results);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("Session expired"))
+            {
+                Console.WriteLine($"   ❌ Session expired during search");
+                return SearchResult.Failed("Session expired");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Search error: {ex.Message}");
+                return SearchResult.Failed(ex.Message);
+            }
+        }
+
+
         #endregion Public API
 
 
@@ -300,6 +359,24 @@ namespace ConsentSyncCore.Services.Phis
         }
 
 
+
+        /// <summary>
+        /// Execute Medicare search
+        /// </summary>
+        private async Task ExecuteMedicareSearchAsync(string medicareNumber)
+        {
+            // Find Medicare input field
+            var medicareInput = _driver.FindElement(By.Id(
+                "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_personalHealthCardNumber"));
+
+            medicareInput.Clear();
+            medicareInput.SendKeys(medicareNumber);
+
+            Console.WriteLine($"   ✏️  Entered Medicare Number");
+
+            // Click search
+            await ClickSearchButtonAsync();
+        }
 
 
         /// <summary>

@@ -241,6 +241,9 @@ namespace Orchestrator.Phase1
             }
         }
 
+
+
+
         /// <summary>
         /// Process a single student record
         /// </summary>
@@ -263,12 +266,11 @@ namespace Orchestrator.Phase1
                     return false;
                 }
 
+                // If no results found, try fallback searches
                 if (!searchResult.HasResults)
                 {
                     Console.WriteLine($"   ⚠️  No results found");
-                    student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
-                    result.ManualReviewCount++;
-                    return false;
+                    return await TryFallbackSearchesAsync(student, result);
                 }
 
                 // Find best match using fuzzy matcher
@@ -277,10 +279,7 @@ namespace Orchestrator.Phase1
                 if (bestMatch == null)
                 {
                     Console.WriteLine($"   ⚠️  No confident match found");
-                    student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
-                    student.BestMatch = suggestion ?? "";
-                    result.ManualReviewCount++;
-                    return false;
+                    return await TryFallbackSearchesAsync(student, result);
                 }
 
                 // Check if score meets threshold
@@ -300,16 +299,7 @@ namespace Orchestrator.Phase1
                 else
                 {
                     Console.WriteLine($"   ⚠️  Score too low: {score:F2}% (threshold: {threshold}%)");
-                    student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
-                    student.BestMatch = suggestion ?? "";
-                    result.ManualReviewCount++;
-
-                    if (!string.IsNullOrEmpty(suggestion))
-                    {
-                        Console.WriteLine($"   💡 Best match saved: {suggestion}");
-                    }
-
-                    return false;
+                    return await TryFallbackSearchesAsync(student, result, suggestion);
                 }
             }
             catch (Exception ex)
@@ -320,6 +310,206 @@ namespace Orchestrator.Phase1
                 return false;
             }
         }
+
+
+
+        /// <summary>
+        /// Try fallback search strategies in order:
+        /// 1. Medicare number search (if available)
+        /// 2. Inverted date search (if no Medicare number)
+        /// </summary>
+        private async Task<bool> TryFallbackSearchesAsync(StudentRecord student, Phase1Result result, string? originalSuggestion = null)
+        {
+            // Strategy 1: Try Medicare search if available
+            if (!string.IsNullOrWhiteSpace(student.MedicareNumber))
+            {
+                Console.WriteLine($"   🔄 Trying Medicare search...");
+                var medicareSuccess = await TryMedicareSearchAsync(student, result);
+                if (medicareSuccess)
+                {
+                    return true;
+                }
+            }
+
+            // Strategy 2: Try inverted date if no Medicare number OR Medicare search failed
+            Console.WriteLine($"   🔄 Trying inverted date search...");
+            var invertedSuccess = await TryInvertedDateSearchAsync(student, result);
+            if (invertedSuccess)
+            {
+                return true;
+            }
+
+            // All fallback strategies failed - mark for manual review
+            student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
+            student.BestMatch = originalSuggestion ?? "";
+            result.ManualReviewCount++;
+
+            if (!string.IsNullOrEmpty(originalSuggestion))
+            {
+                Console.WriteLine($"   💡 Best match saved: {originalSuggestion}");
+            }
+
+            return false;
+        }
+
+
+
+
+        /// <summary>
+        /// Try searching by Medicare number as fallback
+        /// </summary>
+        private async Task<bool> TryMedicareSearchAsync(StudentRecord student, Phase1Result result)
+        {
+            try
+            {
+                var medicareResult = await _searchService!.SearchByMedicareAsync(student.MedicareNumber!);
+
+                if (!medicareResult.Success)
+                {
+                    Console.WriteLine($"   ❌ Medicare search failed: {medicareResult.ErrorMessage}");
+                    return false;
+                }
+
+                if (!medicareResult.HasResults)
+                {
+                    Console.WriteLine($"   ⚠️  No results found by Medicare number");
+                    return false;
+                }
+
+                // Medicare search should return exact matches
+                if (medicareResult.IsSingleResult)
+                {
+                    var match = medicareResult.FirstResult!;
+
+                    // Verify name similarity for safety
+                    var nameScore = _fuzzyMatcher!.CalculateNameMatchScore(
+                        student.FirstName,
+                        student.LastName,
+                        match.FirstName,
+                        match.LastName);
+
+                    // Use a lower threshold for Medicare matches since the number itself is a strong identifier
+                    if (nameScore >= 50.0) // 50% threshold for Medicare-based matches
+                    {
+                        student.ClientId = match.ClientId;
+                        student.ClientIdStatus = ClientIdStatus.Found;
+                        student.BestMatch = string.Empty;
+                        result.FoundCount++;
+                        Console.WriteLine($"   ✅ Client ID found via Medicare: {match.ClientId} (name match: {nameScore:F2}%)");
+                        return true;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"   ⚠️  Medicare match found but name mismatch (score: {nameScore:F2}%)");
+                        return false;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"   ⚠️  Multiple results ({medicareResult.Results.Count}) found by Medicare");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Medicare search error: {ex.Message}");
+                return false;
+            }
+        }
+
+
+
+
+        /// <summary>
+        /// Try searching with inverted date (MM/DD swapped to DD/MM)
+        /// Handles cases where date was incorrectly entered (e.g., 2012-12-10 should be 2012-10-12)
+        /// </summary>
+        private async Task<bool> TryInvertedDateSearchAsync(StudentRecord student, Phase1Result result)
+        {
+            try
+            {
+                // Parse the original date
+                if (!DateTime.TryParseExact(student.DateOfBirth, "yyyy-MM-dd",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateTime originalDate))
+                {
+                    Console.WriteLine($"   ⚠️  Cannot parse date for inversion: {student.DateOfBirth}");
+                    return false;
+                }
+
+                // Create inverted date by swapping day and month
+                var invertedDate = new DateTime(originalDate.Year, originalDate.Day, originalDate.Month);
+                var invertedDateString = invertedDate.ToString("yyyy-MM-dd");
+
+                // Don't search if inverted date is the same (e.g., 2012-10-10)
+                if (invertedDateString == student.DateOfBirth)
+                {
+                    Console.WriteLine($"   ℹ️  Date is symmetric, skipping inversion");
+                    return false;
+                }
+
+                Console.WriteLine($"   📅 Original: {student.DateOfBirth} → Inverted: {invertedDateString}");
+
+                // Search with inverted date
+                var searchResult = await _searchService!.SearchByDobAsync(
+                    invertedDateString,
+                    student.FirstName,
+                    student.LastName,
+                    student.MedicareNumber);
+
+                if (!searchResult.Success || !searchResult.HasResults)
+                {
+                    Console.WriteLine($"   ⚠️  No results with inverted date");
+                    return false;
+                }
+
+                Console.WriteLine($"   📊 Found {searchResult.Results.Count} result(s) with inverted date");
+
+                // Find best match
+                var (bestMatch, score, suggestion) = _fuzzyMatcher!.FindBestMatch(student, searchResult.Results);
+
+                if (bestMatch == null)
+                {
+                    Console.WriteLine($"   ⚠️  No confident match with inverted date");
+                    return false;
+                }
+
+                // Check if score meets threshold
+                var threshold = searchResult.IsSingleResult
+                    ? _fuzzyMatcher.SingleResultThreshold
+                    : _fuzzyMatcher.MultipleResultsThreshold;
+
+                if (score >= threshold)
+                {
+                    student.ClientId = bestMatch.ClientId;
+                    student.ClientIdStatus = ClientIdStatus.Found;
+                    student.BestMatch = string.Empty;
+                    result.FoundCount++;
+                    Console.WriteLine($"   ✅ Client ID found with INVERTED date: {bestMatch.ClientId} (score: {score:F2}%)");
+                    Console.WriteLine($"   ⚠️  NOTE: Date in CSV may be incorrect! Original: {student.DateOfBirth}, Worked: {invertedDateString}");
+                    return true;
+                }
+                else
+                {
+                    Console.WriteLine($"   ⚠️  Score still too low with inverted date: {score:F2}% (threshold: {threshold}%)");
+                    return false;
+                }
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                // Invalid date combination (e.g., trying to create Feb 30th)
+                Console.WriteLine($"   ⚠️  Date inversion creates invalid date");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Inverted date search error: {ex.Message}");
+                return false;
+            }
+        }
+
+
 
 
         #endregion Student Processing
