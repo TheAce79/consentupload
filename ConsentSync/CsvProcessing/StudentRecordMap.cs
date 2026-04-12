@@ -22,7 +22,7 @@ namespace CsvProcessing
             Map(m => m.Tdap).Name("Tdap");
             Map(m => m.HPV).Name("HPV");
             Map(m => m.ClientId).Name("ClientId");
-            Map(m => m.IsFileRoseDefaut).Name("IsFileRoseDefaut");
+            Map(m => m.IsFileRoseDefault).Name("IsFileRoseDefault");
             Map(m => m.ClientIdStatus).Name("ClientIdStatus")
                 .TypeConverter<ClientIdStatusConverter>();
             Map(m => m.BestMatch).Name("BestMatch").Optional(); // Optional for backward compatibility

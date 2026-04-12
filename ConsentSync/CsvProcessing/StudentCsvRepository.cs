@@ -333,7 +333,7 @@ namespace CsvProcessing
             record["Tdap"] = student.Tdap;
             record["HPV"] = student.HPV;
             record["ClientId"] = student.ClientId;
-            record["IsFileRoseDefaut"] = student.IsFileRoseDefaut.ToString();
+            record["IsFileRoseDefault"] = student.IsFileRoseDefault.ToString();
             record["ClientIdStatus"] = ((int)student.ClientIdStatus).ToString();
             record["BestMatch"] = student.BestMatch;
             return record;
@@ -356,7 +356,7 @@ namespace CsvProcessing
                 Tdap = record["Tdap"],
                 HPV = record["HPV"],
                 ClientId = record["ClientId"],
-                IsFileRoseDefaut = bool.TryParse(record["IsFileRoseDefaut"], out var val) && val,
+                IsFileRoseDefault = bool.TryParse(record["IsFileRoseDefault"], out var val) && val,
                 ClientIdStatus = Enum.TryParse<ClientIdStatus>(record["ClientIdStatus"], out var status)
                     ? status
                     : ClientIdStatus.NotProcessed,
@@ -399,7 +399,7 @@ namespace CsvProcessing
                 Found = allStudents.Count(s => s.ClientIdStatus == ClientIdStatus.Found),
                 NeedsManualReview = allStudents.Count(s => s.ClientIdStatus == ClientIdStatus.NeedsManualReview),
                 WithClientIds = allStudents.Count(s => !string.IsNullOrWhiteSpace(s.ClientId)),
-                WithFileRose = allStudents.Count(s => s.IsFileRoseDefaut)
+                WithFileRose = allStudents.Count(s => s.IsFileRoseDefault)
             };
         }
 
