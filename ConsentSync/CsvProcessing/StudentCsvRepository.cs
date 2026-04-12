@@ -21,6 +21,9 @@ namespace CsvProcessing
 
 
         // Constructor with optional IConfiguration parameter for flexibility
+
+
+        // Constructor with optional IConfiguration parameter for flexibility
         public StudentCsvRepository(IConfiguration? config = null)
         {
             // Use provided config or get from ConfigurationService
@@ -30,6 +33,17 @@ namespace CsvProcessing
             _inputCsvFullPath = ConfigurationService.GetInputCsvFullPath();
             _outputCsvFullPath = ConfigurationService.GetOutputCsvFullPath();
 
+            // ✅ DEBUG: Verify paths are resolved
+            Console.WriteLine($"\n📁 StudentCsvRepository Initialized:");
+            Console.WriteLine($"   Input Path:  {_inputCsvFullPath}");
+            Console.WriteLine($"   Output Path: {_outputCsvFullPath}");
+
+            // ✅ Check if placeholders are still present
+            if (_outputCsvFullPath.Contains("{") || _outputCsvFullPath.Contains("}"))
+            {
+                Console.WriteLine($"   ⚠️  WARNING: Placeholders not resolved in output path!");
+                Console.WriteLine($"   ⚠️  Raw path: {_outputCsvFullPath}");
+            }
         }
 
 

@@ -214,7 +214,7 @@ namespace ConsentSyncCore.Services
         public bool DisablePopupBlocking { get; set; }
         public bool HideAutomationIndicators { get; set; }
         public bool Headless { get; set; }
-        public string DefaultDownloadDirectory { get; set; } = string.Empty;
+        public string DefaultDownloadChromeDirectory { get; set; } = string.Empty;
     }
 
     /// <summary>

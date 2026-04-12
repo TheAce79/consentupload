@@ -69,7 +69,7 @@ namespace ConsentSyncCore.Services.Browser
         public IWebDriver CreateDriverWithDownloadDirectory(string downloadPath)
         {
             var tempConfig = _chromeConfig;
-            tempConfig.DefaultDownloadDirectory = downloadPath;
+            tempConfig.DefaultDownloadChromeDirectory = downloadPath;
 
             return CreateDriver();
         }
@@ -196,21 +196,21 @@ namespace ConsentSyncCore.Services.Browser
         /// </summary>
         private void ConfigureDownloadDirectory(ChromeOptions options)
         {
-            if (!string.IsNullOrWhiteSpace(_chromeConfig.DefaultDownloadDirectory))
+            if (!string.IsNullOrWhiteSpace(_chromeConfig.DefaultDownloadChromeDirectory))
             {
                 // Ensure directory exists
-                Directory.CreateDirectory(_chromeConfig.DefaultDownloadDirectory);
+                Directory.CreateDirectory(_chromeConfig.DefaultDownloadChromeDirectory);
 
                 var prefs = new Dictionary<string, object>
             {
-                { "download.default_directory", _chromeConfig.DefaultDownloadDirectory },
+                { "download.default_directory", _chromeConfig.DefaultDownloadChromeDirectory },
                 { "download.prompt_for_download", false },
                 { "download.directory_upgrade", true },
                 { "safebrowsing.enabled", false }
             };
 
                 options.AddUserProfilePreference("download", prefs);
-                Console.WriteLine($"   📁 Download directory: {_chromeConfig.DefaultDownloadDirectory}");
+                Console.WriteLine($"   📁 Download directory: {_chromeConfig.DefaultDownloadChromeDirectory}");
             }
         }
 
@@ -336,9 +336,9 @@ namespace ConsentSyncCore.Services.Browser
             Console.WriteLine($"   Disable Notifications: {_chromeConfig.DisableNotifications}");
             Console.WriteLine($"   Hide Automation: {_chromeConfig.HideAutomationIndicators}");
 
-            if (!string.IsNullOrWhiteSpace(_chromeConfig.DefaultDownloadDirectory))
+            if (!string.IsNullOrWhiteSpace(_chromeConfig.DefaultDownloadChromeDirectory))
             {
-                Console.WriteLine($"   Download Directory: {_chromeConfig.DefaultDownloadDirectory}");
+                Console.WriteLine($"   Download Directory: {_chromeConfig.DefaultDownloadChromeDirectory}");
             }
         }
 

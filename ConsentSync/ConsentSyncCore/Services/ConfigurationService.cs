@@ -18,6 +18,9 @@ namespace ConsentSyncCore.Services
 
         private static IConfiguration? _config;
         private static readonly object _lock = new object();
+        private static string? _baseDirectory;
+
+
 
         /// <summary>
         /// Get the configuration instance (singleton)
@@ -39,12 +42,17 @@ namespace ConsentSyncCore.Services
                             .AddEnvironmentVariables(prefix: "CONSENTSYNC_")
                             .Build();
 
+                        // Load BaseDirectory
+                        _baseDirectory = _config["BaseDirectory"] ?? "C:\\PHIS";
+
                         Console.WriteLine($"✅ Configuration loaded (Environment: {environment})");
+                        Console.WriteLine($"📁 Base Directory: {_baseDirectory}");
                     }
                 }
             }
             return _config;
         }
+
 
         /// <summary>
         /// Reload configuration from disk
@@ -54,25 +62,128 @@ namespace ConsentSyncCore.Services
             lock (_lock)
             {
                 _config = null;
+                _baseDirectory = null;
                 GetConfiguration();
             }
         }
 
 
 
+        /// <summary>
+        /// Get the base directory
+        /// </summary>
+        public static string GetBaseDirectory()
+        {
+            if (_config == null)
+            {
+                GetConfiguration();
+            }
+            return _baseDirectory ?? "C:\\PHIS";
+        }
+
+
+        /// <summary>
+        /// Resolve path with placeholders
+        /// Supported placeholders:
+        ///   {BaseDirectory} - Base directory for all operations
+        ///   {SchoolName} - Current school name
+        ///   {Grade} - Current grade
+        ///   {SchoolYear} - Current school year
+        /// </summary>
+        private static string ResolvePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return path;
+
+            // Ensure configuration is loaded
+            if (_config == null)
+            {
+                GetConfiguration();
+            }
+
+            var schoolContext = GetSchoolContextConfig();
+            var baseDir = GetBaseDirectory();
+
+            // ✅ DEBUG: Show resolution
+            Console.WriteLine($"      ResolvePath Input: '{path}'");
+            Console.WriteLine($"      BaseDirectory: '{baseDir}'");
+            Console.WriteLine($"      SchoolName: '{schoolContext.SchoolName}'");
+            Console.WriteLine($"      Grade: '{schoolContext.Grade}'");
+            Console.WriteLine($"      SchoolYear: '{schoolContext.SchoolYear}'");
+
+            var resolved = path
+                .Replace("{BaseDirectory}", baseDir)
+                .Replace("{SchoolName}", schoolContext.SchoolName)
+                .Replace("{Grade}", schoolContext.Grade)
+                .Replace("{SchoolYear}", schoolContext.SchoolYear);
+
+            Console.WriteLine($"      ResolvePath Output: '{resolved}'");
+
+            return resolved;
+        }
+
+
+
+        /// <summary>
+        /// Resolve multiple paths with placeholders
+        /// </summary>
+        private static string[] ResolvePaths(string[] paths)
+        {
+            return paths?.Select(ResolvePath).ToArray() ?? Array.Empty<string>();
+        }
+
+
+        #region School Context Configuration
+
+        /// <summary>
+        /// Get School Context configuration (shared across all phases)
+        /// </summary>
+        public static SchoolContextConfig GetSchoolContextConfig()
+        {
+            var config = GetConfiguration();
+            return new SchoolContextConfig
+            {
+                SchoolName = config["SchoolContext:SchoolName"] ?? "Unknown School",
+                Grade = config["SchoolContext:Grade"] ?? "0",
+                SchoolYear = config["SchoolContext:SchoolYear"] ?? "2024-2025"
+            };
+        }
+
+        #endregion School Context Configuration
+
+
+
+
+
         #region CSV Processing Configuration
 
         /// <summary>
-        /// Get CSV Processing configuration
+        /// Get CSV Processing configuration with resolved paths
         /// </summary>
         public static CsvProcessingConfig GetCsvConfig()
         {
             var config = GetConfiguration();
+
+            // Get raw values
+            var rawInputPath = config["CsvProcessing:InputCsvPath"] ?? "";
+            var rawOutputPath = config["CsvProcessing:OutputCsvPath"] ?? "";
+
+            // ✅ DEBUG: Show before/after resolution
+            Console.WriteLine($"\n🔍 DEBUG GetCsvConfig:");
+            Console.WriteLine($"   Raw InputPath:  {rawInputPath}");
+            Console.WriteLine($"   Raw OutputPath: {rawOutputPath}");
+
+            var resolvedInputPath = ResolvePath(rawInputPath);
+            var resolvedOutputPath = ResolvePath(rawOutputPath);
+
+            Console.WriteLine($"   ✅ Resolved InputPath:  {resolvedInputPath}");
+            Console.WriteLine($"   ✅ Resolved OutputPath: {resolvedOutputPath}");
+
             return new CsvProcessingConfig
             {
-                InputCsvPath = config["CsvProcessing:InputCsvPath"] ?? "",
+                InputCsvPath = resolvedInputPath,
                 InputCsvFileName = config["CsvProcessing:InputCsvFileName"] ?? "immunizations.csv",
-                OutputCsvPath = config["CsvProcessing:OutputCsvPath"] ?? "",
+                OutputCsvPath = resolvedOutputPath,
                 OutputCsvFileName = config["CsvProcessing:OutputCsvFileName"] ?? "immunizations_processed.csv",
                 SaveProgressEveryNRecords = config.GetValue<int>("CsvProcessing:SaveProgressEveryNRecords", 5),
                 DateOfBirthColumn = config["CsvProcessing:DateOfBirthColumn"] ?? "Date of Birth",
@@ -86,21 +197,38 @@ namespace ConsentSyncCore.Services
         }
 
         /// <summary>
-        /// Get full input CSV path
+        /// Get full input CSV path (resolved)
         /// </summary>
         public static string GetInputCsvFullPath()
         {
             var csvConfig = GetCsvConfig();
-            return Path.Combine(csvConfig.InputCsvPath, csvConfig.InputCsvFileName);
+            var fullPath = Path.Combine(csvConfig.InputCsvPath, csvConfig.InputCsvFileName);
+
+            // ✅ DEBUG: Show what we're resolving
+            Console.WriteLine($"🔍 DEBUG GetInputCsvFullPath:");
+            Console.WriteLine($"   InputCsvPath (raw): {csvConfig.InputCsvPath}");
+            Console.WriteLine($"   InputCsvFileName: {csvConfig.InputCsvFileName}");
+            Console.WriteLine($"   Combined Path: {fullPath}");
+
+            return fullPath;
         }
 
+
         /// <summary>
-        /// Get full output CSV path
+        /// Get full output CSV path (resolved)
         /// </summary>
         public static string GetOutputCsvFullPath()
         {
             var csvConfig = GetCsvConfig();
-            return Path.Combine(csvConfig.OutputCsvPath, csvConfig.OutputCsvFileName);
+            var fullPath = Path.Combine(csvConfig.OutputCsvPath, csvConfig.OutputCsvFileName);
+
+            // ✅ DEBUG: Show what we're resolving
+            Console.WriteLine($"🔍 DEBUG GetOutputCsvFullPath:");
+            Console.WriteLine($"   OutputCsvPath (raw): {csvConfig.OutputCsvPath}");
+            Console.WriteLine($"   OutputCsvFileName: {csvConfig.OutputCsvFileName}");
+            Console.WriteLine($"   Combined Path: {fullPath}");
+
+            return fullPath;
         }
 
 
@@ -108,19 +236,6 @@ namespace ConsentSyncCore.Services
 
 
 
-        /// <summary>
-        /// Get School Context configuration (shared across all phases)
-        /// </summary>
-        public static SchoolContextConfig GetSchoolContextConfig()
-        {
-            var config = GetConfiguration();
-            return new SchoolContextConfig
-            {
-                SchoolName = config["SchoolContext:SchoolName"] ?? "",
-                Grade = config["SchoolContext:Grade"] ?? "",
-                SchoolYear = config["SchoolContext:SchoolYear"] ?? "2025-2026"
-            };
-        }
 
 
         #region Phase 1 Configuration
@@ -169,9 +284,15 @@ namespace ConsentSyncCore.Services
                 WaitAfterLoginSeconds = config.GetValue<int>("Phase2:VitaliteWebsite:WaitAfterLoginSeconds", 3),
                 DownloadTimeoutSeconds = config.GetValue<int>("Phase2:VitaliteWebsite:DownloadTimeoutSeconds", 30),
 
-                DownloadPath = config["Phase2:Download:DownloadPath"] ?? "",
-                RenamedPath = config["Phase2:Download:RenamedPath"] ?? "",
-                TempPath = config["Phase2:Download:TempPath"] ?? "",
+                // ✅ Resolve paths with placeholders
+                DownloadPath = ResolvePath(config["Phase2:Download:DownloadPath"] ?? ""),
+                RenamedPath = ResolvePath(config["Phase2:Download:RenamedPath"] ?? ""),
+                TempPath = ResolvePath(config["Phase2:Download:TempPath"] ?? ""),
+                ErrorOutputDir = ResolvePath(config["Phase2:Download:ErrorOutputDir"] ?? ""),
+
+
+
+
                 MaxDownloadRetries = config.GetValue<int>("Phase2:Download:MaxDownloadRetries", 3),
                 DelayBetweenDownloadsMs = config.GetValue<int>("Phase2:Download:DelayBetweenDownloadsMs", 1000),
 
@@ -179,10 +300,9 @@ namespace ConsentSyncCore.Services
                 SplitMultiPagePdfs = config.GetValue<bool>("Phase2:PdfProcessing:SplitMultiPagePdfs", true),
                 FileRosePageThreshold = config.GetValue<int>("Phase2:PdfProcessing:FileRosePageThreshold", 1),
                 DebugMode = config.GetValue<bool>("Phase2:PdfProcessing:DebugMode", false),
-                DebugOutputDir = config["Phase2:PdfProcessing:DebugOutputDir"] ?? "",
-
+                DebugOutputDir = ResolvePath(config["Phase2:PdfProcessing:DebugOutputDir"] ?? ""),
                 UseFuzzyMatching = config.GetValue<bool>("Phase2:PdfProcessing:UseFuzzyMatching", true),
-                ErrorOutputDir = config["Phase2:Download:ErrorOutputDir"] ?? "",
+               
 
                 ValidationResultsCsv = config["Phase2:Output:ValidationResultsCsv"] ?? "Validation_Results.csv",
                 UploadCsv = config["Phase2:Output:UploadCsv"] ?? "Upload_to_PHIS.csv",
@@ -208,8 +328,9 @@ namespace ConsentSyncCore.Services
 
         #region Phase 3 Configuration
 
+
         /// <summary>
-        /// Get Phase 3 configuration
+        /// Get Phase 3 configuration with resolved paths
         /// </summary>
         public static Phase3Config GetPhase3Config()
         {
@@ -219,9 +340,10 @@ namespace ConsentSyncCore.Services
                 Enabled = config.GetValue<bool>("Phase3:Enabled", true),
                 Description = config["Phase3:Description"] ?? "Upload consent PDFs to PHIS",
 
-                UploadCsvPath = config["Phase3:Input:UploadCsvPath"] ?? "",
+                // ✅ Resolve paths with placeholders
+                UploadCsvPath = ResolvePath(config["Phase3:Input:UploadCsvPath"] ?? ""),
                 UploadCsvFileName = config["Phase3:Input:UploadCsvFileName"] ?? "Upload_to_PHIS.csv",
-                PdfPath = config["Phase3:Input:PdfPath"] ?? "",
+                PdfPath = ResolvePath(config["Phase3:Input:PdfPath"] ?? ""),
 
                 MaxUploadRetries = config.GetValue<int>("Phase3:Upload:MaxUploadRetries", 3),
                 DelayBetweenUploadsMs = config.GetValue<int>("Phase3:Upload:DelayBetweenUploadsMs", 2000),
@@ -229,7 +351,7 @@ namespace ConsentSyncCore.Services
                 VerifyUploadSuccess = config.GetValue<bool>("Phase3:Upload:VerifyUploadSuccess", true),
 
                 FileRoseEnabled = config.GetValue<bool>("Phase3:FileRose:FileRoseEnabled", true),
-                FileRosePath = config["Phase3:FileRose:FileRosePath"] ?? "",
+                FileRosePath = ResolvePath(config["Phase3:FileRose:FileRosePath"] ?? ""),
                 UseCustomFileRosePerVaccine = config.GetValue<bool>("Phase3:FileRose:UseCustomFileRosePerVaccine", false),
 
                 DocumentsSectionId = config["Phase3:Navigation:DocumentsSectionId"] ?? "documents-tab",
@@ -346,7 +468,7 @@ namespace ConsentSyncCore.Services
         #region Chrome Driver Configuration
 
         /// <summary>
-        /// Get Chrome Driver configuration
+        /// Get ChromeDriver configuration with resolved paths
         /// </summary>
         public static ChromeDriverConfig GetChromeDriverConfig()
         {
@@ -354,8 +476,8 @@ namespace ConsentSyncCore.Services
             return new ChromeDriverConfig
             {
                 UsePortableChrome = config.GetValue<bool>("ChromeDriver:UsePortableChrome", false),
-                PortableChromePath = config["ChromeDriver:PortableChromePath"] ?? "",
-                ChromeDriverPath = config["ChromeDriver:ChromeDriverPath"] ?? "",
+                PortableChromePath = ResolvePath(config["ChromeDriver:PortableChromePath"] ?? ""),
+                ChromeDriverPath = ResolvePath(config["ChromeDriver:ChromeDriverPath"] ?? ""),
                 UseDebuggerMode = config.GetValue<bool>("ChromeDriver:UseDebuggerMode", false),
                 DebuggerPort = config.GetValue<int>("ChromeDriver:DebuggerPort", 9222),
 
@@ -365,7 +487,7 @@ namespace ConsentSyncCore.Services
                 HideAutomationIndicators = config.GetValue<bool>("ChromeDriver:Options:HideAutomationIndicators", true),
                 Headless = config.GetValue<bool>("ChromeDriver:Options:Headless", false),
 
-                DefaultDownloadDirectory = config["ChromeDriver:Download:DefaultDownloadDirectory"] ?? ""
+                DefaultDownloadChromeDirectory = ResolvePath(config["ChromeDriver:Download:DefaultDownloadChromeDirectory"] ?? "")
             };
         }
 
