@@ -49,6 +49,30 @@ namespace Orchestrator.Phase1
         }
 
 
+        /// <summary>
+        /// Get the WebDriver instance for reuse in other phases
+        /// </summary>
+        public IWebDriver? GetDriver()
+        {
+            return _driver;
+        }
+
+        /// <summary>
+        /// Get the PhisSessionManager instance for reuse in other phases
+        /// </summary>
+        public PhisSessionManager? GetSessionManager()
+        {
+            return _sessionManager;
+        }
+
+        /// <summary>
+        /// Get the PhisSearchService instance for reuse in other phases
+        /// </summary>
+        public PhisSearchService? GetSearchService()
+        {
+            return _searchService;
+        }
+
 
         #region Public API
 
@@ -244,9 +268,6 @@ namespace Orchestrator.Phase1
 
 
 
-        /// <summary>
-        /// Process a single student record
-        /// </summary>
         private async Task<bool> ProcessSingleStudentAsync(StudentRecord student, Phase1Result result)
         {
             try
@@ -299,7 +320,8 @@ namespace Orchestrator.Phase1
                 else
                 {
                     Console.WriteLine($"   ⚠️  Score too low: {score:F2}% (threshold: {threshold}%)");
-                    return await TryFallbackSearchesAsync(student, result, suggestion);
+                    // ✅ Pass original best match to fallback searches
+                    return await TryFallbackSearchesAsync(student, result, suggestion, bestMatch, score);
                 }
             }
             catch (Exception ex)
@@ -313,12 +335,19 @@ namespace Orchestrator.Phase1
 
 
 
+
+
         /// <summary>
         /// Try fallback search strategies in order:
         /// 1. Medicare number search (if available)
         /// 2. Inverted date search (if no Medicare number)
         /// </summary>
-        private async Task<bool> TryFallbackSearchesAsync(StudentRecord student, Phase1Result result, string? originalSuggestion = null)
+        private async Task<bool> TryFallbackSearchesAsync(
+            StudentRecord student,
+            Phase1Result result,
+            string? originalSuggestion = null,
+            PhisSearchResult? originalBestMatch = null,
+            double originalBestScore = 0.0)
         {
             // Strategy 1: Try Medicare search if available
             if (!string.IsNullOrWhiteSpace(student.MedicareNumber))
@@ -331,9 +360,9 @@ namespace Orchestrator.Phase1
                 }
             }
 
-            // Strategy 2: Try inverted date if no Medicare number OR Medicare search failed
+            // Strategy 2: Try inverted date - NOW passing original best match!
             Console.WriteLine($"   🔄 Trying inverted date search...");
-            var invertedSuccess = await TryInvertedDateSearchAsync(student, result);
+            var invertedSuccess = await TryInvertedDateSearchAsync(student, result, originalBestMatch, originalBestScore);
             if (invertedSuccess)
             {
                 return true;
@@ -351,7 +380,6 @@ namespace Orchestrator.Phase1
 
             return false;
         }
-
 
 
 
@@ -420,11 +448,17 @@ namespace Orchestrator.Phase1
 
 
 
+
         /// <summary>
         /// Try searching with inverted date (MM/DD swapped to DD/MM)
         /// Handles cases where date was incorrectly entered (e.g., 2012-12-10 should be 2012-10-12)
+        /// NOW: Selects HIGHEST confidence match from BOTH original and inverted searches
         /// </summary>
-        private async Task<bool> TryInvertedDateSearchAsync(StudentRecord student, Phase1Result result)
+        private async Task<bool> TryInvertedDateSearchAsync(
+            StudentRecord student,
+            Phase1Result result,
+            PhisSearchResult? originalBestMatch = null,
+            double originalBestScore = 0.0)
         {
             try
             {
@@ -466,34 +500,93 @@ namespace Orchestrator.Phase1
 
                 Console.WriteLine($"   📊 Found {searchResult.Results.Count} result(s) with inverted date");
 
-                // Find best match
-                var (bestMatch, score, suggestion) = _fuzzyMatcher!.FindBestMatch(student, searchResult.Results);
+                // ✅ KEY FIX: Evaluate ALL results from inverted search
+                var invertedMatches = searchResult.Results
+                    .Select(r =>
+                    {
+                        var (finalScore, nameScore, medicareMatch) = _fuzzyMatcher!.CalculateMatchScore(student, r);
+                        return new { Result = r, FinalScore = finalScore, NameScore = nameScore, MedicareMatch = medicareMatch };
+                    })
+                    .OrderByDescending(m => m.FinalScore)
+                    .ToList();
 
-                if (bestMatch == null)
+                var bestInvertedMatch = invertedMatches.FirstOrDefault();
+
+                if (bestInvertedMatch == null)
                 {
                     Console.WriteLine($"   ⚠️  No confident match with inverted date");
                     return false;
                 }
 
-                // Check if score meets threshold
+                Console.WriteLine($"   🔍 Best inverted match: {bestInvertedMatch.Result.FirstName} {bestInvertedMatch.Result.LastName}");
+                Console.WriteLine($"      Score: {bestInvertedMatch.FinalScore:F2}% (Name: {bestInvertedMatch.NameScore:F2}%)");
+
+                // ✅ CRITICAL: Compare with original search's best match
+                double compareScore = originalBestScore;
+                PhisSearchResult? compareMatch = originalBestMatch;
+
+                Console.WriteLine($"\n   📊 Comparing results:");
+                Console.WriteLine($"      Original date best: {(compareMatch != null ? $"{compareMatch.FirstName} {compareMatch.LastName} - {compareScore:F2}%" : "None")}");
+                Console.WriteLine($"      Inverted date best: {bestInvertedMatch.Result.FirstName} {bestInvertedMatch.Result.LastName} - {bestInvertedMatch.FinalScore:F2}%");
+
+                // Select the HIGHEST confidence match regardless of which search found it
                 var threshold = searchResult.IsSingleResult
                     ? _fuzzyMatcher.SingleResultThreshold
                     : _fuzzyMatcher.MultipleResultsThreshold;
 
-                if (score >= threshold)
+                // Use the better of the two matches
+                if (bestInvertedMatch.FinalScore > compareScore)
                 {
-                    student.ClientId = bestMatch.ClientId;
-                    student.ClientIdStatus = ClientIdStatus.Found;
-                    student.BestMatch = string.Empty;
-                    result.FoundCount++;
-                    Console.WriteLine($"   ✅ Client ID found with INVERTED date: {bestMatch.ClientId} (score: {score:F2}%)");
-                    Console.WriteLine($"   ⚠️  NOTE: Date in CSV may be incorrect! Original: {student.DateOfBirth}, Worked: {invertedDateString}");
-                    return true;
+                    Console.WriteLine($"   ✅ Inverted date match is BETTER ({bestInvertedMatch.FinalScore:F2}% vs {compareScore:F2}%)");
+
+                    if (bestInvertedMatch.FinalScore >= threshold)
+                    {
+                        student.ClientId = bestInvertedMatch.Result.ClientId;
+                        student.ClientIdStatus = ClientIdStatus.Found;
+                        student.BestMatch = string.Empty;
+                        result.FoundCount++;
+                        Console.WriteLine($"   ✅ Client ID found with INVERTED date: {bestInvertedMatch.Result.ClientId} (score: {bestInvertedMatch.FinalScore:F2}%)");
+                        Console.WriteLine($"   ⚠️  NOTE: Date in CSV may be incorrect! Original: {student.DateOfBirth}, Worked: {invertedDateString}");
+                        return true;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"   ⚠️  Score still too low: {bestInvertedMatch.FinalScore:F2}% (threshold: {threshold}%)");
+
+                        // Save best match info for manual review
+                        string suggestion = $"{bestInvertedMatch.Result.FirstName}#{bestInvertedMatch.Result.LastName}#{bestInvertedMatch.Result.ClientId}#{bestInvertedMatch.FinalScore:F1}%";
+                        student.BestMatch = suggestion;
+                        Console.WriteLine($"   💡 Best match saved: {suggestion}");
+                        return false;
+                    }
                 }
                 else
                 {
-                    Console.WriteLine($"   ⚠️  Score still too low with inverted date: {score:F2}% (threshold: {threshold}%)");
-                    return false;
+                    Console.WriteLine($"   ℹ️  Original date match is better ({compareScore:F2}% vs {bestInvertedMatch.FinalScore:F2}%)");
+
+                    // Original was better, but did it meet the threshold?
+                    if (compareMatch != null && compareScore >= threshold)
+                    {
+                        student.ClientId = compareMatch.ClientId;
+                        student.ClientIdStatus = ClientIdStatus.Found;
+                        student.BestMatch = string.Empty;
+                        result.FoundCount++;
+                        Console.WriteLine($"   ✅ Using original date match: {compareMatch.ClientId} (score: {compareScore:F2}%)");
+                        return true;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"   ⚠️  Neither match meets threshold ({threshold}%)");
+
+                        // Save the better match for manual review
+                        if (compareMatch != null)
+                        {
+                            string suggestion = $"{compareMatch.FirstName}#{compareMatch.LastName}#{compareMatch.ClientId}#{compareScore:F1}%";
+                            student.BestMatch = suggestion;
+                            Console.WriteLine($"   💡 Best match saved: {suggestion}");
+                        }
+                        return false;
+                    }
                 }
             }
             catch (ArgumentOutOfRangeException)
@@ -508,6 +601,7 @@ namespace Orchestrator.Phase1
                 return false;
             }
         }
+
 
 
 

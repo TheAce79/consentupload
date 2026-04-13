@@ -357,39 +357,68 @@ namespace ConsentSyncCore.Services
         #region Phase 3 Configuration
 
 
-        /// <summary>
-        /// Get Phase 3 configuration with resolved paths
-        /// </summary>
         public static Phase3Config GetPhase3Config()
         {
             var config = GetConfiguration();
-            return new Phase3Config
+            var phase3Section = config.GetSection("Phase3");
+            var phase3Config = new Phase3Config
             {
-                Enabled = config.GetValue<bool>("Phase3:Enabled", true),
-                Description = config["Phase3:Description"] ?? "Upload consent PDFs to PHIS",
+                Enabled = phase3Section.GetValue<bool>("Enabled"),
+                Description = phase3Section.GetValue<string>("Description") ?? string.Empty,
 
-                // ✅ Resolve paths with placeholders
-                UploadCsvPath = ResolvePath(config["Phase3:Input:UploadCsvPath"] ?? ""),
-                UploadCsvFileName = config["Phase3:Input:UploadCsvFileName"] ?? "Upload_to_PHIS.csv",
-                PdfPath = ResolvePath(config["Phase3:Input:PdfPath"] ?? ""),
+                // Input section
+                Input = new Phase3InputConfig
+                {
+                    UploadCsvPath = phase3Section.GetValue<string>("Input:UploadCsvPath") ?? string.Empty,
+                    UploadCsvFileName = phase3Section.GetValue<string>("Input:UploadCsvFileName") ?? string.Empty,
+                    PdfPath = phase3Section.GetValue<string>("Input:PdfPath") ?? string.Empty
+                },
 
-                MaxUploadRetries = config.GetValue<int>("Phase3:Upload:MaxUploadRetries", 3),
-                DelayBetweenUploadsMs = config.GetValue<int>("Phase3:Upload:DelayBetweenUploadsMs", 2000),
-                WaitAfterUploadMs = config.GetValue<int>("Phase3:Upload:WaitAfterUploadMs", 1500),
-                VerifyUploadSuccess = config.GetValue<bool>("Phase3:Upload:VerifyUploadSuccess", true),
+                // Upload section
+                Upload = new Phase3UploadConfig
+                {
+                    MaxUploadRetries = phase3Section.GetValue<int>("Upload:MaxUploadRetries"),
+                    DelayBetweenUploadsMs = phase3Section.GetValue<int>("Upload:DelayBetweenUploadsMs"),
+                    WaitAfterUploadMs = phase3Section.GetValue<int>("Upload:WaitAfterUploadMs"),
+                    VerifyUploadSuccess = phase3Section.GetValue<bool>("Upload:VerifyUploadSuccess")
+                },
 
-                FileRoseEnabled = config.GetValue<bool>("Phase3:FileRose:FileRoseEnabled", true),
-                FileRosePath = ResolvePath(config["Phase3:FileRose:FileRosePath"] ?? ""),
-                UseCustomFileRosePerVaccine = config.GetValue<bool>("Phase3:FileRose:UseCustomFileRosePerVaccine", false),
+                // FileRose section
+                FileRose = new Phase3FileRoseConfig
+                {
+                    FileRoseEnabled = phase3Section.GetValue<bool>("FileRose:FileRoseEnabled"),
+                    FileRosePath = phase3Section.GetValue<string>("FileRose:FileRosePath") ?? string.Empty,
+                    UseCustomFileRosePerVaccine = phase3Section.GetValue<bool>("FileRose:UseCustomFileRosePerVaccine")
+                },
 
-                DocumentsSectionId = config["Phase3:Navigation:DocumentsSectionId"] ?? "documents-tab",
-                UploadButtonId = config["Phase3:Navigation:UploadButtonId"] ?? "upload-btn",
-                DocumentTitleFieldId = config["Phase3:Navigation:DocumentTitleFieldId"] ?? "doc-title",
-                DocumentDescriptionFieldId = config["Phase3:Navigation:DocumentDescriptionFieldId"] ?? "doc-description",
+                // Navigation section
+                Navigation = new Phase3NavigationConfig
+                {
+                    DocumentsSectionId = phase3Section.GetValue<string>("Navigation:DocumentsSectionId") ?? string.Empty,
+                    UploadButtonId = phase3Section.GetValue<string>("Navigation:UploadButtonId") ?? string.Empty,
+                    DocumentTitleFieldId = phase3Section.GetValue<string>("Navigation:DocumentTitleFieldId") ?? string.Empty,
+                    DocumentDescriptionFieldId = phase3Section.GetValue<string>("Navigation:DocumentDescriptionFieldId") ?? string.Empty
+                },
 
-                CompletedCsvFileName = config["Phase3:Output:CompletedCsvFileName"] ?? "Upload_to_PHIS_completed.csv"
+                // Output section
+                Output = new Phase3OutputConfig
+                {
+                    CompletedCsvFileName = phase3Section.GetValue<string>("Output:CompletedCsvFileName") ?? string.Empty
+                }
             };
+
+            // Apply variable substitutions using existing ResolvePath method
+            phase3Config.Input.UploadCsvPath = ResolvePath(phase3Config.Input.UploadCsvPath);
+            phase3Config.Input.PdfPath = ResolvePath(phase3Config.Input.PdfPath);
+
+            if (phase3Config.FileRose.FileRoseEnabled)
+            {
+                phase3Config.FileRose.FileRosePath = ResolvePath(phase3Config.FileRose.FileRosePath);
+            }
+
+            return phase3Config;
         }
+
 
         /// <summary>
         /// Get file rose path for specific vaccine type
@@ -414,7 +443,7 @@ namespace ConsentSyncCore.Services
         public static string GetUploadCsvFullPath()
         {
             var phase3Config = GetPhase3Config();
-            return Path.Combine(phase3Config.UploadCsvPath, phase3Config.UploadCsvFileName);
+            return Path.Combine(phase3Config.Input.UploadCsvPath, phase3Config.Input.UploadCsvFileName);
         }
 
         #endregion

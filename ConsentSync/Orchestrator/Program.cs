@@ -1,10 +1,14 @@
 ﻿using ConsentSyncCore.Services;
+using ConsentSyncCore.Services.Phis;
+using ConsentSyncCore.Services.Browser;
 using CsvProcessing;
 using Microsoft.Extensions.Configuration;
 using Orchestrator.Phase1;
 using Orchestrator.Phase2;
+using Orchestrator.Phase3;
 using Orchestrator.PrePhase3;
 using System.Text;
+using OpenQA.Selenium;
 
 
 namespace Orchestrator
@@ -19,6 +23,11 @@ namespace Orchestrator
 
             PrintHeader();
 
+            // Declare PHIS components at program scope
+            IWebDriver? driver = null;
+            PhisSessionManager? sessionManager = null;
+            PhisSearchService? phisSearchService = null;
+
             try
             {
                 // Load configuration
@@ -28,6 +37,7 @@ namespace Orchestrator
                 var csvConfig = ConfigurationService.GetCsvConfig();
                 var phase1Config = ConfigurationService.GetPhase1Config();
                 var phase2Config = ConfigurationService.GetPhase2Config();
+                var prePhase3Config = ConfigurationService.GetPrePhase3Config();
                 var phase3Config = ConfigurationService.GetPhase3Config();
 
                 // Display configuration summary
@@ -78,7 +88,13 @@ namespace Orchestrator
                     }
                     else
                     {
-                        var phase1Result = await RunPhase1Async(config);
+                        // Phase 1 will create and return PHIS components
+                        var (phase1Result, phase1Driver, phase1SessionMgr, phase1SearchSvc) = await RunPhase1Async(config);
+
+                        // Store for potential use in Phase 3
+                        driver = phase1Driver;
+                        sessionManager = phase1SessionMgr;
+                        phisSearchService = phase1SearchSvc;
 
                         if (phase1Result.HasErrors)
                         {
@@ -130,8 +146,6 @@ namespace Orchestrator
                 // ═══════════════════════════════════════════════════════
                 // PRE-PHASE 3: Validate and Prepare for Upload
                 // ═══════════════════════════════════════════════════════
-                var prePhase3Config = ConfigurationService.GetPrePhase3Config();
-
                 if (prePhase3Config.Enabled)
                 {
                     Console.WriteLine("\n" + new string('═', 70));
@@ -153,14 +167,15 @@ namespace Orchestrator
                 }
 
 
-                // ═══════════════════════════════════════════════════════
-                // PHASE 3: Upload Documents to PHIS
-                // ═══════════════════════════════════════════════════════
+                // ═══════════════════════════════════════════════════════════
+                // PHASE 3: Upload to PHIS (TEST MODE)
+                // ═══════════════════════════════════════════════════════════
                 if (phase3Config.Enabled)
                 {
-                    Console.WriteLine("\n" + new string('═', 70));
-                    Console.WriteLine($"📤 PHASE 3: {phase3Config.Description}");
-                    Console.WriteLine(new string('═', 70));
+                    Console.WriteLine("\n\n");
+                    Console.WriteLine("╔════════════════════════════════════════════════════════╗");
+                    Console.WriteLine("║         STARTING PHASE 3: Upload to PHIS (TEST)        ║");
+                    Console.WriteLine("╚════════════════════════════════════════════════════════╝");
 
                     if (!ConfirmPhase("Phase 3"))
                     {
@@ -168,13 +183,69 @@ namespace Orchestrator
                     }
                     else
                     {
-                        await RunPhase3Async(config);
+                        try
+                        {
+                            // Initialize PHIS components if not already done (Phase 1 skipped)
+                            if (driver == null || phisSearchService == null || sessionManager == null)
+                            {
+                                Console.WriteLine("⚠️  PHIS components not initialized. Initializing now...");
+                                Console.WriteLine("💡 This will open a browser - please log into PHIS manually");
+
+                                // Create driver using ChromeDriverFactory
+                                var driverFactory = new ChromeDriverFactory(config);
+                                driver = driverFactory.CreateDriver();
+
+                                // Navigate to PHIS and wait for manual login
+                                var phisConfig = ConfigurationService.GetPhisConfig();
+                                driver.Navigate().GoToUrl(phisConfig.LoginUrl);
+
+                                Console.WriteLine($"\n⏳ Please log into PHIS manually...");
+                                Console.WriteLine($"   You have {phisConfig.ManualLoginWaitSeconds} seconds");
+                                Console.WriteLine($"   Press any key once you're logged in...");
+                                Console.ReadKey();
+
+                                // Initialize PHIS components
+                                var resultExtractor = new PhisResultExtractor(config);
+                                sessionManager = new PhisSessionManager(driver, config);
+                                phisSearchService = new PhisSearchService(driver, config, resultExtractor, sessionManager);
+
+                                Console.WriteLine("✅ PHIS components initialized");
+                            }
+                            else
+                            {
+                                Console.WriteLine("✅ Reusing PHIS session from Phase 1");
+                            }
+
+                            // Run Phase 3
+                            var phase3Orchestrator = new Phase3Orchestrator(
+                                config,
+                                driver,
+                                phisSearchService,
+                                sessionManager);
+
+                            var phase3Result = await phase3Orchestrator.RunAsync();
+
+                            if (phase3Result.IsSuccessful)
+                            {
+                                Console.WriteLine("\n✅ Phase 3 test completed successfully!");
+                            }
+                            else
+                            {
+                                Console.WriteLine("\n⚠️  Phase 3 test completed with errors");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"\n❌ Phase 3 failed: {ex.Message}");
+                            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                        }
                     }
                 }
                 else
                 {
                     Console.WriteLine("\n⏭️  Phase 3 disabled in configuration");
                 }
+
 
                 // ═══════════════════════════════════════════════════════
                 // COMPLETION
@@ -191,6 +262,21 @@ namespace Orchestrator
             }
             finally
             {
+                // Clean up driver if it was created
+                if (driver != null)
+                {
+                    try
+                    {
+                        Console.WriteLine("\n🔄 Closing browser...");
+                        driver.Quit();
+                        driver.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"⚠️  Error closing browser: {ex.Message}");
+                    }
+                }
+
                 Console.WriteLine("\n\nPress any key to exit...");
                 Console.ReadKey();
             }
@@ -217,19 +303,27 @@ namespace Orchestrator
 
         /// <summary>
         /// Execute Phase 1: Search PHIS for Client IDs
+        /// Returns Phase1Result and PHIS components for reuse in Phase 3
         /// </summary>
-        static async Task<Phase1Result> RunPhase1Async(IConfiguration config)
+        static async Task<(Phase1Result result, IWebDriver? driver, PhisSessionManager? sessionMgr, PhisSearchService? searchSvc)>
+            RunPhase1Async(IConfiguration config)
         {
             try
             {
                 using var orchestrator = new Phase1Orchestrator(config);
                 var result = await orchestrator.RunAsync();
-                return result;
+
+                // Get the PHIS components from orchestrator for reuse
+                var driver = orchestrator.GetDriver();
+                var sessionMgr = orchestrator.GetSessionManager();
+                var searchSvc = orchestrator.GetSearchService();
+
+                return (result, driver, sessionMgr, searchSvc);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"❌ Phase 1 error: {ex.Message}");
-                return new Phase1Result { HasErrors = true };
+                return (new Phase1Result { HasErrors = true }, null, null, null);
             }
         }
 
@@ -295,34 +389,6 @@ namespace Orchestrator
             catch (Exception ex)
             {
                 Console.WriteLine($"❌ Pre-Phase 3 error: {ex.Message}");
-            }
-        }
-
-
-
-
-        /// <summary>
-        /// Execute Phase 3: Upload documents to PHIS
-        /// </summary>
-        static async Task RunPhase3Async(IConfiguration config)
-        {
-            try
-            {
-                Console.WriteLine("🚧 Phase 3 implementation coming soon...");
-                Console.WriteLine("📤 This phase will:");
-                Console.WriteLine("   1. Read Upload_to_PHIS.csv");
-                Console.WriteLine("   2. Login to PHIS");
-                Console.WriteLine("   3. Navigate to each client record");
-                Console.WriteLine("   4. Upload consent PDFs");
-                Console.WriteLine("   5. Upload File Rose PDFs (if enabled)");
-                Console.WriteLine("   6. Verify upload success");
-                Console.WriteLine("   7. Mark records as completed");
-
-                await Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Phase 3 error: {ex.Message}");
             }
         }
 

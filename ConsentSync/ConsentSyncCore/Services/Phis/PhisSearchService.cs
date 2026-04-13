@@ -528,17 +528,82 @@ namespace ConsentSyncCore.Services.Phis
         /// </summary>
         private async Task ExecuteClientIdSearchAsync(string clientId)
         {
-            // Find Client ID input field
-            var clientIdInput = _driver.FindElement(By.Id(
-                "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_clientID"));
+            try
+            {
+                Console.WriteLine($"   🔍 Locating Client ID search elements...");
 
-            clientIdInput.Clear();
-            clientIdInput.SendKeys(clientId);
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
-            Console.WriteLine($"   ✏️  Entered Client ID");
+                // Step 1: Set the dropdown value to CLIENT_ID using JavaScript
+                var dropdownInputId = "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_ClientNumberType:selectOneMenu_input";
 
-            // Click search
-            await ClickSearchButtonAsync();
+                // Wait for dropdown to be present
+                _wait.Until(d => d.FindElements(By.Id(dropdownInputId)).Count > 0);
+
+                // Set dropdown value via JavaScript
+                js.ExecuteScript($@"
+            var dropdown = document.getElementById('{dropdownInputId}');
+            if (dropdown) {{
+                dropdown.value = 'CLIENT_ID';
+                
+                // Trigger change event for PrimeFaces
+                var changeEvent = new Event('change', {{ bubbles: true }});
+                dropdown.dispatchEvent(changeEvent);
+                
+                console.log('Dropdown set to CLIENT_ID');
+            }}
+        ");
+
+                Console.WriteLine($"   ✅ Set dropdown to 'Client ID' via JavaScript");
+                await Task.Delay(_phisConfig.AjaxWaitMs); // Wait for PrimeFaces to process
+
+                // Step 2: Enter Client ID using JavaScript
+                var clientNumberInputId = "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_ClientNumber:inputText";
+
+                // Wait for input to be present
+                _wait.Until(d => d.FindElements(By.Id(clientNumberInputId)).Count > 0);
+
+                // Set input value via JavaScript
+                js.ExecuteScript($@"
+            var input = document.getElementById('{clientNumberInputId}');
+            if (input) {{
+                input.value = '{clientId}';
+                
+                // Trigger input events
+                var inputEvent = new Event('input', {{ bubbles: true }});
+                input.dispatchEvent(inputEvent);
+                
+                var changeEvent = new Event('change', {{ bubbles: true }});
+                input.dispatchEvent(changeEvent);
+                
+                console.log('Client ID entered: {clientId}');
+            }}
+        ");
+
+                Console.WriteLine($"   ✅ Entered Client ID: {clientId}");
+                await Task.Delay(500); // Brief pause to ensure value is set
+
+                // Step 3: Verify values were set
+                var dropdownValue = (string)js.ExecuteScript($"return document.getElementById('{dropdownInputId}').value;");
+                var inputValue = (string)js.ExecuteScript($"return document.getElementById('{clientNumberInputId}').value;");
+
+                Console.WriteLine($"   🔍 Verification - Dropdown: {dropdownValue}, Input: {inputValue}");
+
+                if (dropdownValue != "CLIENT_ID" || inputValue != clientId)
+                {
+                    Console.WriteLine($"   ⚠️  WARNING: Values not set correctly!");
+                    Console.WriteLine($"      Expected dropdown: CLIENT_ID, Got: {dropdownValue}");
+                    Console.WriteLine($"      Expected input: {clientId}, Got: {inputValue}");
+                }
+
+                // Click search
+                await ClickSearchButtonAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Error in ExecuteClientIdSearchAsync: {ex.Message}");
+                throw;
+            }
         }
 
 
@@ -570,9 +635,191 @@ namespace ConsentSyncCore.Services.Phis
 
 
 
+
+
         #endregion Search Execution Methods
 
 
+
+
+
+
+        #region Phase 3 - Set In Context
+
+        /// <summary>
+        /// Select the first search result and click "Set In Context"
+        /// Used in Phase 3 after searching by Client ID
+        /// </summary>
+        public async Task<bool> SelectResultAndSetInContextAsync()
+        {
+            try
+            {
+                Console.WriteLine($"   🎯 Selecting search result and setting in context...");
+
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+
+                // Step 1: Wait for search results table to be present
+                _wait.Until(d => d.FindElements(By.Id("form:dataTable:dataTable_data")).Count > 0);
+
+                // Step 2: Check the checkbox for the first result (row 0)
+                var checkboxId = "form:dataTable:dataTable:0:j_idt198"; // This might vary, we'll use a more robust selector
+
+                // More reliable: find checkbox in first row
+                var firstRowCheckbox = _driver.FindElement(By.CssSelector(
+                    "#form\\:dataTable\\:dataTable_data tr[data-ri='0'] .ui-chkbox-box"));
+
+                // Click checkbox using JavaScript to ensure it works
+                js.ExecuteScript("arguments[0].click();", firstRowCheckbox);
+
+                Console.WriteLine($"   ✅ Selected first result checkbox");
+                await Task.Delay(_phisConfig.AjaxWaitMs); // Wait for AJAX to process row selection
+
+                // Step 3: Verify checkbox is checked
+                var isChecked = firstRowCheckbox.GetAttribute("class").Contains("ui-state-active");
+                if (!isChecked)
+                {
+                    Console.WriteLine($"   ⚠️  WARNING: Checkbox might not be selected, retrying...");
+                    js.ExecuteScript("arguments[0].click();", firstRowCheckbox);
+                    await Task.Delay(500);
+                }
+
+                // Step 4: Click "Set In Context" button
+                var setInContextButtonId = "form:dataTable:selectButtonId:actionButtonId:commandButtonId";
+
+                // Wait for button to be clickable
+                _wait.Until(d => d.FindElements(By.Id(setInContextButtonId)).Count > 0);
+
+                var setInContextButton = _driver.FindElement(By.Id(setInContextButtonId));
+
+                // Click using JavaScript for reliability
+                js.ExecuteScript("arguments[0].click();", setInContextButton);
+
+                Console.WriteLine($"   ✅ Clicked 'Set In Context' button");
+                await Task.Delay(_phisConfig.PageLoadDelayMs); // Wait for page to process
+
+                // Step 5: Verify success by checking if we're redirected or context is set
+                // You might want to check for a success message or URL change here
+                await Task.Delay(1000); // Extra time for page to update
+
+                // Update session activity
+                _sessionManager.UpdateActivity();
+
+                Console.WriteLine($"   ✅ Client set in context successfully");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Error setting client in context: {ex.Message}");
+                return false;
+            }
+        }
+
+
+
+        /// <summary>
+        /// Alternative method using network trace approach (more reliable for PrimeFaces)
+        /// </summary>
+        public async Task<bool> SelectResultAndSetInContextViaJavaScriptAsync()
+        {
+            try
+            {
+                Console.WriteLine($"   🎯 Selecting search result via JavaScript...");
+
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+
+                // Step 1: Trigger the checkbox selection event via JavaScript
+                // Based on network trace: rowSelectCheckbox event on row 0
+                js.ExecuteScript(@"
+            // Simulate PrimeFaces checkbox selection
+            PrimeFaces.ajax.Request.handle({
+                source: 'form:dataTable:dataTable',
+                process: 'form:dataTable:dataTable',
+                update: 'form:dataTable:rowActionsPanel',
+                params: [
+                    {name: 'javax.faces.behavior.event', value: 'rowSelectCheckbox'},
+                    {name: 'javax.faces.partial.event', value: 'rowSelectCheckbox'},
+                    {name: 'form:dataTable:dataTable_instantSelectedRowKey', value: '0'},
+                    {name: 'form:dataTable:dataTable_selection', value: '0'}
+                ],
+                oncomplete: function() {
+                    console.log('Row selected');
+                }
+            });
+        ");
+
+                Console.WriteLine($"   ✅ Row selection triggered via PrimeFaces AJAX");
+                await Task.Delay(_phisConfig.AjaxWaitMs * 2); // Extra wait for AJAX
+
+                // Step 2: Click "Set In Context" button
+                var setInContextButtonId = "form:dataTable:selectButtonId:actionButtonId:commandButtonId";
+                var setInContextButton = _driver.FindElement(By.Id(setInContextButtonId));
+
+                js.ExecuteScript("arguments[0].click();", setInContextButton);
+
+                Console.WriteLine($"   ✅ Clicked 'Set In Context' button");
+                await Task.Delay(_phisConfig.PageLoadDelayMs);
+
+                _sessionManager.UpdateActivity();
+
+                Console.WriteLine($"   ✅ Client set in context successfully");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Error in SelectResultAndSetInContextViaJavaScriptAsync: {ex.Message}");
+                return false;
+            }
+        }
+
+
+
+
+        public async Task<bool> SearchByClientIdAndSetInContextAsync(string clientId)
+        {
+            try
+            {
+                Console.WriteLine($"   🔍 Phase 3: Searching for Client ID {clientId} and setting in context...");
+
+                // Step 1: Search by Client ID
+                var searchResult = await SearchByClientIdAsync(clientId);
+
+                if (!searchResult.Success)
+                {
+                    Console.WriteLine($"   ❌ Search failed: {searchResult.ErrorMessage}");
+                    return false;
+                }
+
+                if (searchResult.Results.Count == 0)
+                {
+                    Console.WriteLine($"   ❌ No results found for Client ID: {clientId}");
+                    return false;
+                }
+
+                if (searchResult.Results.Count > 1)
+                {
+                    Console.WriteLine($"   ⚠️  WARNING: Found {searchResult.Results.Count} results, expected 1");
+                }
+
+                // Step 2: Select result and set in context
+                bool contextSet = await SelectResultAndSetInContextAsync();
+
+                if (!contextSet)
+                {
+                    Console.WriteLine($"   ⚠️  Standard method failed, trying JavaScript approach...");
+                    contextSet = await SelectResultAndSetInContextViaJavaScriptAsync();
+                }
+
+                return contextSet;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Error in Phase 3: {ex.Message}");
+                return false;
+            }
+        }
+
+
+        #endregion Phase 3 - Set In Context
 
 
 
