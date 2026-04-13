@@ -22,12 +22,46 @@ namespace CsvProcessing
             Map(m => m.Tdap).Name("Tdap");
             Map(m => m.HPV).Name("HPV");
             Map(m => m.ClientId).Name("ClientId");
-            Map(m => m.IsFileRoseDefault).Name("IsFileRoseDefault");
+            Map(m => m.IsFileRoseDefault).Name("IsFileRoseDefault")
+                .TypeConverter<SafeBooleanConverter>(); // Use custom converter
             Map(m => m.ClientIdStatus).Name("ClientIdStatus")
                 .TypeConverter<ClientIdStatusConverter>();
             Map(m => m.BestMatch).Name("BestMatch").Optional(); // Optional for backward compatibility
         }
+    }
 
+    /// <summary>
+    /// Safe boolean converter that handles empty/null values
+    /// </summary>
+    public class SafeBooleanConverter : CsvHelper.TypeConversion.DefaultTypeConverter
+    {
+        public override object ConvertFromString(string? text, IReaderRow row, MemberMapData memberMapData)
+        {
+            // Handle empty/null values
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            // Normalize the text
+            text = text.Trim().ToLowerInvariant();
+
+            // Handle common boolean representations
+            return text switch
+            {
+                "true" or "1" or "yes" or "y" => true,
+                "false" or "0" or "no" or "n" => false,
+                _ => false // Default to false for any unrecognized value
+            };
+        }
+
+        public override string ConvertToString(object? value, IWriterRow row, MemberMapData memberMapData)
+        {
+            if (value is bool boolValue)
+            {
+                return boolValue.ToString().ToLowerInvariant();
+            }
+
+            return "false";
+        }
     }
 
     /// <summary>
@@ -57,4 +91,7 @@ namespace CsvProcessing
             return "0";
         }
     }
+
+
+
 }
