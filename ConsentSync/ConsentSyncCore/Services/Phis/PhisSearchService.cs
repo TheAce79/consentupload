@@ -369,25 +369,69 @@ namespace ConsentSyncCore.Services.Phis
             {
                 Console.WriteLine($"   🔍 Locating Medicare search elements...");
 
-                // First, select "Health Card Number" from the Client Number Type dropdown
-                var clientNumberTypeDropdownId = "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_ClientNumberType:selectOneMenu_input";
-                var clientNumberTypeDropdown = _driver.FindElement(By.Id(clientNumberTypeDropdownId));
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
-                // Create SelectElement to interact with dropdown
-                var selectElement = new SelectElement(clientNumberTypeDropdown);
-                selectElement.SelectByValue("HEALTH_CARD_NUMBER");
+                // Step 1: Set the dropdown value using JavaScript (PrimeFaces dropdowns often need this)
+                var dropdownInputId = "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_ClientNumberType:selectOneMenu_input";
 
-                Console.WriteLine($"   ✅ Selected 'Health Card Number' type");
-                await Task.Delay(_phisConfig.AjaxWaitMs); // Wait for any AJAX to complete
+                // Wait for dropdown to be present
+                _wait.Until(d => d.FindElements(By.Id(dropdownInputId)).Count > 0);
 
-                // Now find the Client Number input field
+                // Set dropdown value via JavaScript
+                js.ExecuteScript($@"
+            var dropdown = document.getElementById('{dropdownInputId}');
+            if (dropdown) {{
+                dropdown.value = 'HEALTH_CARD_NUMBER';
+                
+                // Trigger change event for PrimeFaces
+                var changeEvent = new Event('change', {{ bubbles: true }});
+                dropdown.dispatchEvent(changeEvent);
+                
+                console.log('Dropdown set to HEALTH_CARD_NUMBER');
+            }}
+        ");
+
+                Console.WriteLine($"   ✅ Set dropdown to 'Health Card Number' via JavaScript");
+                await Task.Delay(_phisConfig.AjaxWaitMs); // Wait for PrimeFaces to process
+
+                // Step 2: Enter Medicare number using JavaScript
                 var clientNumberInputId = "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_ClientNumber:inputText";
-                var medicareInput = _driver.FindElement(By.Id(clientNumberInputId));
 
-                medicareInput.Clear();
-                medicareInput.SendKeys(medicareNumber);
+                // Wait for input to be present
+                _wait.Until(d => d.FindElements(By.Id(clientNumberInputId)).Count > 0);
+
+                // Set input value via JavaScript
+                js.ExecuteScript($@"
+            var input = document.getElementById('{clientNumberInputId}');
+            if (input) {{
+                input.value = '{medicareNumber}';
+                
+                // Trigger input events
+                var inputEvent = new Event('input', {{ bubbles: true }});
+                input.dispatchEvent(inputEvent);
+                
+                var changeEvent = new Event('change', {{ bubbles: true }});
+                input.dispatchEvent(changeEvent);
+                
+                console.log('Medicare number entered: {medicareNumber}');
+            }}
+        ");
 
                 Console.WriteLine($"   ✅ Entered Medicare Number: {medicareNumber}");
+                await Task.Delay(500); // Brief pause to ensure value is set
+
+                // Step 3: Verify values were set
+                var dropdownValue = (string)js.ExecuteScript($"return document.getElementById('{dropdownInputId}').value;");
+                var inputValue = (string)js.ExecuteScript($"return document.getElementById('{clientNumberInputId}').value;");
+
+                Console.WriteLine($"   🔍 Verification - Dropdown: {dropdownValue}, Input: {inputValue}");
+
+                if (dropdownValue != "HEALTH_CARD_NUMBER" || inputValue != medicareNumber)
+                {
+                    Console.WriteLine($"   ⚠️  WARNING: Values not set correctly!");
+                    Console.WriteLine($"      Expected dropdown: HEALTH_CARD_NUMBER, Got: {dropdownValue}");
+                    Console.WriteLine($"      Expected input: {medicareNumber}, Got: {inputValue}");
+                }
 
                 // Click search
                 await ClickSearchButtonAsync();
@@ -397,28 +441,37 @@ namespace ConsentSyncCore.Services.Phis
                 Console.WriteLine($"   ❌ Element not found in ExecuteMedicareSearchAsync");
                 Console.WriteLine($"      Error: {ex.Message}");
 
-                // Try to log available elements for debugging
+                // Debug: Log page source snippet
                 try
                 {
-                    var allInputs = _driver.FindElements(By.CssSelector("input[type='text']"));
-                    Console.WriteLine($"   🔍 Found {allInputs.Count} text input fields");
+                    IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+                    var clientNumberSection = js.ExecuteScript(@"
+                var elem = document.getElementById('form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_ClientNumber:inputText');
+                if (elem) {
+                    return {
+                        id: elem.id,
+                        visible: elem.offsetParent !== null,
+                        enabled: !elem.disabled,
+                        readonly: elem.readOnly,
+                        display: window.getComputedStyle(elem).display,
+                        visibility: window.getComputedStyle(elem).visibility
+                    };
+                }
+                return null;
+            ");
 
-                    var clientInputCandidates = allInputs
-                        .Where(e => (e.GetAttribute("id") ?? "").Contains("ClientNumber", StringComparison.OrdinalIgnoreCase))
-                        .Take(5);
-
-                    foreach (var candidate in clientInputCandidates)
-                    {
-                        Console.WriteLine($"      - {candidate.GetAttribute("id")}");
-                    }
+                    Console.WriteLine($"   🔍 Input element state: {clientNumberSection}");
                 }
                 catch { }
 
                 throw;
             }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Error in ExecuteMedicareSearchAsync: {ex.Message}");
+                throw;
+            }
         }
-
-
 
         /// <summary>
         /// Convert date from CSV format (yyyy-MM-dd) to PHIS format (yyyy/MM/dd)
