@@ -360,29 +360,34 @@ namespace ConsentSyncCore.Services.Phis
 
 
 
+        /// <summary>
+        /// Execute Medicare search
+        /// </summary>
         private async Task ExecuteMedicareSearchAsync(string medicareNumber)
         {
             try
             {
-                // First, ensure we select "Health Card Number" from the Client Number Type dropdown
-                var clientNumberTypeDropdown = _driver.FindElement(By.Id(
-                    "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_clientNumType"));
+                Console.WriteLine($"   🔍 Locating Medicare search elements...");
+
+                // First, select "Health Card Number" from the Client Number Type dropdown
+                var clientNumberTypeDropdownId = "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_ClientNumberType:selectOneMenu_input";
+                var clientNumberTypeDropdown = _driver.FindElement(By.Id(clientNumberTypeDropdownId));
 
                 // Create SelectElement to interact with dropdown
                 var selectElement = new SelectElement(clientNumberTypeDropdown);
-                selectElement.SelectByText("Health Card Number");
+                selectElement.SelectByValue("HEALTH_CARD_NUMBER");
 
-                Console.WriteLine($"   ✏️  Selected 'Health Card Number' type");
+                Console.WriteLine($"   ✅ Selected 'Health Card Number' type");
                 await Task.Delay(_phisConfig.AjaxWaitMs); // Wait for any AJAX to complete
 
-                // Now find the Client Number input field (not personalHealthCardNumber)
-                var medicareInput = _driver.FindElement(By.Id(
-                    "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_clientNumber"));
+                // Now find the Client Number input field
+                var clientNumberInputId = "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_ClientNumber:inputText";
+                var medicareInput = _driver.FindElement(By.Id(clientNumberInputId));
 
                 medicareInput.Clear();
                 medicareInput.SendKeys(medicareNumber);
 
-                Console.WriteLine($"   ✏️  Entered Medicare Number: {medicareNumber}");
+                Console.WriteLine($"   ✅ Entered Medicare Number: {medicareNumber}");
 
                 // Click search
                 await ClickSearchButtonAsync();
@@ -395,11 +400,16 @@ namespace ConsentSyncCore.Services.Phis
                 // Try to log available elements for debugging
                 try
                 {
-                    var clientNumberFields = _driver.FindElements(By.CssSelector("[id*='clientNumber']"));
-                    Console.WriteLine($"   🔍 Found {clientNumberFields.Count} elements with 'clientNumber' in ID:");
-                    foreach (var field in clientNumberFields.Take(5))
+                    var allInputs = _driver.FindElements(By.CssSelector("input[type='text']"));
+                    Console.WriteLine($"   🔍 Found {allInputs.Count} text input fields");
+
+                    var clientInputCandidates = allInputs
+                        .Where(e => (e.GetAttribute("id") ?? "").Contains("ClientNumber", StringComparison.OrdinalIgnoreCase))
+                        .Take(5);
+
+                    foreach (var candidate in clientInputCandidates)
                     {
-                        Console.WriteLine($"      - {field.GetAttribute("id")}");
+                        Console.WriteLine($"      - {candidate.GetAttribute("id")}");
                     }
                 }
                 catch { }
@@ -407,6 +417,7 @@ namespace ConsentSyncCore.Services.Phis
                 throw;
             }
         }
+
 
 
         /// <summary>
