@@ -360,22 +360,52 @@ namespace ConsentSyncCore.Services.Phis
 
 
 
-        /// <summary>
-        /// Execute Medicare search
-        /// </summary>
         private async Task ExecuteMedicareSearchAsync(string medicareNumber)
         {
-            // Find Medicare input field
-            var medicareInput = _driver.FindElement(By.Id(
-                "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_personalHealthCardNumber"));
+            try
+            {
+                // First, ensure we select "Health Card Number" from the Client Number Type dropdown
+                var clientNumberTypeDropdown = _driver.FindElement(By.Id(
+                    "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_clientNumType"));
 
-            medicareInput.Clear();
-            medicareInput.SendKeys(medicareNumber);
+                // Create SelectElement to interact with dropdown
+                var selectElement = new SelectElement(clientNumberTypeDropdown);
+                selectElement.SelectByText("Health Card Number");
 
-            Console.WriteLine($"   ✏️  Entered Medicare Number");
+                Console.WriteLine($"   ✏️  Selected 'Health Card Number' type");
+                await Task.Delay(_phisConfig.AjaxWaitMs); // Wait for any AJAX to complete
 
-            // Click search
-            await ClickSearchButtonAsync();
+                // Now find the Client Number input field (not personalHealthCardNumber)
+                var medicareInput = _driver.FindElement(By.Id(
+                    "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_clientNumber"));
+
+                medicareInput.Clear();
+                medicareInput.SendKeys(medicareNumber);
+
+                Console.WriteLine($"   ✏️  Entered Medicare Number: {medicareNumber}");
+
+                // Click search
+                await ClickSearchButtonAsync();
+            }
+            catch (NoSuchElementException ex)
+            {
+                Console.WriteLine($"   ❌ Element not found in ExecuteMedicareSearchAsync");
+                Console.WriteLine($"      Error: {ex.Message}");
+
+                // Try to log available elements for debugging
+                try
+                {
+                    var clientNumberFields = _driver.FindElements(By.CssSelector("[id*='clientNumber']"));
+                    Console.WriteLine($"   🔍 Found {clientNumberFields.Count} elements with 'clientNumber' in ID:");
+                    foreach (var field in clientNumberFields.Take(5))
+                    {
+                        Console.WriteLine($"      - {field.GetAttribute("id")}");
+                    }
+                }
+                catch { }
+
+                throw;
+            }
         }
 
 
