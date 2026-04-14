@@ -321,6 +321,7 @@ namespace ConsentSyncCore.Services
         /// <summary>
         /// Get Phase 2 configuration
         /// </summary>
+        /// 
         public static Phase2Config GetPhase2Config()
         {
             var config = GetConfiguration();
@@ -337,13 +338,9 @@ namespace ConsentSyncCore.Services
                 DownloadTimeoutSeconds = config.GetValue<int>("Phase2:VitaliteWebsite:DownloadTimeoutSeconds", 30),
 
                 // ✅ Resolve paths with placeholders
-                DownloadPath = ResolvePath(config["Phase2:Download:DownloadPath"] ?? ""),
                 RenamedPath = ResolvePath(config["Phase2:Download:RenamedPath"] ?? ""),
                 TempPath = ResolvePath(config["Phase2:Download:TempPath"] ?? ""),
                 ErrorOutputDir = ResolvePath(config["Phase2:Download:ErrorOutputDir"] ?? ""),
-
-
-
 
                 MaxDownloadRetries = config.GetValue<int>("Phase2:Download:MaxDownloadRetries", 3),
                 DelayBetweenDownloadsMs = config.GetValue<int>("Phase2:Download:DelayBetweenDownloadsMs", 1000),
@@ -354,11 +351,10 @@ namespace ConsentSyncCore.Services
                 DebugMode = config.GetValue<bool>("Phase2:PdfProcessing:DebugMode", false),
                 DebugOutputDir = ResolvePath(config["Phase2:PdfProcessing:DebugOutputDir"] ?? ""),
                 UseFuzzyMatching = config.GetValue<bool>("Phase2:PdfProcessing:UseFuzzyMatching", true),
-               
+                ReadNamesFromFilename = config.GetValue<bool>("Phase2:PdfProcessing:ReadNamesFromFilename", true), // ✅ Added
 
                 ValidationResultsCsv = config["Phase2:Output:ValidationResultsCsv"] ?? "Validation_Results.csv",
                 UploadCsv = config["Phase2:Output:UploadCsv"] ?? "Upload_to_PHIS.csv",
-               
             };
         }
 

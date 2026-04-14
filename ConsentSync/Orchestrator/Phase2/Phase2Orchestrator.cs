@@ -7,11 +7,9 @@ using CsvHelper.Configuration;
 using CsvProcessing;
 using Microsoft.Extensions.Configuration;
 using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
+
 
 namespace Orchestrator.Phase2
 {
@@ -24,33 +22,34 @@ namespace Orchestrator.Phase2
         private readonly StudentCsvRepository _csvRepo;
         private readonly FuzzyMatcher _fuzzyMatcher;
         private readonly SchoolContextConfig _schoolContext;
+        private readonly BulkPdfExtractionConfig _bulkPdfConfig;
 
         public Phase2Orchestrator(IConfiguration? config = null)
         {
             _config = config ?? ConfigurationService.GetConfiguration();
             _phase2Config = ConfigurationService.GetPhase2Config();
+            _bulkPdfConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+
             _schoolContext = ConfigurationService.GetSchoolContextConfig();
             _csvRepo = new StudentCsvRepository(_config);
             _fuzzyMatcher = new FuzzyMatcher();
         }
 
 
-
-
-
-
         private bool ValidateFolders()
         {
             bool valid = true;
 
-            if (!Directory.Exists(_phase2Config.DownloadPath))
+            // ✅ Use BulkPdfConfig instead of Phase2 DownloadPath
+            var pdfSourcePath = _bulkPdfConfig.GetOutputReadyPath();
+            if (!Directory.Exists(pdfSourcePath))
             {
-                Console.WriteLine($"   ❌ DownloadPath not found: {_phase2Config.DownloadPath}");
+                Console.WriteLine($"   ❌ PDF Source (OutputReady) not found: {pdfSourcePath}");
                 valid = false;
             }
             else
             {
-                Console.WriteLine($"   ✅ DownloadPath: {_phase2Config.DownloadPath}");
+                Console.WriteLine($"   ✅ PDF Source (OutputReady): {pdfSourcePath}");
             }
 
             if (!Directory.Exists(_phase2Config.RenamedPath))
@@ -78,6 +77,8 @@ namespace Orchestrator.Phase2
 
             return valid;
         }
+
+
 
 
         /// <summary>
@@ -179,8 +180,12 @@ namespace Orchestrator.Phase2
                 Console.WriteLine($"   ✅ Created {validationRecords.Count} validation records");
 
                 // Step 4: Process PDFs
-                Console.WriteLine($"\n📋 Step 4: Processing PDFs from: {_phase2Config.DownloadPath}");
-                var pdfFiles = Directory.GetFiles(_phase2Config.DownloadPath, "*.pdf");
+                // Step 4: Process PDFs from BulkPdfExtraction OutputReady folder
+                var pdfSourcePath = _bulkPdfConfig.GetOutputReadyPath(); // ✅ Changed
+
+                Console.WriteLine($"\n📋 Step 4: Processing PDFs from: {pdfSourcePath}");
+
+                var pdfFiles = Directory.GetFiles(pdfSourcePath, "*.pdf"); // ✅ Changed
                 result.TotalPdfs = pdfFiles.Length;
 
                 Console.WriteLine($"   Found {pdfFiles.Length} PDF files to process");
@@ -199,10 +204,46 @@ namespace Orchestrator.Phase2
 
                     try
                     {
-                        var (firstName, lastName, pageCount) = PdfProcessor.ProcessSinglePdf(
-                            pdfPath,
-                            _phase2Config.DebugMode,
-                            _phase2Config.DebugOutputDir);
+                        string firstName, lastName;
+
+                        // ✅ Check configuration flag
+                        if (_phase2Config.ReadNamesFromFilename)
+                        {
+                            // Extract from filename
+                            var (fnameFromFile, lnameFromFile, idFromFile) = ExtractNamesFromFilename(fileName);
+
+                            if (!string.IsNullOrWhiteSpace(fnameFromFile) && !string.IsNullOrWhiteSpace(lnameFromFile))
+                            {
+                                firstName = fnameFromFile;
+                                lastName = lnameFromFile;
+                                Console.WriteLine($"      ✅ Extracted from filename: {firstName} {lastName}");
+                            }
+                            else
+                            {
+                                // Filename parsing failed, fallback to PDF extraction
+                                Console.WriteLine($"      ⚠️  Failed to parse filename, falling back to PDF extraction...");
+                                var (fn, ln, pageCount) = PdfProcessor.ProcessSinglePdf(
+                                    pdfPath,
+                                    _phase2Config.DebugMode,
+                                    _phase2Config.DebugOutputDir);
+                                firstName = fn;
+                                lastName = ln;
+                                Console.WriteLine($"      ✅ Extracted from PDF: {firstName} {lastName}");
+                            }
+                        }
+                        else {
+
+                            // Extract from PDF content
+                            Console.WriteLine($"      📄 Reading PDF content...");
+                            var (fn, ln, pageCount) = PdfProcessor.ProcessSinglePdf(
+                                pdfPath,
+                                _phase2Config.DebugMode,
+                                _phase2Config.DebugOutputDir);
+                            firstName = fn;
+                            lastName = ln;
+                            Console.WriteLine($"      ✅ Extracted from PDF: {firstName} {lastName}");
+
+                        }
 
                         if (firstName == "Unknown" || lastName == "Unknown" ||
                             firstName == "Error" || lastName == "Error")
@@ -314,151 +355,6 @@ namespace Orchestrator.Phase2
         }
 
 
-
-
-
-        ///// <summary>
-        ///// Run Phase 2 workflow
-        ///// </summary>
-        //public async Task<Phase2Result> RunAsyncOLD()
-        //{
-        //    Console.WriteLine("╔════════════════════════════════════════════════════════╗");
-        //    Console.WriteLine("║         ConsentSync - Phase 2: Process PDFs            ║");
-        //    Console.WriteLine("╚════════════════════════════════════════════════════════╝\n");
-
-        //    var result = new Phase2Result();
-
-        //    try
-        //    {
-        //        // Step 1: Validate folders
-        //        Console.WriteLine("📋 Step 1: Validating folders...");
-        //        if (!ValidateFolders())
-        //        {
-        //            result.HasErrors = true;
-        //            return result;
-        //        }
-
-        //        // Step 2: Load student CSV
-        //        Console.WriteLine("\n📋 Step 2: Loading student data...");
-        //        var students = _csvRepo.ReadAll()
-        //            .Where(s => !string.IsNullOrWhiteSpace(s.ClientId))
-        //            .ToList();
-
-        //        Console.WriteLine($"   ✅ Loaded {students.Count} students with Client IDs");
-
-        //        // Step 3: Process PDFs
-        //        Console.WriteLine($"\n📋 Step 3: Processing PDFs from: {_phase2Config.DownloadPath}");
-        //        var pdfFiles = Directory.GetFiles(_phase2Config.DownloadPath, "*.pdf");
-        //        result.TotalPdfs = pdfFiles.Length;
-
-        //        Console.WriteLine($"   Found {pdfFiles.Length} PDF files to process");
-
-        //        if (pdfFiles.Length == 0)
-        //        {
-        //            Console.WriteLine("   ⚠️  No PDFs found. Please download PDFs to the DownloadPath folder.");
-        //            return result;
-        //        }
-
-        //        var uploadRecords = new List<UploadRecord>();
-
-        //        foreach (var pdfPath in pdfFiles)
-        //        {
-        //            var fileName = Path.GetFileName(pdfPath);
-        //            Console.WriteLine($"\n   Processing: {fileName}");
-
-        //            try
-        //            {
-        //                // Extract names from PDF
-        //                var (firstName, lastName, pageCount) = PdfProcessor.ProcessSinglePdf(
-        //                    pdfPath,
-        //                    _phase2Config.DebugMode,
-        //                    _phase2Config.DebugOutputDir);
-
-        //                if (firstName == "Unknown" || lastName == "Unknown" ||
-        //                    firstName == "Error" || lastName == "Error")
-        //                {
-        //                    Console.WriteLine($"      ❌ Failed to extract names from PDF");
-
-        //                    // ✅ Move to error directory
-        //                    CopyToErrorDirectory(pdfPath, "NameExtractionFailed");
-
-        //                    result.FailedToMatch++;
-        //                    result.ErrorMessages.Add($"{fileName}: Name extraction failed");
-        //                    continue;
-        //                }
-
-        //                Console.WriteLine($"      Extracted: {firstName} {lastName}");
-
-
-        //                StudentRecord? matchedStudent = null;
-        //                if (_phase2Config.UseFuzzyMatching)
-        //                {
-
-        //                    // ✅ ENHANCED: Use fuzzy matching instead of exact match
-        //                    matchedStudent = FindBestMatchingStudent(
-        //                       firstName,
-        //                       lastName,
-        //                       students);
-        //                }
-        //                else
-        //                {
-        //                    // Find matching student using exact name
-        //                    matchedStudent = students.FirstOrDefault(s =>
-        //                    s.FirstName.Equals(firstName, StringComparison.OrdinalIgnoreCase) &&
-        //                    s.LastName.Equals(lastName, StringComparison.OrdinalIgnoreCase));
-
-        //                }
-
-
-        //                if (matchedStudent == null)
-        //                {
-        //                    Console.WriteLine($"      ⚠️  No matching student found in CSV");
-
-        //                    // ✅ Move to error directory
-        //                    CopyToErrorDirectory(pdfPath, "NameExtractionFailed");
-
-        //                    result.FailedToMatch++;
-        //                    result.ErrorMessages.Add($"{fileName}: No match for {firstName} {lastName}");
-        //                    continue;
-        //                }
-
-        //                Console.WriteLine($"      ✅ Matched to Client ID: {matchedStudent.ClientId}");
-
-        //                // Process based on grade
-        //                var generated = await ProcessPdfForGrade(
-        //                    pdfPath,
-        //                    matchedStudent,
-        //                    pageCount,
-        //                    uploadRecords);
-
-        //                result.FilesGenerated += generated;
-        //                result.SuccessfullyProcessed++;
-        //            }
-        //            catch (Exception ex)
-        //            {
-        //                Console.WriteLine($"      ❌ Error: {ex.Message}");
-        //                result.FailedToMatch++;
-        //                result.ErrorMessages.Add($"{fileName}: {ex.Message}");
-        //            }
-        //        }
-
-        //        // Step 4: Generate Upload CSV
-        //        Console.WriteLine($"\n📋 Step 4: Generating Upload_to_PHIS.csv...");
-        //        GenerateUploadCsv(uploadRecords);
-
-        //        // Step 5: Display summary
-        //        DisplaySummary(result, uploadRecords.Count);
-
-        //        return result;
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Console.WriteLine($"\n❌ FATAL ERROR: {ex.Message}");
-        //        Console.WriteLine($"Stack trace: {ex.StackTrace}");
-        //        result.HasErrors = true;
-        //        return result;
-        //    }
-        //}
 
 
 
@@ -598,6 +494,50 @@ namespace Orchestrator.Phase2
         }
 
 
+        /// <summary>
+        /// Extract names from filename format: {ID}_{LastName}_{FirstName}_consent.pdf
+        /// Returns empty strings if parsing fails
+        /// </summary>
+        private (string firstName, string lastName, string id) ExtractNamesFromFilename(string fileName)
+        {
+            try
+            {
+                // Remove extension
+                var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+
+                // Expected format: {ID}_{LastName}_{FirstName}_consent
+                // Remove "_consent" suffix if present
+                if (nameWithoutExt.EndsWith("_consent", StringComparison.OrdinalIgnoreCase))
+                {
+                    nameWithoutExt = nameWithoutExt.Substring(0, nameWithoutExt.Length - 8);
+                }
+
+                var parts = nameWithoutExt.Split('_');
+
+                if (parts.Length >= 3)
+                {
+                    var id = parts[0];
+                    var lastName = parts[1];
+                    var firstName = parts[2];
+
+                    // Validate that we got meaningful values
+                    if (!string.IsNullOrWhiteSpace(id) &&
+                        !string.IsNullOrWhiteSpace(lastName) &&
+                        !string.IsNullOrWhiteSpace(firstName))
+                    {
+                        return (firstName, lastName, id);
+                    }
+                }
+
+                Console.WriteLine($"         ⚠️  Filename doesn't match expected format: {fileName}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"         ⚠️  Error parsing filename: {ex.Message}");
+            }
+
+            return (string.Empty, string.Empty, string.Empty);
+        }
 
     }
 }

@@ -96,6 +96,7 @@ namespace ConsentSyncCore.Services
     }
 
 
+
     /// <summary>
     /// Phase 2 configuration
     /// </summary>
@@ -113,7 +114,6 @@ namespace ConsentSyncCore.Services
         public int DownloadTimeoutSeconds { get; set; }
 
         // Download
-        public string DownloadPath { get; set; } = string.Empty;
         public string RenamedPath { get; set; } = string.Empty;
         public string TempPath { get; set; } = string.Empty;
         public int MaxDownloadRetries { get; set; }
@@ -126,12 +126,17 @@ namespace ConsentSyncCore.Services
         public bool DebugMode { get; set; }
         public string DebugOutputDir { get; set; } = string.Empty;
 
-
         /// <summary>
         /// by default, we want to use fuzzy matching for Phase 2 to maximize 
         /// the number of records we can automatically process, but this can be disabled for testing or if you want to be more strict with matching criteria
         /// </summary>
         public bool UseFuzzyMatching { get; set; } = true;
+
+        /// <summary>
+        /// If true, extract names from filename format: {ID}_{LastName}_{FirstName}_consent.pdf
+        /// If false, extract names by reading PDF content (slower but works with any filename)
+        /// </summary>
+        public bool ReadNamesFromFilename { get; set; } = true;
 
         /// <summary>
         /// copy any files that fail processing to a separate directory 
@@ -142,8 +147,9 @@ namespace ConsentSyncCore.Services
         // Output
         public string ValidationResultsCsv { get; set; } = string.Empty;
         public string UploadCsv { get; set; } = string.Empty;
-
     }
+
+
 
 
     /// <summary>
