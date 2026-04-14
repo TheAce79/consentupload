@@ -228,9 +228,11 @@ namespace ConsentSyncCore.Services.Pdf
 
 
 
+
         /// <summary>
         /// Process a single-page scanned PDF
         /// Output format: {ID}_{LastName}_{FirstName}_consent.pdf
+        /// Files with Unknown names are moved to 4_Error for manual review
         /// </summary>
         private BulkExtractionResult ProcessSinglePagePdf(string pdfPath, string outputDirectory, int pageId)
         {
@@ -245,17 +247,42 @@ namespace ConsentSyncCore.Services.Pdf
                 var (firstName, lastName, pageCount) = PdfProcessor.ProcessSinglePdf(
                     pdfPath, debugOcr: false, debugOutputDir: null);
 
-                // Track if names were detected
-                bool namesDetected = true;
+                //// Track if names were detected
+                //bool namesDetected = true;
 
                 if (string.IsNullOrEmpty(firstName) || string.IsNullOrEmpty(lastName) ||
                     firstName == "Unknown" || lastName == "Unknown" ||
                     firstName == "Error" || lastName == "Error")
                 {
-                    Console.WriteLine($"   ⚠️  Could not extract names - using 'Unknown'");
-                    firstName = "Unknown";
-                    lastName = "Unknown";
-                    namesDetected = false;
+                    Console.WriteLine($"   ⚠️  Could not extract names - moving to 4_Error for manual review");
+
+                    // ✅ Move to error folder instead of processing
+                    string errorMessage = "Unable to extract student names from PDF. Manual identification required.";
+
+                    // Copy to error folder with descriptive name
+                    string errorFileName = $"UNKNOWN_{pageId}_{Path.GetFileNameWithoutExtension(pdfPath)}.pdf";
+                    string errorPath = Path.Combine(_bulkConfig.GetErrorPath(), errorFileName);
+
+                    File.Copy(pdfPath, errorPath, overwrite: true);
+
+                    // Create error log
+                    string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    string errorLogPath = Path.Combine(_bulkConfig.GetErrorPath(),
+                        $"UNKNOWN_{pageId}_{Path.GetFileNameWithoutExtension(pdfPath)}_ERROR_{timestamp}.txt");
+
+                    File.WriteAllText(errorLogPath,
+                        $"Error Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n" +
+                        $"Original File: {Path.GetFileName(pdfPath)}\n" +
+                        $"Reason: {errorMessage}\n" +
+                        $"Action Required: Manually identify student and rename file to: {{ID}}_{{LastName}}_{{FirstName}}_consent.pdf\n" +
+                        $"Then move to 3_Output_Ready folder");
+
+                    result.UnknownNameCount = 1;
+                    result.ErrorMessages.Add($"{errorFileName}: {errorMessage}");
+                    result.Success = false; // Mark as unsuccessful since it needs manual review
+
+                    Console.WriteLine($"   ⚠️  Moved to 4_Error: {errorFileName}");
+                    return result;
                 }
 
                 firstName = CleanAndCapitalizeName(firstName);
@@ -280,20 +307,9 @@ namespace ConsentSyncCore.Services.Pdf
 
                 result.ExtractedFiles.Add(outputPath);
                 result.TotalExtracted = 1;
-                result.Success = namesDetected; // Success only if names detected
-
-                if (!namesDetected)
-                {
-                    result.UnknownNameCount = 1;
-                    result.ErrorMessages.Add($"{outputFileName}: Names not detected - requires manual review");
-                }
+                result.Success = true;
 
                 Console.WriteLine($"   ✅ Saved to 3_Output_Ready: {outputFileName}");
-
-                if (!namesDetected)
-                {
-                    Console.WriteLine($"   ⚠️  WARNING: File contains 'Unknown' - may need to move to 4_Error");
-                }
 
                 return result;
             }
@@ -307,12 +323,10 @@ namespace ConsentSyncCore.Services.Pdf
         }
 
 
-
-
-
         /// <summary>
         /// Extract from bulk PDF with name detection
         /// Output format: {ID}_{LastName}_{FirstName}_consent.pdf
+        /// Files with Unknown names or duplicates are moved to 4_Error for manual review
         /// </summary>
         public BulkExtractionResult ExtractFromBulkPdfWithNames(string bulkPdfPath, string outputDirectory)
         {
@@ -364,48 +378,99 @@ namespace ConsentSyncCore.Services.Pdf
                             tempFilePath, debugOcr: false, debugOutputDir: null);
 
                         bool namesDetected = true;
+                        bool isDuplicate = false;
 
+                        // ✅ Check for unknown names
                         if (string.IsNullOrEmpty(firstName) || string.IsNullOrEmpty(lastName) ||
                             firstName == "Unknown" || lastName == "Unknown" ||
                             firstName == "Error" || lastName == "Error")
                         {
-                            Console.WriteLine($"   ⚠️  Page {currentPage}: Names not detected");
-                            firstName = "Unknown";
-                            lastName = "Unknown";
-                            namesDetected = false;
+                            Console.WriteLine($"   ⚠️  Page {currentPage}: Names not detected - moving to 4_Error");
+
+                            // Move to error folder
+                            string errorFileName = $"UNKNOWN_{pageIndex}_Page{currentPage}.pdf";
+                            string errorPath = Path.Combine(_bulkConfig.GetErrorPath(), errorFileName);
+                            File.Move(tempFilePath, errorPath, overwrite: true);
+
+                            // Create error log
+                            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                            string errorLogPath = Path.Combine(_bulkConfig.GetErrorPath(),
+                                $"UNKNOWN_{pageIndex}_Page{currentPage}_ERROR_{timestamp}.txt");
+
+                            File.WriteAllText(errorLogPath,
+                                $"Error Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n" +
+                                $"Source: {Path.GetFileName(bulkPdfPath)}, Page {currentPage}\n" +
+                                $"Reason: Unable to extract student names from PDF\n" +
+                                $"Action Required: Manually identify student and rename file to: {{ID}}_{{LastName}}_{{FirstName}}_consent.pdf\n" +
+                                $"Then move to 3_Output_Ready folder");
+
                             result.UnknownNameCount++;
+                            result.ErrorMessages.Add($"{errorFileName}: Names not detected");
+
+                            Console.WriteLine($"   ⚠️  Moved to 4_Error: {errorFileName}");
+                            pageIndex++;
+                            currentPage += pagesPerConsent;
+                            continue; // Skip to next PDF
                         }
 
                         firstName = CleanAndCapitalizeName(firstName);
                         lastName = CleanAndCapitalizeName(lastName);
 
-                        // Track duplicates
+                        // ✅ Check for duplicates
                         string nameKey = $"{NormalizeName(lastName)}_{NormalizeName(firstName)}";
-                        int duplicateCount = 0;
 
                         if (seenNames.ContainsKey(nameKey))
                         {
                             seenNames[nameKey]++;
-                            duplicateCount = seenNames[nameKey];
-                            Console.WriteLine($"   ⚠️  DUPLICATE: {firstName} {lastName} (#{duplicateCount + 1})");
+                            int duplicateCount = seenNames[nameKey];
+
+                            Console.WriteLine($"   ⚠️  DUPLICATE: {firstName} {lastName} (occurrence #{duplicateCount + 1}) - moving to 4_Error");
+
+                            // Move duplicate to error folder
+                            string errorFileName = $"DUPLICATE_{pageIndex}_{lastName}_{firstName}_{duplicateCount + 1}.pdf";
+                            string errorPath = Path.Combine(_bulkConfig.GetErrorPath(), errorFileName);
+                            File.Move(tempFilePath, errorPath, overwrite: true);
+
+                            // Create error log
+                            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                            string errorLogPath = Path.Combine(_bulkConfig.GetErrorPath(),
+                                $"DUPLICATE_{pageIndex}_{lastName}_{firstName}_{duplicateCount + 1}_ERROR_{timestamp}.txt");
+
+                            File.WriteAllText(errorLogPath,
+                                $"Error Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n" +
+                                $"Source: {Path.GetFileName(bulkPdfPath)}, Page {currentPage}\n" +
+                                $"Student: {firstName} {lastName}\n" +
+                                $"Reason: Duplicate name detected (occurrence #{duplicateCount + 1})\n" +
+                                $"Action Required: \n" +
+                                $"  1. Verify if this is the same student (form submitted twice)\n" +
+                                $"  2. If duplicate, delete this file\n" +
+                                $"  3. If different student with same name, add middle initial or identifier\n" +
+                                $"     Example: {pageIndex}_{lastName}_{firstName}_2_consent.pdf\n" +
+                                $"  4. Move corrected file to 3_Output_Ready");
+
+                            result.DuplicatesFound++;
+                            result.ErrorMessages.Add($"{errorFileName}: Duplicate name");
+
+                            Console.WriteLine($"   ⚠️  Moved to 4_Error: {errorFileName}");
+                            pageIndex++;
+                            currentPage += pagesPerConsent;
+                            continue; // Skip to next PDF
                         }
                         else
                         {
                             seenNames[nameKey] = 0;
                         }
 
-                        // Format: {ID}_{LastName}_{FirstName}_consent.pdf
-                        string outputFileName = FormatFileName(pageIndex, lastName, firstName, duplicateCount > 0 ? duplicateCount + 1 : null);
+                        // ✅ Names detected and no duplicate - save to 3_Output_Ready
+                        string outputFileName = FormatFileName(pageIndex, lastName, firstName);
                         string finalOutputPath = Path.Combine(outputDirectory, outputFileName);
 
-                        // Move to 3_Output_Ready
                         File.Move(tempFilePath, finalOutputPath, overwrite: true);
 
                         result.ExtractedFiles.Add(finalOutputPath);
                         result.TotalExtracted++;
 
-                        string statusIcon = namesDetected ? "✅" : "⚠️";
-                        Console.WriteLine($"   {statusIcon} [{pageIndex}] {outputFileName}");
+                        Console.WriteLine($"   ✅ [{pageIndex}] {outputFileName}");
 
                         pageIndex++;
                     }
@@ -419,10 +484,9 @@ namespace ConsentSyncCore.Services.Pdf
                     currentPage += pagesPerConsent;
                 }
 
-                result.Success = result.FailedExtractions == 0 && result.UnknownNameCount == 0;
-                result.DuplicatesFound = seenNames.Count(kvp => kvp.Value > 0);
+                result.Success = result.FailedExtractions == 0 && result.UnknownNameCount == 0 && result.DuplicatesFound == 0;
 
-                Console.WriteLine($"\n   Summary: {result.TotalExtracted} extracted, {result.UnknownNameCount} unknown names, {result.FailedExtractions} failed");
+                Console.WriteLine($"\n   Summary: {result.TotalExtracted} extracted, {result.UnknownNameCount} unknown names, {result.DuplicatesFound} duplicates, {result.FailedExtractions} failed");
 
                 return result;
             }
@@ -440,6 +504,7 @@ namespace ConsentSyncCore.Services.Pdf
                 }
             }
         }
+
 
 
 
@@ -627,9 +692,6 @@ namespace ConsentSyncCore.Services.Pdf
         }
 
 
-        /// <summary>
-        /// Display final processing summary
-        /// </summary>
         private void DisplayProcessingSummary(BulkExtractionResult result)
         {
             Console.WriteLine("\n" + new string('═', 60));
@@ -637,18 +699,33 @@ namespace ConsentSyncCore.Services.Pdf
             Console.WriteLine(new string('═', 60));
             Console.WriteLine($"Total PDFs Processed:    {result.TotalExtracted}");
             Console.WriteLine($"Unknown Names:           {result.UnknownNameCount} ⚠️");
-            Console.WriteLine($"Duplicates Detected:     {result.DuplicatesFound}");
+            Console.WriteLine($"Duplicates Detected:     {result.DuplicatesFound} ⚠️");
             Console.WriteLine($"Failed:                  {result.FailedExtractions}");
             Console.WriteLine($"Status:                  {(result.Success ? "✅ Success" : "⚠️ Needs Review")}");
             Console.WriteLine(new string('═', 60));
 
-            Console.WriteLine($"\n📁 Output Location:");
+            Console.WriteLine($"\n📁 Output Locations:");
             Console.WriteLine($"   3_Output_Ready: {_bulkConfig.GetOutputReadyPath()}");
+            Console.WriteLine($"   4_Error:        {_bulkConfig.GetErrorPath()}");
 
-            if (result.UnknownNameCount > 0)
+            if (result.UnknownNameCount > 0 || result.DuplicatesFound > 0)
             {
-                Console.WriteLine($"\n⚠️  {result.UnknownNameCount} file(s) with 'Unknown' names");
-                Console.WriteLine($"   Review files in 3_Output_Ready and move to 4_Error if needed");
+                Console.WriteLine($"\n⚠️  MANUAL REVIEW REQUIRED:");
+
+                if (result.UnknownNameCount > 0)
+                {
+                    Console.WriteLine($"   • {result.UnknownNameCount} file(s) with unknown names in 4_Error");
+                    Console.WriteLine($"     → Identify students and rename manually");
+                }
+
+                if (result.DuplicatesFound > 0)
+                {
+                    Console.WriteLine($"   • {result.DuplicatesFound} duplicate name(s) in 4_Error");
+                    Console.WriteLine($"     → Verify if same student or add identifier");
+                }
+
+                Console.WriteLine($"\n   📋 Check error log files (*_ERROR_*.txt) for details");
+                Console.WriteLine($"   ✅ After fixing, move corrected files to 3_Output_Ready");
             }
 
             if (result.ErrorMessages.Count > 0)
@@ -666,11 +743,14 @@ namespace ConsentSyncCore.Services.Pdf
 
             if (result.Success)
             {
-                Console.WriteLine($"\n✅ Ready for Phase 3! Use files from 3_Output_Ready");
+                Console.WriteLine($"\n✅ All PDFs successfully processed!");
+                Console.WriteLine($"   Ready for Phase 3! Use files from 3_Output_Ready");
+            }
+            else
+            {
+                Console.WriteLine($"\n⚠️  Review required before proceeding to Phase 3");
             }
         }
-
-
 
 
 
