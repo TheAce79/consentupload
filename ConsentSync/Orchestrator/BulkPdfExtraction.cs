@@ -2,6 +2,8 @@
 using ConsentSyncCore.Services;
 using ConsentSyncCore.Services.Pdf;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Orchestrator.Phase3;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -24,11 +26,14 @@ namespace Orchestrator
             private readonly BulkPdfExtractionConfig _bulkConfig;
             private readonly SchoolContextConfig _schoolContext;
 
+            private readonly ILogger<BulkPdfExtractionOrchestrator> _logger;
+
             public BulkPdfExtractionOrchestrator(IConfiguration? config = null)
             {
                 _config = config ?? ConfigurationService.GetConfiguration();
                 _bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
                 _schoolContext = ConfigurationService.GetSchoolContextConfig();
+                _logger = LoggerService.GetLogger<BulkPdfExtractionOrchestrator>();
             }
 
 
@@ -57,37 +62,37 @@ namespace Orchestrator
 
             public async Task<BulkExtractionResult> RunAsync()
             {
-                Console.WriteLine("╔════════════════════════════════════════════════════════╗");
-                Console.WriteLine("║      PDF Processing - Smart Extraction                ║");
-                Console.WriteLine("╚════════════════════════════════════════════════════════╝\n");
+                 LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
+                 LoggerService.LogInformation("║      PDF Processing - Smart Extraction                ║");
+                 LoggerService.LogInformation("╚════════════════════════════════════════════════════════╝\n");
 
                 var result = new BulkExtractionResult();
 
                 try
                 {
-                    Console.WriteLine("📋 Step 1: Validating configuration...");
+                     LoggerService.LogInformation("📋 Step 1: Validating configuration...");
                     if (!ValidateConfiguration())
                     {
                         return new BulkExtractionResult { ErrorMessage = "Configuration validation failed" };
                     }
 
-                    Console.WriteLine("\n📋 Step 2: Verifying folder structure...");
+                     LoggerService.LogInformation("\n📋 Step 2: Verifying folder structure...");
                     DisplayFolderStructure();
 
                     // ✅ NEW: Initialize extractor (creates folders automatically)
-                    Console.WriteLine("\n📋 Step 3: Initializing folder structure...");
+                     LoggerService.LogInformation("\n📋 Step 3: Initializing folder structure...");
                     var extractor = new BulkPdfExtractor(_config);
-                    Console.WriteLine("   ✅ Folder structure created/verified");
-                    Console.WriteLine($"   📂 Base path: {_bulkConfig.BasePdfPath}");
+                     LoggerService.LogInformation("   ✅ Folder structure created/verified");
+                     LoggerService.LogInformation($"   📂 Base path: {_bulkConfig.BasePdfPath}");
 
-                    Console.WriteLine("\n📋 Step 4: Processing PDFs...");
+                     LoggerService.LogInformation("\n📋 Step 4: Processing PDFs...");
                     result = extractor.ProcessAllPdfs();
 
                     return result;
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"\n❌ FATAL ERROR: {ex.Message}");
+                     LoggerService.LogInformation($"\n❌ FATAL ERROR: {ex.Message}");
                     result.ErrorMessage = ex.Message;
                     return result;
                 }
@@ -106,47 +111,47 @@ namespace Orchestrator
                 // Validate BasePdfPath
                 if (string.IsNullOrWhiteSpace(_bulkConfig.BasePdfPath))
                 {
-                    Console.WriteLine($"   ❌ BasePdfPath not configured");
+                     LoggerService.LogInformation($"   ❌ BasePdfPath not configured");
                     isValid = false;
                 }
                 else
                 {
-                    Console.WriteLine($"   ✅ BasePdfPath: {_bulkConfig.BasePdfPath}");
+                     LoggerService.LogInformation($"   ✅ BasePdfPath: {_bulkConfig.BasePdfPath}");
                 }
 
                 // Validate folder names
                 if (string.IsNullOrWhiteSpace(_bulkConfig.InputBulkFolder))
                 {
-                    Console.WriteLine($"   ❌ InputBulkFolder not configured");
+                     LoggerService.LogInformation($"   ❌ InputBulkFolder not configured");
                     isValid = false;
                 }
 
                 if (string.IsNullOrWhiteSpace(_bulkConfig.InputScannedFolder))
                 {
-                    Console.WriteLine($"   ❌ InputScannedFolder not configured");
+                     LoggerService.LogInformation($"   ❌ InputScannedFolder not configured");
                     isValid = false;
                 }
 
                 if (string.IsNullOrWhiteSpace(_bulkConfig.OutputReadyFolder))
                 {
-                    Console.WriteLine($"   ❌ OutputReadyFolder not configured");
+                     LoggerService.LogInformation($"   ❌ OutputReadyFolder not configured");
                     isValid = false;
                 }
 
                 // Validate processing settings
                 if (_bulkConfig.PagesPerConsent < 1)
                 {
-                    Console.WriteLine($"   ❌ PagesPerConsent must be >= 1");
+                     LoggerService.LogInformation($"   ❌ PagesPerConsent must be >= 1");
                     isValid = false;
                 }
                 else
                 {
-                    Console.WriteLine($"   ✅ PagesPerConsent: {_bulkConfig.PagesPerConsent}");
+                     LoggerService.LogInformation($"   ✅ PagesPerConsent: {_bulkConfig.PagesPerConsent}");
                 }
 
                 if (_bulkConfig.StartPage < 1)
                 {
-                    Console.WriteLine($"   ❌ StartPage must be >= 1");
+                     LoggerService.LogInformation($"   ❌ StartPage must be >= 1");
                     isValid = false;
                 }
 
@@ -163,39 +168,39 @@ namespace Orchestrator
             /// </summary>
             private void DisplaySummary(BulkExtractionResult result)
             {
-                Console.WriteLine("\n" + new string('═', 60));
-                Console.WriteLine("📊 BULK PDF EXTRACTION COMPLETE - Final Summary");
-                Console.WriteLine(new string('═', 60));
-                Console.WriteLine($"Total PDFs extracted: {result.TotalExtracted}");
-                Console.WriteLine($"Failed extractions: {result.FailedExtractions}");
+                 LoggerService.LogInformation("\n" + new string('═', 60));
+                 LoggerService.LogInformation("📊 BULK PDF EXTRACTION COMPLETE - Final Summary");
+                 LoggerService.LogInformation(new string('═', 60));
+                 LoggerService.LogInformation($"Total PDFs extracted: {result.TotalExtracted}");
+                 LoggerService.LogInformation($"Failed extractions: {result.FailedExtractions}");
 
                 if (result.DuplicatesFound > 0)
                 {
-                    Console.WriteLine($"⚠️  Duplicates detected: {result.DuplicatesFound}");
+                     LoggerService.LogInformation($"⚠️  Duplicates detected: {result.DuplicatesFound}");
                 }
 
-                Console.WriteLine($"Status: {(result.Success ? "✅ Success" : "⚠️  Completed with errors")}");
-                Console.WriteLine(new string('═', 60));
+                 LoggerService.LogInformation($"Status: {(result.Success ? "✅ Success" : "⚠️  Completed with errors")}");
+                 LoggerService.LogInformation(new string('═', 60));
 
                 if (result.ErrorMessages.Count > 0)
                 {
-                    Console.WriteLine($"\n⚠️  Errors ({result.ErrorMessages.Count}):");
+                     LoggerService.LogInformation($"\n⚠️  Errors ({result.ErrorMessages.Count}):");
                     foreach (var error in result.ErrorMessages.Take(10))
                     {
-                        Console.WriteLine($"   - {error}");
+                         LoggerService.LogInformation($"   - {error}");
                     }
                     if (result.ErrorMessages.Count > 10)
                     {
-                        Console.WriteLine($"   ... and {result.ErrorMessages.Count - 10} more");
+                         LoggerService.LogInformation($"   ... and {result.ErrorMessages.Count - 10} more");
                     }
                 }
 
-                Console.WriteLine($"\n📁 Output location:");
-                Console.WriteLine($"   {_bulkConfig.GetOutputReadyPath()}");
+                 LoggerService.LogInformation($"\n📁 Output location:");
+                 LoggerService.LogInformation($"   {_bulkConfig.GetOutputReadyPath()}");
 
                 if (result.Success)
                 {
-                    Console.WriteLine($"\n✅ Ready to proceed with Phase 2 processing!");
+                     LoggerService.LogInformation($"\n✅ Ready to proceed with Phase 2 processing!");
                 }
             }
 
@@ -203,18 +208,18 @@ namespace Orchestrator
 
             private void DisplayFolderStructure()
             {
-                Console.WriteLine($"   📁 Folder Structure:");
-                Console.WriteLine($"");
-                Console.WriteLine($"   📂 {_bulkConfig.BasePdfPath}");
-                Console.WriteLine($"   ├── 📁 1_Input_Bulk/     ← DROP BULK PDFs HERE");
-                Console.WriteLine($"   ├── 📁 2_Input_Scanned/  ← DROP SCANNED PDFs HERE");
-                Console.WriteLine($"   ├── 📁 3_Output_Ready/   ← Processed files (Phase 3 source)");
-                Console.WriteLine($"   ├── 📁 4_Error/          ← Failed files");
-                Console.WriteLine($"   └── 📁 5_Archive/");
-                Console.WriteLine($"       ├── 📁 Bulk/         ← Original bulk files");
-                Console.WriteLine($"       └── 📁 Scanned/      ← Original scans");
-                Console.WriteLine($"");
-                Console.WriteLine($"   💡 README.txt files created in each folder with instructions");
+                 LoggerService.LogInformation($"   📁 Folder Structure:");
+                 LoggerService.LogInformation($"");
+                 LoggerService.LogInformation($"   📂 {_bulkConfig.BasePdfPath}");
+                 LoggerService.LogInformation($"   ├── 📁 1_Input_Bulk/     ← DROP BULK PDFs HERE");
+                 LoggerService.LogInformation($"   ├── 📁 2_Input_Scanned/  ← DROP SCANNED PDFs HERE");
+                 LoggerService.LogInformation($"   ├── 📁 3_Output_Ready/   ← Processed files (Phase 3 source)");
+                 LoggerService.LogInformation($"   ├── 📁 4_Error/          ← Failed files");
+                 LoggerService.LogInformation($"   └── 📁 5_Archive/");
+                 LoggerService.LogInformation($"       ├── 📁 Bulk/         ← Original bulk files");
+                 LoggerService.LogInformation($"       └── 📁 Scanned/      ← Original scans");
+                 LoggerService.LogInformation($"");
+                 LoggerService.LogInformation($"   💡 README.txt files created in each folder with instructions");
             }
 
 
@@ -232,7 +237,7 @@ namespace Orchestrator
     {
         public static async Task<int> ExecuteAsync(string[] args)
         {
-            Console.WriteLine("🚀 ConsentSync - Bulk PDF Extraction Tool\n");
+             LoggerService.LogInformation("🚀 ConsentSync - Bulk PDF Extraction Tool\n");
 
             var config = ConfigurationService.GetConfiguration();
             var orchestrator = new BulkPdfExtractionOrchestrator(config);

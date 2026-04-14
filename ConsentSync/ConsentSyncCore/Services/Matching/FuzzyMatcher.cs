@@ -1,11 +1,12 @@
-﻿using System;
+﻿using ConsentSyncCore.Models;
+using ConsentSyncCore.Services;
+using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using System.Globalization;
-using ConsentSyncCore.Models;
-using ConsentSyncCore.Services;
 
 
 namespace ConsentSyncCore.Services.Matching
@@ -18,6 +19,7 @@ namespace ConsentSyncCore.Services.Matching
     public class FuzzyMatcher
     {
         private readonly FuzzyMatchingConfig _config;
+        private readonly ILogger<FuzzyMatcher> _logger;
 
         // Thresholds
         public double SingleResultThreshold => _config.SingleResultThreshold;
@@ -27,13 +29,14 @@ namespace ConsentSyncCore.Services.Matching
         public FuzzyMatcher(FuzzyMatchingConfig? config = null)
         {
             _config = config ?? ConfigurationService.GetFuzzyMatchingConfig();
+            _logger = LoggerService.GetLogger<FuzzyMatcher>();
 
             // Log configuration on startup
-            Console.WriteLine($"\n🔍 Fuzzy Matcher Configuration:");
-            Console.WriteLine($"   Compound name matching: {_config.TreatCompoundNamesAsPartialMatch}");
-            Console.WriteLine($"   Space-separated compounds: {_config.TreatSpaceSeparatedNamesAsCompound}");
-            Console.WriteLine($"   Compound match score: {_config.CompoundNameMatchScore}%");
-            Console.WriteLine($"   Min compound ratio: {_config.MinimumCompoundMatchRatio:P0}");
+             LoggerService.LogInformation($"\n🔍 Fuzzy Matcher Configuration:");
+             LoggerService.LogInformation($"   Compound name matching: {_config.TreatCompoundNamesAsPartialMatch}");
+             LoggerService.LogInformation($"   Space-separated compounds: {_config.TreatSpaceSeparatedNamesAsCompound}");
+             LoggerService.LogInformation($"   Compound match score: {_config.CompoundNameMatchScore}%");
+             LoggerService.LogInformation($"   Min compound ratio: {_config.MinimumCompoundMatchRatio:P0}");
         }
 
 
@@ -195,7 +198,7 @@ namespace ConsentSyncCore.Services.Matching
                         if (part.Equals(name2, StringComparison.OrdinalIgnoreCase))
                         {
                             var score = _config.CompoundNameMatchScore / 100.0;
-                            Console.WriteLine($"      Compound match: '{name1}' contains '{name2}' → {score * 100:F1}%");
+                             LoggerService.LogInformation($"      Compound match: '{name1}' contains '{name2}' → {score * 100:F1}%");
                             return score;
                         }
                     }
@@ -209,7 +212,7 @@ namespace ConsentSyncCore.Services.Matching
                         if (part.Equals(name1, StringComparison.OrdinalIgnoreCase))
                         {
                             var score = _config.CompoundNameMatchScore / 100.0;
-                            Console.WriteLine($"      Compound match: '{name2}' contains '{name1}' → {score * 100:F1}%");
+                             LoggerService.LogInformation($"      Compound match: '{name2}' contains '{name1}' → {score * 100:F1}%");
                             return score;
                         }
                     }
@@ -236,7 +239,7 @@ namespace ConsentSyncCore.Services.Matching
                         if (matchRatio >= _config.MinimumCompoundMatchRatio)
                         {
                             var score = matchRatio * (_config.CompoundNameMatchScore / 100.0);
-                            Console.WriteLine($"      Partial compound: {matchCount}/{Math.Max(parts1.Length, parts2.Length)} parts → {score * 100:F1}%");
+                             LoggerService.LogInformation($"      Partial compound: {matchCount}/{Math.Max(parts1.Length, parts2.Length)} parts → {score * 100:F1}%");
                             return score;
                         }
                     }

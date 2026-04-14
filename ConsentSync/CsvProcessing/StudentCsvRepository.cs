@@ -3,6 +3,7 @@ using ConsentSyncCore.Services;
 using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -18,7 +19,7 @@ namespace CsvProcessing
         private readonly CsvProcessingConfig _csvConfig;
         private readonly string _inputCsvFullPath;
         private readonly string _outputCsvFullPath;
-
+        private readonly ILogger<StudentCsvRepository> _logger;
 
         // Constructor with optional IConfiguration parameter for flexibility
 
@@ -33,16 +34,18 @@ namespace CsvProcessing
             _inputCsvFullPath = ConfigurationService.GetInputCsvFullPath();
             _outputCsvFullPath = ConfigurationService.GetOutputCsvFullPath();
 
+                _logger = LoggerService.GetLogger<StudentCsvRepository>();
+
             // ✅ DEBUG: Verify paths are resolved
-            Console.WriteLine($"\n📁 StudentCsvRepository Initialized:");
-            Console.WriteLine($"   Input Path:  {_inputCsvFullPath}");
-            Console.WriteLine($"   Output Path: {_outputCsvFullPath}");
+             LoggerService.LogInformation($"\n📁 StudentCsvRepository Initialized:");
+             LoggerService.LogInformation($"   Input Path:  {_inputCsvFullPath}");
+             LoggerService.LogInformation($"   Output Path: {_outputCsvFullPath}");
 
             // ✅ Check if placeholders are still present
             if (_outputCsvFullPath.Contains("{") || _outputCsvFullPath.Contains("}"))
             {
-                Console.WriteLine($"   ⚠️  WARNING: Placeholders not resolved in output path!");
-                Console.WriteLine($"   ⚠️  Raw path: {_outputCsvFullPath}");
+                 LoggerService.LogInformation($"   ⚠️  WARNING: Placeholders not resolved in output path!");
+                 LoggerService.LogInformation($"   ⚠️  Raw path: {_outputCsvFullPath}");
             }
         }
 
@@ -58,12 +61,12 @@ namespace CsvProcessing
         /// </summary>
         public void ProcessRawCsv()
         {
-            Console.WriteLine("📄 PRE-PROCESSING: Running StudentCsvProcessor...");
+             LoggerService.LogInformation("📄 PRE-PROCESSING: Running StudentCsvProcessor...");
 
             var processor = new StudentCsvProcessor(_config);
             processor.ProcessCsv();
 
-            Console.WriteLine("✅ Pre-processing complete\n");
+             LoggerService.LogInformation("✅ Pre-processing complete\n");
         }
 
 
@@ -83,7 +86,7 @@ namespace CsvProcessing
         {
             if (!ProcessedCsvExists())
             {
-                Console.WriteLine($"❌ Processed CSV not found: {_outputCsvFullPath}");
+                 LoggerService.LogInformation($"❌ Processed CSV not found: {_outputCsvFullPath}");
                 return;
             }
 
@@ -110,7 +113,7 @@ namespace CsvProcessing
                 throw new FileNotFoundException($"Processed CSV not found: {_outputCsvFullPath}");
             }
 
-            Console.WriteLine($"📖 Reading students from: {_outputCsvFullPath}");
+             LoggerService.LogInformation($"📖 Reading students from: {_outputCsvFullPath}");
 
             using var reader = new StreamReader(_outputCsvFullPath, Encoding.UTF8);
             using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
@@ -124,7 +127,7 @@ namespace CsvProcessing
             csv.Context.RegisterClassMap<StudentRecordMap>();
             var students = csv.GetRecords<StudentRecord>().ToList();
 
-            Console.WriteLine($"✅ Loaded {students.Count} student records\n");
+             LoggerService.LogInformation($"✅ Loaded {students.Count} student records\n");
             return students;
         }
 
@@ -139,7 +142,7 @@ namespace CsvProcessing
             var allStudents = ReadAll();
             var filtered = allStudents.Where(s => s.ClientIdStatus == status).ToList();
 
-            Console.WriteLine($"📊 Filtered {filtered.Count} students with status: {status}");
+             LoggerService.LogInformation($"📊 Filtered {filtered.Count} students with status: {status}");
             return filtered;
         }
 
@@ -161,7 +164,7 @@ namespace CsvProcessing
                 .Where(s => !string.IsNullOrWhiteSpace(s.ClientId))
                 .ToList();
 
-            Console.WriteLine($"📊 Found {withClientIds.Count} students with Client IDs");
+             LoggerService.LogInformation($"📊 Found {withClientIds.Count} students with Client IDs");
             return withClientIds;
         }
 
@@ -184,7 +187,7 @@ namespace CsvProcessing
 
             try
             {
-                Console.WriteLine($"💾 Saving {students.Count} students to: {_outputCsvFullPath}");
+                 LoggerService.LogInformation($"💾 Saving {students.Count} students to: {_outputCsvFullPath}");
 
                 // Write to temporary file first
                 using (var writer = new StreamWriter(tempFile, false, Encoding.UTF8))
@@ -200,11 +203,11 @@ namespace CsvProcessing
                 // Atomically replace the old file
                 File.Move(tempFile, _outputCsvFullPath, overwrite: true);
 
-                Console.WriteLine($"✅ Saved successfully\n");
+                 LoggerService.LogInformation($"✅ Saved successfully\n");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Save failed: {ex.Message}");
+                 LoggerService.LogInformation($"❌ Save failed: {ex.Message}");
 
                 // Clean up temp file
                 if (File.Exists(tempFile))
@@ -234,11 +237,11 @@ namespace CsvProcessing
             {
                 allStudents[index] = student;
                 SaveAll(allStudents);
-                Console.WriteLine($"✅ Updated: {student.FirstName} {student.LastName}");
+                 LoggerService.LogInformation($"✅ Updated: {student.FirstName} {student.LastName}");
             }
             else
             {
-                Console.WriteLine($"⚠️  Student not found: {student.FirstName} {student.LastName}");
+                 LoggerService.LogInformation($"⚠️  Student not found: {student.FirstName} {student.LastName}");
             }
         }
 
@@ -292,7 +295,7 @@ namespace CsvProcessing
         {
             if (records.Count == 0)
             {
-                Console.WriteLine("⚠️  No records to save");
+                 LoggerService.LogInformation("⚠️  No records to save");
                 return;
             }
 
@@ -306,7 +309,7 @@ namespace CsvProcessing
             }
 
             File.WriteAllLines(_outputCsvFullPath, lines, Encoding.UTF8);
-            Console.WriteLine($"✅ Saved {records.Count} CSV records");
+             LoggerService.LogInformation($"✅ Saved {records.Count} CSV records");
         }
 
 
@@ -410,13 +413,13 @@ namespace CsvProcessing
         {
             var stats = GetStatistics();
 
-            Console.WriteLine("\n📊 CSV Statistics:");
-            Console.WriteLine($"   Total records: {stats.TotalRecords}");
-            Console.WriteLine($"   Not processed: {stats.NotProcessed}");
-            Console.WriteLine($"   Found: {stats.Found}");
-            Console.WriteLine($"   Needs manual review: {stats.NeedsManualReview}");
-            Console.WriteLine($"   With Client IDs: {stats.WithClientIds}");
-            Console.WriteLine($"   Multi-page (File Rose): {stats.WithFileRose}\n");
+             LoggerService.LogInformation("\n📊 CSV Statistics:");
+             LoggerService.LogInformation($"   Total records: {stats.TotalRecords}");
+             LoggerService.LogInformation($"   Not processed: {stats.NotProcessed}");
+             LoggerService.LogInformation($"   Found: {stats.Found}");
+             LoggerService.LogInformation($"   Needs manual review: {stats.NeedsManualReview}");
+             LoggerService.LogInformation($"   With Client IDs: {stats.WithClientIds}");
+             LoggerService.LogInformation($"   Multi-page (File Rose): {stats.WithFileRose}\n");
         }
 
         #endregion

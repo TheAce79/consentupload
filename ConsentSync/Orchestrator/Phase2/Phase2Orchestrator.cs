@@ -6,6 +6,7 @@ using CsvHelper;
 using CsvHelper.Configuration;
 using CsvProcessing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Globalization;
 using System.Text;
@@ -23,6 +24,7 @@ namespace Orchestrator.Phase2
         private readonly FuzzyMatcher _fuzzyMatcher;
         private readonly SchoolContextConfig _schoolContext;
         private readonly BulkPdfExtractionConfig _bulkPdfConfig;
+        private readonly ILogger<Phase2Orchestrator> _logger;
 
         public Phase2Orchestrator(IConfiguration? config = null)
         {
@@ -33,6 +35,7 @@ namespace Orchestrator.Phase2
             _schoolContext = ConfigurationService.GetSchoolContextConfig();
             _csvRepo = new StudentCsvRepository(_config);
             _fuzzyMatcher = new FuzzyMatcher();
+            _logger = LoggerService.GetLogger<Phase2Orchestrator>();
         }
 
 
@@ -44,22 +47,22 @@ namespace Orchestrator.Phase2
             var pdfSourcePath = _bulkPdfConfig.GetOutputReadyPath();
             if (!Directory.Exists(pdfSourcePath))
             {
-                Console.WriteLine($"   ❌ PDF Source (OutputReady) not found: {pdfSourcePath}");
+                 LoggerService.LogInformation($"   ❌ PDF Source (OutputReady) not found: {pdfSourcePath}");
                 valid = false;
             }
             else
             {
-                Console.WriteLine($"   ✅ PDF Source (OutputReady): {pdfSourcePath}");
+                 LoggerService.LogInformation($"   ✅ PDF Source (OutputReady): {pdfSourcePath}");
             }
 
             if (!Directory.Exists(_phase2Config.RenamedPath))
             {
                 Directory.CreateDirectory(_phase2Config.RenamedPath);
-                Console.WriteLine($"   ✅ Created RenamedPath: {_phase2Config.RenamedPath}");
+                 LoggerService.LogInformation($"   ✅ Created RenamedPath: {_phase2Config.RenamedPath}");
             }
             else
             {
-                Console.WriteLine($"   ✅ RenamedPath: {_phase2Config.RenamedPath}");
+                 LoggerService.LogInformation($"   ✅ RenamedPath: {_phase2Config.RenamedPath}");
             }
 
             if (!string.IsNullOrWhiteSpace(_phase2Config.ErrorOutputDir))
@@ -67,11 +70,11 @@ namespace Orchestrator.Phase2
                 if (!Directory.Exists(_phase2Config.ErrorOutputDir))
                 {
                     Directory.CreateDirectory(_phase2Config.ErrorOutputDir);
-                    Console.WriteLine($"   ✅ Created ErrorOutputDir: {_phase2Config.ErrorOutputDir}");
+                     LoggerService.LogInformation($"   ✅ Created ErrorOutputDir: {_phase2Config.ErrorOutputDir}");
                 }
                 else
                 {
-                    Console.WriteLine($"   ✅ ErrorOutputDir: {_phase2Config.ErrorOutputDir}");
+                     LoggerService.LogInformation($"   ✅ ErrorOutputDir: {_phase2Config.ErrorOutputDir}");
                 }
             }
 
@@ -91,7 +94,7 @@ namespace Orchestrator.Phase2
                 // Check if ErrorOutputDir is configured
                 if (string.IsNullOrWhiteSpace(_phase2Config.ErrorOutputDir))
                 {
-                    Console.WriteLine($"         ⚠️  ErrorOutputDir not configured - file not moved");
+                     LoggerService.LogInformation($"         ⚠️  ErrorOutputDir not configured - file not moved");
                     return;
                 }
 
@@ -99,7 +102,7 @@ namespace Orchestrator.Phase2
                 if (!Directory.Exists(_phase2Config.ErrorOutputDir))
                 {
                     Directory.CreateDirectory(_phase2Config.ErrorOutputDir);
-                    Console.WriteLine($"         📁 Created error directory: {_phase2Config.ErrorOutputDir}");
+                     LoggerService.LogInformation($"         📁 Created error directory: {_phase2Config.ErrorOutputDir}");
                 }
 
                 // Generate new filename with reason prefix
@@ -111,11 +114,11 @@ namespace Orchestrator.Phase2
 
                 // Move the file
                 File.Copy(sourcePdfPath, destinationPath, overwrite: false);
-                Console.WriteLine($"         📤 copy to errors: {newFileName}");
+                 LoggerService.LogInformation($"         📤 copy to errors: {newFileName}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"         ⚠️  Failed to copy file to error directory: {ex.Message}");
+                 LoggerService.LogInformation($"         ⚠️  Failed to copy file to error directory: {ex.Message}");
             }
         }
 
@@ -123,16 +126,24 @@ namespace Orchestrator.Phase2
 
         public async Task<Phase2Result> RunAsync()
         {
-            Console.WriteLine("╔════════════════════════════════════════════════════════╗");
-            Console.WriteLine("║         ConsentSync - Phase 2: Process PDFs            ║");
-            Console.WriteLine("╚════════════════════════════════════════════════════════╝\n");
+            _logger.LogInformation("═══════════════════════════════════════════════════════");
+            _logger.LogInformation("ConsentSync - Phase 2: Process PDFs");
+            _logger.LogInformation("═══════════════════════════════════════════════════════");
+
+            // Or use the simpler static methods:
+            LoggerService.LogInformation("Starting Phase 2...");
+
+            // Rest of your code, replacing  LoggerService.LogInformation with:
+            LoggerService.LogInformation("Your message here");
+            LoggerService.LogWarning("Warning message");
+            LoggerService.LogError("Error message");
 
             var result = new Phase2Result();
 
             try
             {
                 // Step 1: Validate folders
-                Console.WriteLine("📋 Step 1: Validating folders...");
+                 LoggerService.LogInformation("📋 Step 1: Validating folders...");
                 if (!ValidateFolders())
                 {
                     result.HasErrors = true;
@@ -140,15 +151,15 @@ namespace Orchestrator.Phase2
                 }
 
                 // Step 2: Load student CSV
-                Console.WriteLine("\n📋 Step 2: Loading student data...");
+                 LoggerService.LogInformation("\n📋 Step 2: Loading student data...");
                 var students = _csvRepo.ReadAll()
                     .Where(s => !string.IsNullOrWhiteSpace(s.ClientId))
                     .ToList();
 
-                Console.WriteLine($"   ✅ Loaded {students.Count} students with Client IDs");
+                 LoggerService.LogInformation($"   ✅ Loaded {students.Count} students with Client IDs");
 
                 // ✅ Step 3: Create validation records from ALL students
-                Console.WriteLine($"\n📋 Step 3: Creating validation records...");
+                 LoggerService.LogInformation($"\n📋 Step 3: Creating validation records...");
                 var validationRecords = students.Select(s => new ValidationRecord
                 {
                     // Copy all student fields
@@ -177,30 +188,30 @@ namespace Orchestrator.Phase2
                     ValidationNotes = string.Empty
                 }).ToList();
 
-                Console.WriteLine($"   ✅ Created {validationRecords.Count} validation records");
+                 LoggerService.LogInformation($"   ✅ Created {validationRecords.Count} validation records");
 
                 // Step 4: Process PDFs
                 // Step 4: Process PDFs from BulkPdfExtraction OutputReady folder
                 var pdfSourcePath = _bulkPdfConfig.GetOutputReadyPath(); // ✅ Changed
 
-                Console.WriteLine($"\n📋 Step 4: Processing PDFs from: {pdfSourcePath}");
+                 LoggerService.LogInformation($"\n📋 Step 4: Processing PDFs from: {pdfSourcePath}");
 
                 var pdfFiles = Directory.GetFiles(pdfSourcePath, "*.pdf"); // ✅ Changed
                 result.TotalPdfs = pdfFiles.Length;
 
-                Console.WriteLine($"   Found {pdfFiles.Length} PDF files to process");
+                 LoggerService.LogInformation($"   Found {pdfFiles.Length} PDF files to process");
 
                 if (pdfFiles.Length == 0)
                 {
-                    Console.WriteLine("   ⚠️  No PDFs found in DownloadPath.");
-                    Console.WriteLine("   💡 User will need to manually download PDFs before running Pre-Phase 3");
+                     LoggerService.LogInformation("   ⚠️  No PDFs found in DownloadPath.");
+                     LoggerService.LogInformation("   💡 User will need to manually download PDFs before running Pre-Phase 3");
                 }
 
 
                 foreach (var pdfPath in pdfFiles)
                 {
                     var fileName = Path.GetFileName(pdfPath);
-                    Console.WriteLine($"\n   Processing: {fileName}");
+                     LoggerService.LogInformation($"\n   Processing: {fileName}");
 
                     try
                     {
@@ -216,39 +227,39 @@ namespace Orchestrator.Phase2
                             {
                                 firstName = fnameFromFile;
                                 lastName = lnameFromFile;
-                                Console.WriteLine($"      ✅ Extracted from filename: {firstName} {lastName}");
+                                 LoggerService.LogInformation($"      ✅ Extracted from filename: {firstName} {lastName}");
                             }
                             else
                             {
                                 // Filename parsing failed, fallback to PDF extraction
-                                Console.WriteLine($"      ⚠️  Failed to parse filename, falling back to PDF extraction...");
+                                 LoggerService.LogInformation($"      ⚠️  Failed to parse filename, falling back to PDF extraction...");
                                 var (fn, ln, pageCount) = PdfProcessor.ProcessSinglePdf(
                                     pdfPath,
                                     _phase2Config.DebugMode,
                                     _phase2Config.DebugOutputDir);
                                 firstName = fn;
                                 lastName = ln;
-                                Console.WriteLine($"      ✅ Extracted from PDF: {firstName} {lastName}");
+                                 LoggerService.LogInformation($"      ✅ Extracted from PDF: {firstName} {lastName}");
                             }
                         }
                         else {
 
                             // Extract from PDF content
-                            Console.WriteLine($"      📄 Reading PDF content...");
+                             LoggerService.LogInformation($"      📄 Reading PDF content...");
                             var (fn, ln, pageCount) = PdfProcessor.ProcessSinglePdf(
                                 pdfPath,
                                 _phase2Config.DebugMode,
                                 _phase2Config.DebugOutputDir);
                             firstName = fn;
                             lastName = ln;
-                            Console.WriteLine($"      ✅ Extracted from PDF: {firstName} {lastName}");
+                             LoggerService.LogInformation($"      ✅ Extracted from PDF: {firstName} {lastName}");
 
                         }
 
                         if (firstName == "Unknown" || lastName == "Unknown" ||
                             firstName == "Error" || lastName == "Error")
                         {
-                            Console.WriteLine($"      ❌ Failed to extract names from PDF");
+                             LoggerService.LogInformation($"      ❌ Failed to extract names from PDF");
                             CopyToErrorDirectory(pdfPath, "NameExtractionFailed");
                             result.FailedToMatch++;
                             result.ErrorMessages.Add($"{fileName}: Name extraction failed");
@@ -257,7 +268,7 @@ namespace Orchestrator.Phase2
                             continue;
                         }
 
-                        Console.WriteLine($"      Extracted: {firstName} {lastName}");
+                         LoggerService.LogInformation($"      Extracted: {firstName} {lastName}");
 
                         // ✅ Find matching validation record
                         var (matchedRecord, matchScore) = FindBestMatchingValidationRecord(
@@ -290,17 +301,17 @@ namespace Orchestrator.Phase2
                                 matchedRecord.ValidationNotes = $"Weak match ({matchScore:F1}%) - needs review";
                             }
 
-                            Console.WriteLine($"      ✅ Matched to Client ID: {matchedRecord.ClientId} (Score: {matchScore:F1}%)");
-                            Console.WriteLine($"         FileFound: {matchedRecord.FileFound}");
-                            Console.WriteLine($"         IsMatch: {matchedRecord.IsMatch}");
+                             LoggerService.LogInformation($"      ✅ Matched to Client ID: {matchedRecord.ClientId} (Score: {matchScore:F1}%)");
+                             LoggerService.LogInformation($"         FileFound: {matchedRecord.FileFound}");
+                             LoggerService.LogInformation($"         IsMatch: {matchedRecord.IsMatch}");
 
                             result.SuccessfullyProcessed++;
                         }
                         else
                         {
                             // ✅ File exists but NO match found in CSV at all
-                            Console.WriteLine($"      ⚠️  No matching student found in CSV");
-                            Console.WriteLine($"      💡 This PDF exists but doesn't match any student record");
+                             LoggerService.LogInformation($"      ⚠️  No matching student found in CSV");
+                             LoggerService.LogInformation($"      💡 This PDF exists but doesn't match any student record");
 
                             // ✅ Optional: Create an "orphan" validation record for this PDF
                             var orphanRecord = new ValidationRecord
@@ -327,7 +338,7 @@ namespace Orchestrator.Phase2
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"      ❌ Error: {ex.Message}");
+                         LoggerService.LogInformation($"      ❌ Error: {ex.Message}");
                         CopyToErrorDirectory(pdfPath, "ProcessingError");
                         result.FailedToMatch++;
                         result.ErrorMessages.Add($"{fileName}: {ex.Message}");
@@ -337,7 +348,7 @@ namespace Orchestrator.Phase2
 
 
                 // Step 5: Generate Validation CSV
-                Console.WriteLine($"\n📋 Step 5: Generating Validation_Results.csv...");
+                 LoggerService.LogInformation($"\n📋 Step 5: Generating Validation_Results.csv...");
                 GenerateValidationCsv(validationRecords);
 
                 // Step 6: Display summary
@@ -347,8 +358,8 @@ namespace Orchestrator.Phase2
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"\n❌ FATAL ERROR: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                 LoggerService.LogInformation($"\n❌ FATAL ERROR: {ex.Message}");
+                 LoggerService.LogInformation($"Stack trace: {ex.StackTrace}");
                 result.HasErrors = true;
                 return result;
             }
@@ -376,12 +387,12 @@ namespace Orchestrator.Phase2
 
             if (exactMatch != null)
             {
-                Console.WriteLine($"         Exact match found");
+                 LoggerService.LogInformation($"         Exact match found");
                 return (exactMatch, 100.0);
             }
 
             // Use fuzzy matching
-            Console.WriteLine($"         No exact match - using fuzzy matching...");
+             LoggerService.LogInformation($"         No exact match - using fuzzy matching...");
 
             var matches = records
                 .Select(r =>
@@ -397,12 +408,12 @@ namespace Orchestrator.Phase2
 
             if (matches.Count == 0)
             {
-                Console.WriteLine($"         No matches found (even at 60% threshold)");
+                 LoggerService.LogInformation($"         No matches found (even at 60% threshold)");
                 return (null, 0.0);
             }
 
             var bestMatch = matches.First();
-            Console.WriteLine($"         Fuzzy match: {bestMatch.Record.FirstName} {bestMatch.Record.LastName} (score: {bestMatch.Score:F1}%)");
+             LoggerService.LogInformation($"         Fuzzy match: {bestMatch.Record.FirstName} {bestMatch.Record.LastName} (score: {bestMatch.Score:F1}%)");
 
             // ✅ Return the best match regardless of score
             // The caller will decide if IsMatch should be true based on threshold
@@ -413,32 +424,32 @@ namespace Orchestrator.Phase2
 
         private void DisplaySummary(Phase2Result result, List<ValidationRecord> validationRecords)
         {
-            Console.WriteLine("\n" + new string('═', 60));
-            Console.WriteLine("📊 PHASE 2 COMPLETE - Final Summary");
-            Console.WriteLine(new string('═', 60));
-            Console.WriteLine($"Total PDFs found: {result.TotalPdfs}");
-            Console.WriteLine($"✅ Successfully processed: {result.SuccessfullyProcessed}");
-            Console.WriteLine($"❌ Failed to match: {result.FailedToMatch}");
-            Console.WriteLine($"\n📋 Validation CSV Statistics:");
-            Console.WriteLine($"   Total students: {validationRecords.Count}");
-            Console.WriteLine($"   Files found: {validationRecords.Count(r => r.FileFound)}");
-            Console.WriteLine($"   Files missing: {validationRecords.Count(r => !r.FileFound)}");
-            Console.WriteLine($"   Matched: {validationRecords.Count(r => r.IsMatch)}");
-            Console.WriteLine($"   Needs review: {validationRecords.Count(r => !r.FileFound || !r.IsMatch)}");
-            Console.WriteLine(new string('═', 60));
+             LoggerService.LogInformation("\n" + new string('═', 60));
+             LoggerService.LogInformation("📊 PHASE 2 COMPLETE - Final Summary");
+             LoggerService.LogInformation(new string('═', 60));
+             LoggerService.LogInformation($"Total PDFs found: {result.TotalPdfs}");
+             LoggerService.LogInformation($"✅ Successfully processed: {result.SuccessfullyProcessed}");
+             LoggerService.LogInformation($"❌ Failed to match: {result.FailedToMatch}");
+             LoggerService.LogInformation($"\n📋 Validation CSV Statistics:");
+             LoggerService.LogInformation($"   Total students: {validationRecords.Count}");
+             LoggerService.LogInformation($"   Files found: {validationRecords.Count(r => r.FileFound)}");
+             LoggerService.LogInformation($"   Files missing: {validationRecords.Count(r => !r.FileFound)}");
+             LoggerService.LogInformation($"   Matched: {validationRecords.Count(r => r.IsMatch)}");
+             LoggerService.LogInformation($"   Needs review: {validationRecords.Count(r => !r.FileFound || !r.IsMatch)}");
+             LoggerService.LogInformation(new string('═', 60));
 
             if (result.ErrorMessages.Count > 0)
             {
-                Console.WriteLine($"\n⚠️  Errors:");
+                 LoggerService.LogInformation($"\n⚠️  Errors:");
                 foreach (var error in result.ErrorMessages.Take(10))
                 {
-                    Console.WriteLine($"   - {error}");
+                     LoggerService.LogInformation($"   - {error}");
                 }
             }
 
-            Console.WriteLine($"\n✅ Next Step: Review Validation_Results.csv");
-            Console.WriteLine($"   - Fix records where FileFound=false or IsMatch=false");
-            Console.WriteLine($"   - Then run Pre-Phase 3 to process validated records");
+             LoggerService.LogInformation($"\n✅ Next Step: Review Validation_Results.csv");
+             LoggerService.LogInformation($"   - Fix records where FileFound=false or IsMatch=false");
+             LoggerService.LogInformation($"   - Then run Pre-Phase 3 to process validated records");
         }
 
 
@@ -483,13 +494,13 @@ namespace Orchestrator.Phase2
                 csv.WriteRecords(records);
             }
 
-            Console.WriteLine($"   ✅ Generated: {outputPath}");
-            Console.WriteLine($"   📊 Total records: {records.Count}");
+             LoggerService.LogInformation($"   ✅ Generated: {outputPath}");
+             LoggerService.LogInformation($"   📊 Total records: {records.Count}");
 
             var needsReview = records.Count(r => !r.FileFound || !r.IsMatch);
             if (needsReview > 0)
             {
-                Console.WriteLine($"   ⚠️  {needsReview} records need manual review (FileFound=false or IsMatch=false)");
+                 LoggerService.LogInformation($"   ⚠️  {needsReview} records need manual review (FileFound=false or IsMatch=false)");
             }
         }
 
@@ -529,11 +540,11 @@ namespace Orchestrator.Phase2
                     }
                 }
 
-                Console.WriteLine($"         ⚠️  Filename doesn't match expected format: {fileName}");
+                 LoggerService.LogInformation($"         ⚠️  Filename doesn't match expected format: {fileName}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"         ⚠️  Error parsing filename: {ex.Message}");
+                 LoggerService.LogInformation($"         ⚠️  Error parsing filename: {ex.Message}");
             }
 
             return (string.Empty, string.Empty, string.Empty);

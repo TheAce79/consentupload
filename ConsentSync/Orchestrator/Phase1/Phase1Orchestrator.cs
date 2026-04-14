@@ -5,7 +5,9 @@ using ConsentSyncCore.Services.Matching;
 using ConsentSyncCore.Services.Phis;
 using CsvProcessing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using OpenQA.Selenium;
+using Orchestrator.Phase3;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -34,6 +36,7 @@ namespace Orchestrator.Phase1
 
         private bool _shutdownRequested = false;
         private List<StudentRecord>? _currentStudentList;
+        private readonly ILogger<Phase1Orchestrator> _logger;
 
         public Phase1Orchestrator(IConfiguration? config = null)
         {
@@ -43,6 +46,7 @@ namespace Orchestrator.Phase1
 
             _phase1Config = ConfigurationService.GetPhase1Config();
             _phisConfig = ConfigurationService.GetPhisConfig();
+            _logger = LoggerService.GetLogger<Phase1Orchestrator>();
 
             // Register Ctrl+C handler for graceful shutdown
             Console.CancelKeyPress += OnShutdownRequested;
@@ -81,19 +85,19 @@ namespace Orchestrator.Phase1
         /// </summary>
         public async Task<Phase1Result> RunAsync()
         {
-            Console.WriteLine("╔════════════════════════════════════════════════════════╗");
-            Console.WriteLine("║         ConsentSync - Phase 1: Search Client IDs       ║");
-            Console.WriteLine("╚════════════════════════════════════════════════════════╝\n");
+             LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
+             LoggerService.LogInformation("║         ConsentSync - Phase 1: Search Client IDs       ║");
+             LoggerService.LogInformation("╚════════════════════════════════════════════════════════╝\n");
 
             var result = new Phase1Result();
 
             try
             {
                 // Step 1: Load and validate CSV
-                Console.WriteLine("📋 Step 1: Loading processed CSV...");
+                 LoggerService.LogInformation("📋 Step 1: Loading processed CSV...");
                 if (!_csvRepo.ProcessedCsvExists())
                 {
-                    Console.WriteLine("❌ Processed CSV not found. Please run  first.");
+                     LoggerService.LogInformation("❌ Processed CSV not found. Please run  first.");
                     return result;
                 }
 
@@ -101,7 +105,7 @@ namespace Orchestrator.Phase1
                 _currentStudentList = allStudents;
                 result.TotalStudents = allStudents.Count;
 
-                Console.WriteLine($"   ✅ Loaded {allStudents.Count} students");
+                 LoggerService.LogInformation($"   ✅ Loaded {allStudents.Count} students");
                 _csvRepo.DisplayStatistics();
 
                 // Step 2: Filter unprocessed students
@@ -111,37 +115,37 @@ namespace Orchestrator.Phase1
 
                 if (unprocessedStudents.Count == 0)
                 {
-                    Console.WriteLine("\n✅ All students already processed!");
+                     LoggerService.LogInformation("\n✅ All students already processed!");
                     return result;
                 }
 
-                Console.WriteLine($"\n📊 Found {unprocessedStudents.Count} students to process");
+                 LoggerService.LogInformation($"\n📊 Found {unprocessedStudents.Count} students to process");
                 result.ToProcessCount = unprocessedStudents.Count;
 
                 // Step 3: Initialize browser and services
-                Console.WriteLine("\n📋 Step 2: Initializing browser and services...");
+                 LoggerService.LogInformation("\n📋 Step 2: Initializing browser and services...");
                 if (!InitializeServices())
                 {
-                    Console.WriteLine("❌ Service initialization failed");
+                     LoggerService.LogInformation("❌ Service initialization failed");
                     return result;
                 }
 
                 // Step 4: Login to PHIS
-                Console.WriteLine("\n📋 Step 3: Logging into PHIS...");
+                 LoggerService.LogInformation("\n📋 Step 3: Logging into PHIS...");
                 if (!_sessionManager!.Login())
                 {
-                    Console.WriteLine("❌ Login failed. Cannot proceed.");
+                     LoggerService.LogInformation("❌ Login failed. Cannot proceed.");
                     return result;
                 }
 
-                Console.WriteLine("✅ Login successful");
+                 LoggerService.LogInformation("✅ Login successful");
 
                 // Step 5: Process students
-                Console.WriteLine("\n📋 Step 4: Searching for Client IDs...");
+                 LoggerService.LogInformation("\n📋 Step 4: Searching for Client IDs...");
                 await ProcessStudentsAsync(unprocessedStudents, result);
 
                 // Step 6: Final save
-                Console.WriteLine("\n💾 Saving final results...");
+                 LoggerService.LogInformation("\n💾 Saving final results...");
                 _csvRepo.SaveAll(allStudents);
 
                 // Step 7: Display summary
@@ -151,8 +155,8 @@ namespace Orchestrator.Phase1
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"\n❌ ERROR: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                 LoggerService.LogInformation($"\n❌ ERROR: {ex.Message}");
+                 LoggerService.LogInformation($"Stack trace: {ex.StackTrace}");
                 result.HasErrors = true;
                 return result;
             }
@@ -184,12 +188,12 @@ namespace Orchestrator.Phase1
                 // Create fuzzy matcher
                 _fuzzyMatcher = new FuzzyMatcher();
 
-                Console.WriteLine("✅ Services initialized successfully");
+                 LoggerService.LogInformation("✅ Services initialized successfully");
                 return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Service initialization failed: {ex.Message}");
+                 LoggerService.LogInformation($"❌ Service initialization failed: {ex.Message}");
                 return false;
             }
         }
@@ -206,25 +210,25 @@ namespace Orchestrator.Phase1
         {
             // Estimate completion time
             double estimatedMinutes = (students.Count * _phisConfig.DelayBetweenSearchesMs) / 60000.0;
-            Console.WriteLine($"\n⏱️  Estimated processing time: {estimatedMinutes:F1} minutes");
+             LoggerService.LogInformation($"\n⏱️  Estimated processing time: {estimatedMinutes:F1} minutes");
 
             if (estimatedMinutes > _phisConfig.SessionTimeoutMinutes && !_phisConfig.SessionRefreshEnabled)
             {
-                Console.WriteLine($"   ⚠️  WARNING: May exceed session timeout ({_phisConfig.SessionTimeoutMinutes} min)");
-                Console.WriteLine($"   💡 Consider enabling SessionRefreshEnabled in appsettings.json");
+                 LoggerService.LogInformation($"   ⚠️  WARNING: May exceed session timeout ({_phisConfig.SessionTimeoutMinutes} min)");
+                 LoggerService.LogInformation($"   💡 Consider enabling SessionRefreshEnabled in appsettings.json");
             }
             else if (_phisConfig.SessionRefreshEnabled && estimatedMinutes > _phisConfig.SessionTimeoutMinutes)
             {
-                Console.WriteLine($"   ✅ Auto-refresh enabled - session will be kept alive");
+                 LoggerService.LogInformation($"   ✅ Auto-refresh enabled - session will be kept alive");
             }
 
-            Console.WriteLine($"\n💡 TIP: Press Ctrl+C to save progress and exit gracefully\n");
+             LoggerService.LogInformation($"\n💡 TIP: Press Ctrl+C to save progress and exit gracefully\n");
 
             for (int i = 0; i < students.Count; i++)
             {
                 if (_shutdownRequested)
                 {
-                    Console.WriteLine("\n⚠️  Shutdown requested - saving progress...");
+                     LoggerService.LogInformation("\n⚠️  Shutdown requested - saving progress...");
                     break;
                 }
 
@@ -236,7 +240,7 @@ namespace Orchestrator.Phase1
                     DisplaySessionStatus();
                 }
 
-                Console.WriteLine($"\n[{i + 1}/{students.Count}] Processing: {student.FirstName} {student.LastName}");
+                 LoggerService.LogInformation($"\n[{i + 1}/{students.Count}] Processing: {student.FirstName} {student.LastName}");
 
                 try
                 {
@@ -246,7 +250,7 @@ namespace Orchestrator.Phase1
                     // Save progress periodically
                     if ((i + 1) % _phase1Config.SaveProgressEveryNRecords == 0)
                     {
-                        Console.WriteLine($"\n💾 Saving progress ({i + 1}/{students.Count} processed)...");
+                         LoggerService.LogInformation($"\n💾 Saving progress ({i + 1}/{students.Count} processed)...");
                         _csvRepo.SaveAll(_currentStudentList!);
                     }
 
@@ -258,7 +262,7 @@ namespace Orchestrator.Phase1
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"   ❌ Error: {ex.Message}");
+                     LoggerService.LogInformation($"   ❌ Error: {ex.Message}");
                     student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
                     result.ErrorCount++;
                 }
@@ -281,7 +285,7 @@ namespace Orchestrator.Phase1
 
                 if (!searchResult.Success)
                 {
-                    Console.WriteLine($"   ❌ Search failed: {searchResult.ErrorMessage}");
+                     LoggerService.LogInformation($"   ❌ Search failed: {searchResult.ErrorMessage}");
                     student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
                     result.ErrorCount++;
                     return false;
@@ -290,7 +294,7 @@ namespace Orchestrator.Phase1
                 // If no results found, try fallback searches
                 if (!searchResult.HasResults)
                 {
-                    Console.WriteLine($"   ⚠️  No results found");
+                     LoggerService.LogInformation($"   ⚠️  No results found");
                     return await TryFallbackSearchesAsync(student, result);
                 }
 
@@ -299,7 +303,7 @@ namespace Orchestrator.Phase1
 
                 if (bestMatch == null)
                 {
-                    Console.WriteLine($"   ⚠️  No confident match found");
+                     LoggerService.LogInformation($"   ⚠️  No confident match found");
                     return await TryFallbackSearchesAsync(student, result);
                 }
 
@@ -314,19 +318,19 @@ namespace Orchestrator.Phase1
                     student.ClientIdStatus = ClientIdStatus.Found;
                     student.BestMatch = string.Empty;
                     result.FoundCount++;
-                    Console.WriteLine($"   ✅ Client ID found: {bestMatch.ClientId} (score: {score:F2}%)");
+                     LoggerService.LogInformation($"   ✅ Client ID found: {bestMatch.ClientId} (score: {score:F2}%)");
                     return true;
                 }
                 else
                 {
-                    Console.WriteLine($"   ⚠️  Score too low: {score:F2}% (threshold: {threshold}%)");
+                     LoggerService.LogInformation($"   ⚠️  Score too low: {score:F2}% (threshold: {threshold}%)");
                     // ✅ Pass original best match to fallback searches
                     return await TryFallbackSearchesAsync(student, result, suggestion, bestMatch, score);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Processing error: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Processing error: {ex.Message}");
                 student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
                 result.ErrorCount++;
                 return false;
@@ -352,7 +356,7 @@ namespace Orchestrator.Phase1
             // Strategy 1: Try Medicare search if available
             if (!string.IsNullOrWhiteSpace(student.MedicareNumber))
             {
-                Console.WriteLine($"   🔄 Trying Medicare search...");
+                 LoggerService.LogInformation($"   🔄 Trying Medicare search...");
                 var medicareSuccess = await TryMedicareSearchAsync(student, result);
                 if (medicareSuccess)
                 {
@@ -361,7 +365,7 @@ namespace Orchestrator.Phase1
             }
 
             // Strategy 2: Try inverted date - NOW passing original best match!
-            Console.WriteLine($"   🔄 Trying inverted date search...");
+             LoggerService.LogInformation($"   🔄 Trying inverted date search...");
             var invertedSuccess = await TryInvertedDateSearchAsync(student, result, originalBestMatch, originalBestScore);
             if (invertedSuccess)
             {
@@ -375,7 +379,7 @@ namespace Orchestrator.Phase1
 
             if (!string.IsNullOrEmpty(originalSuggestion))
             {
-                Console.WriteLine($"   💡 Best match saved: {originalSuggestion}");
+                 LoggerService.LogInformation($"   💡 Best match saved: {originalSuggestion}");
             }
 
             return false;
@@ -394,13 +398,13 @@ namespace Orchestrator.Phase1
 
                 if (!medicareResult.Success)
                 {
-                    Console.WriteLine($"   ❌ Medicare search failed: {medicareResult.ErrorMessage}");
+                     LoggerService.LogInformation($"   ❌ Medicare search failed: {medicareResult.ErrorMessage}");
                     return false;
                 }
 
                 if (!medicareResult.HasResults)
                 {
-                    Console.WriteLine($"   ⚠️  No results found by Medicare number");
+                     LoggerService.LogInformation($"   ⚠️  No results found by Medicare number");
                     return false;
                 }
 
@@ -423,24 +427,24 @@ namespace Orchestrator.Phase1
                         student.ClientIdStatus = ClientIdStatus.Found;
                         student.BestMatch = string.Empty;
                         result.FoundCount++;
-                        Console.WriteLine($"   ✅ Client ID found via Medicare: {match.ClientId} (name match: {nameScore:F2}%)");
+                         LoggerService.LogInformation($"   ✅ Client ID found via Medicare: {match.ClientId} (name match: {nameScore:F2}%)");
                         return true;
                     }
                     else
                     {
-                        Console.WriteLine($"   ⚠️  Medicare match found but name mismatch (score: {nameScore:F2}%)");
+                         LoggerService.LogInformation($"   ⚠️  Medicare match found but name mismatch (score: {nameScore:F2}%)");
                         return false;
                     }
                 }
                 else
                 {
-                    Console.WriteLine($"   ⚠️  Multiple results ({medicareResult.Results.Count}) found by Medicare");
+                     LoggerService.LogInformation($"   ⚠️  Multiple results ({medicareResult.Results.Count}) found by Medicare");
                     return false;
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Medicare search error: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Medicare search error: {ex.Message}");
                 return false;
             }
         }
@@ -468,7 +472,7 @@ namespace Orchestrator.Phase1
                     System.Globalization.DateTimeStyles.None,
                     out DateTime originalDate))
                 {
-                    Console.WriteLine($"   ⚠️  Cannot parse date for inversion: {student.DateOfBirth}");
+                     LoggerService.LogInformation($"   ⚠️  Cannot parse date for inversion: {student.DateOfBirth}");
                     return false;
                 }
 
@@ -479,11 +483,11 @@ namespace Orchestrator.Phase1
                 // Don't search if inverted date is the same (e.g., 2012-10-10)
                 if (invertedDateString == student.DateOfBirth)
                 {
-                    Console.WriteLine($"   ℹ️  Date is symmetric, skipping inversion");
+                     LoggerService.LogInformation($"   ℹ️  Date is symmetric, skipping inversion");
                     return false;
                 }
 
-                Console.WriteLine($"   📅 Original: {student.DateOfBirth} → Inverted: {invertedDateString}");
+                 LoggerService.LogInformation($"   📅 Original: {student.DateOfBirth} → Inverted: {invertedDateString}");
 
                 // Search with inverted date
                 var searchResult = await _searchService!.SearchByDobAsync(
@@ -494,11 +498,11 @@ namespace Orchestrator.Phase1
 
                 if (!searchResult.Success || !searchResult.HasResults)
                 {
-                    Console.WriteLine($"   ⚠️  No results with inverted date");
+                     LoggerService.LogInformation($"   ⚠️  No results with inverted date");
                     return false;
                 }
 
-                Console.WriteLine($"   📊 Found {searchResult.Results.Count} result(s) with inverted date");
+                 LoggerService.LogInformation($"   📊 Found {searchResult.Results.Count} result(s) with inverted date");
 
                 // ✅ KEY FIX: Evaluate ALL results from inverted search
                 var invertedMatches = searchResult.Results
@@ -514,20 +518,20 @@ namespace Orchestrator.Phase1
 
                 if (bestInvertedMatch == null)
                 {
-                    Console.WriteLine($"   ⚠️  No confident match with inverted date");
+                     LoggerService.LogInformation($"   ⚠️  No confident match with inverted date");
                     return false;
                 }
 
-                Console.WriteLine($"   🔍 Best inverted match: {bestInvertedMatch.Result.FirstName} {bestInvertedMatch.Result.LastName}");
-                Console.WriteLine($"      Score: {bestInvertedMatch.FinalScore:F2}% (Name: {bestInvertedMatch.NameScore:F2}%)");
+                 LoggerService.LogInformation($"   🔍 Best inverted match: {bestInvertedMatch.Result.FirstName} {bestInvertedMatch.Result.LastName}");
+                 LoggerService.LogInformation($"      Score: {bestInvertedMatch.FinalScore:F2}% (Name: {bestInvertedMatch.NameScore:F2}%)");
 
                 // ✅ CRITICAL: Compare with original search's best match
                 double compareScore = originalBestScore;
                 PhisSearchResult? compareMatch = originalBestMatch;
 
-                Console.WriteLine($"\n   📊 Comparing results:");
-                Console.WriteLine($"      Original date best: {(compareMatch != null ? $"{compareMatch.FirstName} {compareMatch.LastName} - {compareScore:F2}%" : "None")}");
-                Console.WriteLine($"      Inverted date best: {bestInvertedMatch.Result.FirstName} {bestInvertedMatch.Result.LastName} - {bestInvertedMatch.FinalScore:F2}%");
+                 LoggerService.LogInformation($"\n   📊 Comparing results:");
+                 LoggerService.LogInformation($"      Original date best: {(compareMatch != null ? $"{compareMatch.FirstName} {compareMatch.LastName} - {compareScore:F2}%" : "None")}");
+                 LoggerService.LogInformation($"      Inverted date best: {bestInvertedMatch.Result.FirstName} {bestInvertedMatch.Result.LastName} - {bestInvertedMatch.FinalScore:F2}%");
 
                 // Select the HIGHEST confidence match regardless of which search found it
                 var threshold = searchResult.IsSingleResult
@@ -537,7 +541,7 @@ namespace Orchestrator.Phase1
                 // Use the better of the two matches
                 if (bestInvertedMatch.FinalScore > compareScore)
                 {
-                    Console.WriteLine($"   ✅ Inverted date match is BETTER ({bestInvertedMatch.FinalScore:F2}% vs {compareScore:F2}%)");
+                     LoggerService.LogInformation($"   ✅ Inverted date match is BETTER ({bestInvertedMatch.FinalScore:F2}% vs {compareScore:F2}%)");
 
                     if (bestInvertedMatch.FinalScore >= threshold)
                     {
@@ -545,24 +549,24 @@ namespace Orchestrator.Phase1
                         student.ClientIdStatus = ClientIdStatus.Found;
                         student.BestMatch = string.Empty;
                         result.FoundCount++;
-                        Console.WriteLine($"   ✅ Client ID found with INVERTED date: {bestInvertedMatch.Result.ClientId} (score: {bestInvertedMatch.FinalScore:F2}%)");
-                        Console.WriteLine($"   ⚠️  NOTE: Date in CSV may be incorrect! Original: {student.DateOfBirth}, Worked: {invertedDateString}");
+                         LoggerService.LogInformation($"   ✅ Client ID found with INVERTED date: {bestInvertedMatch.Result.ClientId} (score: {bestInvertedMatch.FinalScore:F2}%)");
+                         LoggerService.LogInformation($"   ⚠️  NOTE: Date in CSV may be incorrect! Original: {student.DateOfBirth}, Worked: {invertedDateString}");
                         return true;
                     }
                     else
                     {
-                        Console.WriteLine($"   ⚠️  Score still too low: {bestInvertedMatch.FinalScore:F2}% (threshold: {threshold}%)");
+                         LoggerService.LogInformation($"   ⚠️  Score still too low: {bestInvertedMatch.FinalScore:F2}% (threshold: {threshold}%)");
 
                         // Save best match info for manual review
                         string suggestion = $"{bestInvertedMatch.Result.FirstName}#{bestInvertedMatch.Result.LastName}#{bestInvertedMatch.Result.ClientId}#{bestInvertedMatch.FinalScore:F1}%";
                         student.BestMatch = suggestion;
-                        Console.WriteLine($"   💡 Best match saved: {suggestion}");
+                         LoggerService.LogInformation($"   💡 Best match saved: {suggestion}");
                         return false;
                     }
                 }
                 else
                 {
-                    Console.WriteLine($"   ℹ️  Original date match is better ({compareScore:F2}% vs {bestInvertedMatch.FinalScore:F2}%)");
+                     LoggerService.LogInformation($"   ℹ️  Original date match is better ({compareScore:F2}% vs {bestInvertedMatch.FinalScore:F2}%)");
 
                     // Original was better, but did it meet the threshold?
                     if (compareMatch != null && compareScore >= threshold)
@@ -571,19 +575,19 @@ namespace Orchestrator.Phase1
                         student.ClientIdStatus = ClientIdStatus.Found;
                         student.BestMatch = string.Empty;
                         result.FoundCount++;
-                        Console.WriteLine($"   ✅ Using original date match: {compareMatch.ClientId} (score: {compareScore:F2}%)");
+                         LoggerService.LogInformation($"   ✅ Using original date match: {compareMatch.ClientId} (score: {compareScore:F2}%)");
                         return true;
                     }
                     else
                     {
-                        Console.WriteLine($"   ⚠️  Neither match meets threshold ({threshold}%)");
+                         LoggerService.LogInformation($"   ⚠️  Neither match meets threshold ({threshold}%)");
 
                         // Save the better match for manual review
                         if (compareMatch != null)
                         {
                             string suggestion = $"{compareMatch.FirstName}#{compareMatch.LastName}#{compareMatch.ClientId}#{compareScore:F1}%";
                             student.BestMatch = suggestion;
-                            Console.WriteLine($"   💡 Best match saved: {suggestion}");
+                             LoggerService.LogInformation($"   💡 Best match saved: {suggestion}");
                         }
                         return false;
                     }
@@ -592,12 +596,12 @@ namespace Orchestrator.Phase1
             catch (ArgumentOutOfRangeException)
             {
                 // Invalid date combination (e.g., trying to create Feb 30th)
-                Console.WriteLine($"   ⚠️  Date inversion creates invalid date");
+                 LoggerService.LogInformation($"   ⚠️  Date inversion creates invalid date");
                 return false;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Inverted date search error: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Inverted date search error: {ex.Message}");
                 return false;
             }
         }
@@ -622,13 +626,13 @@ namespace Orchestrator.Phase1
             var stats = _sessionManager.GetStatistics();
             var timeRemaining = stats.TimeUntilTimeout;
 
-            Console.WriteLine($"\n⏱️  Session Status:");
-            Console.WriteLine($"   Time remaining: {timeRemaining.TotalMinutes:F1} minutes");
-            Console.WriteLine($"   Health: {stats.PercentageRemaining:F1}%");
+             LoggerService.LogInformation($"\n⏱️  Session Status:");
+             LoggerService.LogInformation($"   Time remaining: {timeRemaining.TotalMinutes:F1} minutes");
+             LoggerService.LogInformation($"   Health: {stats.PercentageRemaining:F1}%");
 
             if (stats.IsAboutToExpire)
             {
-                Console.WriteLine($"   ⚠️  Session expiring soon!");
+                 LoggerService.LogInformation($"   ⚠️  Session expiring soon!");
             }
         }
 
@@ -637,31 +641,31 @@ namespace Orchestrator.Phase1
         /// </summary>
         private void DisplaySummary(Phase1Result result)
         {
-            Console.WriteLine("\n" + new string('═', 60));
-            Console.WriteLine("📊 PHASE 1 COMPLETE - Final Summary");
-            Console.WriteLine(new string('═', 60));
-            Console.WriteLine($"Total students: {result.TotalStudents}");
-            Console.WriteLine($"To process: {result.ToProcessCount}");
-            Console.WriteLine($"✅ Client IDs found: {result.FoundCount}");
-            Console.WriteLine($"⚠️  Needs manual review: {result.ManualReviewCount}");
-            Console.WriteLine($"❌ Errors: {result.ErrorCount}");
-            Console.WriteLine($"📝 Total processed: {result.TotalProcessed}");
-            Console.WriteLine(new string('═', 60));
+             LoggerService.LogInformation("\n" + new string('═', 60));
+             LoggerService.LogInformation("📊 PHASE 1 COMPLETE - Final Summary");
+             LoggerService.LogInformation(new string('═', 60));
+             LoggerService.LogInformation($"Total students: {result.TotalStudents}");
+             LoggerService.LogInformation($"To process: {result.ToProcessCount}");
+             LoggerService.LogInformation($"✅ Client IDs found: {result.FoundCount}");
+             LoggerService.LogInformation($"⚠️  Needs manual review: {result.ManualReviewCount}");
+             LoggerService.LogInformation($"❌ Errors: {result.ErrorCount}");
+             LoggerService.LogInformation($"📝 Total processed: {result.TotalProcessed}");
+             LoggerService.LogInformation(new string('═', 60));
 
             if (result.ManualReviewCount > 0)
             {
-                Console.WriteLine($"\n⚠️  ACTION REQUIRED:");
-                Console.WriteLine($"   {result.ManualReviewCount} students need manual Client ID assignment");
-                Console.WriteLine($"   Review the CSV and fill in missing Client IDs");
-                Console.WriteLine($"   Then proceed to Phase 2");
+                 LoggerService.LogInformation($"\n⚠️  ACTION REQUIRED:");
+                 LoggerService.LogInformation($"   {result.ManualReviewCount} students need manual Client ID assignment");
+                 LoggerService.LogInformation($"   Review the CSV and fill in missing Client IDs");
+                 LoggerService.LogInformation($"   Then proceed to Phase 2");
             }
             else
             {
-                Console.WriteLine($"\n✅ All Client IDs found! Ready for Phase 2");
+                 LoggerService.LogInformation($"\n✅ All Client IDs found! Ready for Phase 2");
             }
 
             // Display updated statistics
-            Console.WriteLine();
+             LoggerService.LogInformation("========Display updated statistics==========");
             _csvRepo.DisplayStatistics();
         }
 
@@ -680,8 +684,8 @@ namespace Orchestrator.Phase1
         {
             if (_shutdownRequested) return;
 
-            Console.WriteLine("\n\n⚠️  Shutdown requested (Ctrl+C detected)");
-            Console.WriteLine("💾 Saving progress before exit...");
+             LoggerService.LogInformation("\n\n⚠️  Shutdown requested (Ctrl+C detected)");
+             LoggerService.LogInformation("💾 Saving progress before exit...");
 
             e.Cancel = true; // Prevent immediate termination
             _shutdownRequested = true;
@@ -692,15 +696,15 @@ namespace Orchestrator.Phase1
                 try
                 {
                     _csvRepo.SaveAll(_currentStudentList);
-                    Console.WriteLine("✅ Progress saved successfully!");
+                     LoggerService.LogInformation("✅ Progress saved successfully!");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"❌ Failed to save progress: {ex.Message}");
+                     LoggerService.LogInformation($"❌ Failed to save progress: {ex.Message}");
                 }
             }
 
-            Console.WriteLine("👋 Exiting safely...");
+             LoggerService.LogInformation("👋 Exiting safely...");
             Dispose();
             Environment.Exit(0);
         }
@@ -720,11 +724,11 @@ namespace Orchestrator.Phase1
             {
                 _driver?.Quit();
                 _driver?.Dispose();
-                Console.WriteLine("✅ ChromeDriver disposed");
+                 LoggerService.LogInformation("✅ ChromeDriver disposed");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"⚠️  Cleanup warning: {ex.Message}");
+                 LoggerService.LogInformation($"⚠️  Cleanup warning: {ex.Message}");
             }
         }
 

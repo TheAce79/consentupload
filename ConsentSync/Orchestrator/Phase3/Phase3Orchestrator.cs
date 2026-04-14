@@ -4,7 +4,9 @@ using ConsentSyncCore.Services.Phis;
 using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using OpenQA.Selenium;
+using Orchestrator.Phase2;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -24,6 +26,7 @@ namespace Orchestrator.Phase3
         private readonly IWebDriver _driver;
         private readonly PhisSearchService _phisSearchService;
         private readonly PhisSessionManager _sessionManager;
+        private readonly ILogger<Phase3Orchestrator> _logger;
 
         public Phase3Orchestrator(
             IConfiguration? config = null,
@@ -37,37 +40,38 @@ namespace Orchestrator.Phase3
             _driver = driver ?? throw new ArgumentNullException(nameof(driver));
             _phisSearchService = phisSearchService ?? throw new ArgumentNullException(nameof(phisSearchService));
             _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
+            _logger = LoggerService.GetLogger<Phase3Orchestrator>();
         }
 
 
 
         public async Task<Phase3Result> RunAsync()
         {
-            Console.WriteLine("╔════════════════════════════════════════════════════════╗");
-            Console.WriteLine("║       ConsentSync - Phase 3: Upload to PHIS            ║");
-            Console.WriteLine("║              TEST MODE: Set In Context Only            ║");
-            Console.WriteLine("╚════════════════════════════════════════════════════════╝\n");
+             LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
+             LoggerService.LogInformation("║       ConsentSync - Phase 3: Upload to PHIS            ║");
+             LoggerService.LogInformation("║              TEST MODE: Set In Context Only            ║");
+             LoggerService.LogInformation("╚════════════════════════════════════════════════════════╝\n");
 
             var result = new Phase3Result();
 
             try
             {
                 // Step 1: Load Upload_to_PHIS.csv
-                Console.WriteLine("📋 Step 1: Loading Upload_to_PHIS.csv...");
+                 LoggerService.LogInformation("📋 Step 1: Loading Upload_to_PHIS.csv...");
                 var uploadRecords = LoadUploadCsv();
                 result.TotalRecords = uploadRecords.Count;
 
-                Console.WriteLine($"   ✅ Loaded {uploadRecords.Count} upload records");
+                 LoggerService.LogInformation($"   ✅ Loaded {uploadRecords.Count} upload records");
 
                 if (uploadRecords.Count == 0)
                 {
-                    Console.WriteLine("\n⚠️  No records found in Upload_to_PHIS.csv!");
-                    Console.WriteLine("   💡 Please run Pre-Phase 3 first to generate this file");
+                     LoggerService.LogInformation("\n⚠️  No records found in Upload_to_PHIS.csv!");
+                     LoggerService.LogInformation("   💡 Please run Pre-Phase 3 first to generate this file");
                     return result;
                 }
 
                 // Step 2: Group by ClientID (multiple PDFs per client)
-                Console.WriteLine("\n📋 Step 2: Grouping records by Client ID...");
+                 LoggerService.LogInformation("\n📋 Step 2: Grouping records by Client ID...");
                 var clientGroups = uploadRecords
                     .Where(r => !string.IsNullOrWhiteSpace(r.ClientID))
                     .GroupBy(r => r.ClientID)
@@ -76,23 +80,23 @@ namespace Orchestrator.Phase3
                 var uniqueClients = clientGroups.Count;
                 result.UploadReadyRecords = uniqueClients;
 
-                Console.WriteLine($"   ✅ Found {uniqueClients} unique clients");
-                Console.WriteLine($"   📄 Total documents to upload: {uploadRecords.Count}");
+                 LoggerService.LogInformation($"   ✅ Found {uniqueClients} unique clients");
+                 LoggerService.LogInformation($"   📄 Total documents to upload: {uploadRecords.Count}");
 
                 // Step 3: Verify session is active
-                Console.WriteLine("\n📋 Step 3: Verifying PHIS session...");
+                 LoggerService.LogInformation("\n📋 Step 3: Verifying PHIS session...");
                 if (!_sessionManager.EnsureSessionValid())
                 {
-                    Console.WriteLine("   ❌ PHIS session is not valid!");
-                    Console.WriteLine("   💡 Please ensure you are logged into PHIS");
+                     LoggerService.LogInformation("   ❌ PHIS session is not valid!");
+                     LoggerService.LogInformation("   💡 Please ensure you are logged into PHIS");
                     result.HasErrors = true;
                     return result;
                 }
-                Console.WriteLine("   ✅ PHIS session is active");
+                 LoggerService.LogInformation("   ✅ PHIS session is active");
 
                 // Step 4: Process each client
-                Console.WriteLine($"\n📋 Step 4: Processing {uniqueClients} clients...");
-                Console.WriteLine($"   🧪 TEST MODE: Only setting clients in context\n");
+                 LoggerService.LogInformation($"\n📋 Step 4: Processing {uniqueClients} clients...");
+                 LoggerService.LogInformation($"   🧪 TEST MODE: Only setting clients in context\n");
 
                 int successCount = 0;
                 int failureCount = 0;
@@ -103,26 +107,26 @@ namespace Orchestrator.Phase3
                     var clientRecords = clientGroup.ToList();
                     var firstRecord = clientRecords.First();
 
-                    Console.WriteLine($"\n{new string('─', 60)}");
-                    Console.WriteLine($"Client: {firstRecord.FirstName} {firstRecord.LastName}");
-                    Console.WriteLine($"Client ID: {clientId}");
-                    Console.WriteLine($"Documents: {clientRecords.Count}");
+                     LoggerService.LogInformation($"\n{new string('─', 60)}");
+                     LoggerService.LogInformation($"Client: {firstRecord.FirstName} {firstRecord.LastName}");
+                     LoggerService.LogInformation($"Client ID: {clientId}");
+                     LoggerService.LogInformation($"Documents: {clientRecords.Count}");
 
                     // Display documents for this client
                     foreach (var record in clientRecords)
                     {
-                        Console.WriteLine($"   📄 {record.DocumentTitle} ({record.Description})");
+                         LoggerService.LogInformation($"   📄 {record.DocumentTitle} ({record.Description})");
                     }
 
                     try
                     {
                         // TEST: Only search and set in context (no upload yet)
-                        Console.WriteLine($"\n   🔍 Searching and setting in context...");
+                         LoggerService.LogInformation($"\n   🔍 Searching and setting in context...");
                         bool contextSet = await _phisSearchService.SearchByClientIdAndSetInContextAsync(clientId);
 
                         if (contextSet)
                         {
-                            Console.WriteLine($"   ✅ SUCCESS: Client set in context");
+                             LoggerService.LogInformation($"   ✅ SUCCESS: Client set in context");
                             successCount++;
                             result.SuccessfulUploads++;
 
@@ -134,7 +138,7 @@ namespace Orchestrator.Phase3
                         }
                         else
                         {
-                            Console.WriteLine($"   ❌ FAILED: Could not set client in context");
+                             LoggerService.LogInformation($"   ❌ FAILED: Could not set client in context");
                             failureCount++;
                             result.FailedUploads++;
                             result.ErrorMessages.Add($"{clientId}: Failed to set in context");
@@ -142,7 +146,7 @@ namespace Orchestrator.Phase3
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"   ❌ ERROR: {ex.Message}");
+                         LoggerService.LogInformation($"   ❌ ERROR: {ex.Message}");
                         failureCount++;
                         result.FailedUploads++;
                         result.ErrorMessages.Add($"{clientId} ({firstRecord.FirstName} {firstRecord.LastName}): {ex.Message}");
@@ -151,14 +155,14 @@ namespace Orchestrator.Phase3
                     // Session check every 10 clients
                     if ((successCount + failureCount) % 10 == 0 && (successCount + failureCount) > 0)
                     {
-                        Console.WriteLine($"\n   🔄 Session check after {successCount + failureCount} clients...");
+                         LoggerService.LogInformation($"\n   🔄 Session check after {successCount + failureCount} clients...");
                         if (!_sessionManager.EnsureSessionValid())
                         {
-                            Console.WriteLine($"   ⚠️  Session expired! Please refresh");
+                             LoggerService.LogInformation($"   ⚠️  Session expired! Please refresh");
                             result.HasErrors = true;
                             break;
                         }
-                        Console.WriteLine($"   ✅ Session still active");
+                         LoggerService.LogInformation($"   ✅ Session still active");
                     }
 
                     // Small delay between clients
@@ -172,8 +176,8 @@ namespace Orchestrator.Phase3
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"\n❌ FATAL ERROR: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                 LoggerService.LogInformation($"\n❌ FATAL ERROR: {ex.Message}");
+                 LoggerService.LogInformation($"Stack trace: {ex.StackTrace}");
                 result.HasErrors = true;
                 return result;
             }
@@ -197,7 +201,7 @@ namespace Orchestrator.Phase3
                 throw new FileNotFoundException($"Upload CSV not found: {csvPath}");
             }
 
-            Console.WriteLine($"   📂 Reading: {csvPath}");
+             LoggerService.LogInformation($"   📂 Reading: {csvPath}");
 
             using var reader = new StreamReader(csvPath, Encoding.UTF8);
             using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture));
@@ -210,47 +214,47 @@ namespace Orchestrator.Phase3
 
         private void DisplaySummary(Phase3Result result, int successCount, int failureCount, int totalDocuments)
         {
-            Console.WriteLine("\n" + new string('═', 60));
-            Console.WriteLine("📊 PHASE 3 TEST RUN COMPLETE - Final Summary");
-            Console.WriteLine(new string('═', 60));
-            Console.WriteLine($"Total records in CSV: {result.TotalRecords}");
-            Console.WriteLine($"Unique clients: {result.UploadReadyRecords}");
-            Console.WriteLine($"Total documents: {totalDocuments}");
-            Console.WriteLine($"\n🎯 Test Results:");
-            Console.WriteLine($"   ✅ Successfully set in context: {successCount}");
-            Console.WriteLine($"   ❌ Failed to set in context: {failureCount}");
+             LoggerService.LogInformation("\n" + new string('═', 60));
+             LoggerService.LogInformation("📊 PHASE 3 TEST RUN COMPLETE - Final Summary");
+             LoggerService.LogInformation(new string('═', 60));
+             LoggerService.LogInformation($"Total records in CSV: {result.TotalRecords}");
+             LoggerService.LogInformation($"Unique clients: {result.UploadReadyRecords}");
+             LoggerService.LogInformation($"Total documents: {totalDocuments}");
+             LoggerService.LogInformation($"\n🎯 Test Results:");
+             LoggerService.LogInformation($"   ✅ Successfully set in context: {successCount}");
+             LoggerService.LogInformation($"   ❌ Failed to set in context: {failureCount}");
 
             if (successCount > 0)
             {
                 double successRate = (double)successCount / result.UploadReadyRecords * 100;
-                Console.WriteLine($"   📈 Success rate: {successRate:F1}%");
+                 LoggerService.LogInformation($"   📈 Success rate: {successRate:F1}%");
             }
 
-            Console.WriteLine(new string('═', 60));
+             LoggerService.LogInformation(new string('═', 60));
 
             if (result.ErrorMessages.Count > 0)
             {
-                Console.WriteLine($"\n⚠️  Errors ({result.ErrorMessages.Count}):");
+                 LoggerService.LogInformation($"\n⚠️  Errors ({result.ErrorMessages.Count}):");
                 foreach (var error in result.ErrorMessages.Take(10))
                 {
-                    Console.WriteLine($"   - {error}");
+                     LoggerService.LogInformation($"   - {error}");
                 }
                 if (result.ErrorMessages.Count > 10)
                 {
-                    Console.WriteLine($"   ... and {result.ErrorMessages.Count - 10} more");
+                     LoggerService.LogInformation($"   ... and {result.ErrorMessages.Count - 10} more");
                 }
             }
 
-            Console.WriteLine($"\n💡 Next Steps:");
+             LoggerService.LogInformation($"\n💡 Next Steps:");
             if (successCount == result.UploadReadyRecords)
             {
-                Console.WriteLine($"   ✅ All clients successfully set in context!");
-                Console.WriteLine($"   📝 Ready to implement PDF upload functionality");
+                 LoggerService.LogInformation($"   ✅ All clients successfully set in context!");
+                 LoggerService.LogInformation($"   📝 Ready to implement PDF upload functionality");
             }
             else
             {
-                Console.WriteLine($"   ⚠️  Review errors above before proceeding");
-                Console.WriteLine($"   🔧 Fix any session or search issues");
+                 LoggerService.LogInformation($"   ⚠️  Review errors above before proceeding");
+                 LoggerService.LogInformation($"   🔧 Fix any session or search issues");
             }
         }
 

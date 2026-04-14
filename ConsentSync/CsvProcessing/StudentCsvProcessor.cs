@@ -1,6 +1,8 @@
-﻿using CsvHelper;
+﻿using ConsentSyncCore.Services;
+using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -21,6 +23,7 @@ namespace CsvProcessing
         private readonly string _lastNameColumn;
         private readonly Dictionary<string, object?> _additionalColumns;
         private readonly List<EncodingConfiguration> _encodingConfigs;
+        private readonly ILogger<StudentCsvProcessor> _logger;
 
         // Tracking for diagnostics
         private readonly List<ProcessingError> _processingErrors = new();
@@ -39,15 +42,17 @@ namespace CsvProcessing
             // Paths are now pre-resolved by ConfigurationService
             _inputCsvPath = Path.Combine(csvConfig.InputCsvPath, csvConfig.InputCsvFileName);
             _outputCsvPath = Path.Combine(csvConfig.OutputCsvPath, csvConfig.OutputCsvFileName);
+            _logger = LoggerService.GetLogger<StudentCsvProcessor>();
+
 
             // DEBUG: Verify paths are resolved
-            Console.WriteLine($"\n📁 StudentCsvProcessor Initialized:");
-            Console.WriteLine($"   Input Path:  {_inputCsvPath}");
-            Console.WriteLine($"   Output Path: {_outputCsvPath}");
+             LoggerService.LogInformation($"\n📁 StudentCsvProcessor Initialized:");
+             LoggerService.LogInformation($"   Input Path:  {_inputCsvPath}");
+             LoggerService.LogInformation($"   Output Path: {_outputCsvPath}");
 
             if (_inputCsvPath.Contains("{") || _outputCsvPath.Contains("{"))
             {
-                Console.WriteLine($"   ⚠️  WARNING: Placeholders still present!");
+                 LoggerService.LogInformation($"   ⚠️  WARNING: Placeholders still present!");
                 throw new InvalidOperationException("Path placeholders were not resolved. Check ConfigurationService.ResolvePath()");
             }
 
@@ -56,7 +61,7 @@ namespace CsvProcessing
             _inputDateFormats = csvConfig.InputDateFormats;
             _lastNameColumn = csvConfig.LastNameColumn;
 
-            Console.WriteLine($"📅 Configured to parse input dates using {_inputDateFormats.Length} format(s): {string.Join(", ", _inputDateFormats)}");
+             LoggerService.LogInformation($"📅 Configured to parse input dates using {_inputDateFormats.Length} format(s): {string.Join(", ", _inputDateFormats)}");
 
             // Load additional columns from configuration
             _additionalColumns = new Dictionary<string, object?>();
@@ -87,13 +92,13 @@ namespace CsvProcessing
 
             if (_encodingConfigs.Count == 0)
             {
-                Console.WriteLine("⚠ No encodings configured, using defaults");
+                 LoggerService.LogInformation("⚠ No encodings configured, using defaults");
                 _encodingConfigs = GetDefaultEncodingConfigurations();
             }
             else
             {
                 _encodingConfigs = _encodingConfigs.OrderBy(e => e.Priority).ToList();
-                Console.WriteLine($"📋 Loaded {_encodingConfigs.Count} encoding configurations");
+                 LoggerService.LogInformation($"📋 Loaded {_encodingConfigs.Count} encoding configurations");
             }
 
             // Ensure output directory exists
@@ -101,7 +106,7 @@ namespace CsvProcessing
             if (!string.IsNullOrEmpty(outputDir) && !Directory.Exists(outputDir))
             {
                 Directory.CreateDirectory(outputDir);
-                Console.WriteLine($"✅ Created output directory: {outputDir}");
+                 LoggerService.LogInformation($"✅ Created output directory: {outputDir}");
             }
         }
 
@@ -146,7 +151,7 @@ namespace CsvProcessing
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"⚠ Failed to load encoding '{config.Name}' (CodePage: {config.CodePage}): {ex.Message}");
+                 LoggerService.LogInformation($"⚠ Failed to load encoding '{config.Name}' (CodePage: {config.CodePage}): {ex.Message}");
                 return Encoding.UTF8; // Fallback
             }
         }
@@ -159,13 +164,13 @@ namespace CsvProcessing
         {
             if (!File.Exists(_inputCsvPath))
             {
-                Console.WriteLine($"❌ CSV file not found: {_inputCsvPath}");
+                 LoggerService.LogInformation($"❌ CSV file not found: {_inputCsvPath}");
                 return;
             }
 
-            Console.WriteLine($"\n📄 Processing CSV file...");
-            Console.WriteLine($"   Input:  {_inputCsvPath}");
-            Console.WriteLine($"   Output: {_outputCsvPath}");
+             LoggerService.LogInformation($"\n📄 Processing CSV file...");
+             LoggerService.LogInformation($"   Input:  {_inputCsvPath}");
+             LoggerService.LogInformation($"   Output: {_outputCsvPath}");
 
             // Reset diagnostics
             _processingErrors.Clear();
@@ -181,18 +186,18 @@ namespace CsvProcessing
 
                 if (records.Count == 0)
                 {
-                    Console.WriteLine("❌ No valid records found in CSV");
+                     LoggerService.LogInformation("❌ No valid records found in CSV");
                     PrintProcessingDiagnostics();
                     return;
                 }
 
-                Console.WriteLine($"\n✅ Successfully parsed {records.Count} records");
+                 LoggerService.LogInformation($"\n✅ Successfully parsed {records.Count} records");
 
                 // Transform Date of Birth column
                 TransformDates(records);
 
                 // Sort by Last Name
-                Console.WriteLine($"\n🔤 Sorting by: {_lastNameColumn}");
+                 LoggerService.LogInformation($"\n🔤 Sorting by: {_lastNameColumn}");
                 var sortedRecords = records
                     .OrderBy(r => r[_lastNameColumn], StringComparer.OrdinalIgnoreCase)
                     .ToList();
@@ -206,16 +211,16 @@ namespace CsvProcessing
                 // Print comprehensive diagnostics
                 PrintProcessingDiagnostics();
 
-                Console.WriteLine($"\n✅ CSV processing complete!");
-                Console.WriteLine($"   Output file: {_outputCsvPath}");
-                Console.WriteLine($"   Total records: {sortedRecords.Count}");
-                Console.WriteLine($"   Ready for Client ID search automation");
+                 LoggerService.LogInformation($"\n✅ CSV processing complete!");
+                 LoggerService.LogInformation($"   Output file: {_outputCsvPath}");
+                 LoggerService.LogInformation($"   Total records: {sortedRecords.Count}");
+                 LoggerService.LogInformation($"   Ready for Client ID search automation");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"\n❌ FATAL ERROR during CSV processing:");
-                Console.WriteLine($"   {ex.Message}");
-                Console.WriteLine($"   Stack trace: {ex.StackTrace}");
+                 LoggerService.LogInformation($"\n❌ FATAL ERROR during CSV processing:");
+                 LoggerService.LogInformation($"   {ex.Message}");
+                 LoggerService.LogInformation($"   Stack trace: {ex.StackTrace}");
                 PrintProcessingDiagnostics();
                 throw;
             }
@@ -227,7 +232,7 @@ namespace CsvProcessing
         /// </summary>
         private List<CsvRecord> ReadCsvWithCsvHelper()
         {
-            Console.WriteLine($"\n🔍 Reading CSV with CsvHelper library...");
+             LoggerService.LogInformation($"\n🔍 Reading CSV with CsvHelper library...");
 
             var records = new List<CsvRecord>();
             Encoding? successfulEncoding = null;
@@ -239,7 +244,7 @@ namespace CsvProcessing
                 try
                 {
                     var encoding = GetEncodingFromConfig(encodingConfig);
-                    Console.WriteLine($"   Trying: {encodingConfig.Name}...");
+                     LoggerService.LogInformation($"   Trying: {encodingConfig.Name}...");
 
                     using var reader = new StreamReader(_inputCsvPath, encoding);
                     using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
@@ -258,7 +263,7 @@ namespace CsvProcessing
                                 ErrorType = "BadData",
                                 Message = $"Malformed data: {context.RawRecord}"
                             });
-                            Console.WriteLine($"      ⚠ Row {context.Context.Parser.Row}: Bad data detected");
+                             LoggerService.LogInformation($"      ⚠ Row {context.Context.Parser.Row}: Bad data detected");
                         },
                         // ✅ FIX: Use correct event handler signature
                         ReadingExceptionOccurred = args =>
@@ -269,7 +274,7 @@ namespace CsvProcessing
                                 ErrorType = "ReadingException",
                                 Message = args.Exception.Message
                             });
-                            Console.WriteLine($"      ⚠ Reading exception: {args.Exception.Message}");
+                             LoggerService.LogInformation($"      ⚠ Reading exception: {args.Exception.Message}");
                             return false; // Don't throw, skip the row
                         }
                     });
@@ -281,19 +286,19 @@ namespace CsvProcessing
 
                     if (header == null || header.Count == 0)
                     {
-                        Console.WriteLine($"      ✗ No header found with {encodingConfig.Name}");
+                         LoggerService.LogInformation($"      ✗ No header found with {encodingConfig.Name}");
                         continue;
                     }
 
                     // Check for encoding issues in header
                     if (header.Any(h => h.Contains('?') || h.Contains('�')))
                     {
-                        Console.WriteLine($"      ✗ Encoding issues detected in header");
+                         LoggerService.LogInformation($"      ✗ Encoding issues detected in header");
                         continue;
                     }
 
-                    Console.WriteLine($"      ✓ Header looks good: {header.Count} columns");
-                    Console.WriteLine($"      Columns: {string.Join(", ", header.Take(5))}{(header.Count > 5 ? "..." : "")}");
+                     LoggerService.LogInformation($"      ✓ Header looks good: {header.Count} columns");
+                     LoggerService.LogInformation($"      Columns: {string.Join(", ", header.Take(5))}{(header.Count > 5 ? "..." : "")}");
 
                     // Add additional columns to header
                     var newHeader = new List<string>(header);
@@ -335,7 +340,7 @@ namespace CsvProcessing
                             if (isEmpty)
                             {
                                 _skippedEmptyRows++;
-                                Console.WriteLine($"      ⚠ Row {rowNumber}: Empty row, skipping");
+                                 LoggerService.LogInformation($"      ⚠ Row {rowNumber}: Empty row, skipping");
                                 continue;
                             }
 
@@ -372,22 +377,22 @@ namespace CsvProcessing
                                 ErrorType = "RowParsingError",
                                 Message = ex.Message
                             });
-                            Console.WriteLine($"      ⚠ Row {rowNumber}: Failed to parse - {ex.Message}");
+                             LoggerService.LogInformation($"      ⚠ Row {rowNumber}: Failed to parse - {ex.Message}");
                         }
                     }
 
                     // If we got here successfully, use this encoding
                     successfulEncoding = encoding;
-                    Console.WriteLine($"   ✅ Successfully read with {encodingConfig.Name}");
-                    Console.WriteLine($"      Total input rows: {_totalInputRows}");
-                    Console.WriteLine($"      Successfully parsed: {_successfullyParsedRows}");
-                    Console.WriteLine($"      Skipped (empty): {_skippedEmptyRows}");
-                    Console.WriteLine($"      Errors: {_processingErrors.Count}");
+                     LoggerService.LogInformation($"   ✅ Successfully read with {encodingConfig.Name}");
+                     LoggerService.LogInformation($"      Total input rows: {_totalInputRows}");
+                     LoggerService.LogInformation($"      Successfully parsed: {_successfullyParsedRows}");
+                     LoggerService.LogInformation($"      Skipped (empty): {_skippedEmptyRows}");
+                     LoggerService.LogInformation($"      Errors: {_processingErrors.Count}");
                     break;
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"      ✗ Failed with {encodingConfig.Name}: {ex.Message}");
+                     LoggerService.LogInformation($"      ✗ Failed with {encodingConfig.Name}: {ex.Message}");
                     records.Clear(); // Clear any partial results
                     _totalInputRows = 0;
                     _successfullyParsedRows = 0;
@@ -411,7 +416,7 @@ namespace CsvProcessing
             int dateErrorCount = 0;
             var failedDates = new List<string>();
 
-            Console.WriteLine($"\n📅 Transforming dates in column: {_dateOfBirthColumn}");
+             LoggerService.LogInformation($"\n📅 Transforming dates in column: {_dateOfBirthColumn}");
 
             foreach (var record in records)
             {
@@ -438,10 +443,10 @@ namespace CsvProcessing
                                 // DEBUG: Log first transformation
                                 if (dateTransformCount == 1)
                                 {
-                                    Console.WriteLine($"   🔍 First date transformation:");
-                                    Console.WriteLine($"      Original: '{originalDate}'");
-                                    Console.WriteLine($"      Format used: '{format}'");
-                                    Console.WriteLine($"      Result: '{parsedDate.ToString(_dateFormat)}'");
+                                     LoggerService.LogInformation($"   🔍 First date transformation:");
+                                     LoggerService.LogInformation($"      Original: '{originalDate}'");
+                                     LoggerService.LogInformation($"      Format used: '{format}'");
+                                     LoggerService.LogInformation($"      Result: '{parsedDate.ToString(_dateFormat)}'");
                                 }
 
                                 break;
@@ -454,7 +459,7 @@ namespace CsvProcessing
                             record[_dateOfBirthColumn] = parsedDate.ToString(_dateFormat);
                             dateTransformCount++;
                             parsed = true;
-                            Console.WriteLine($"   ⚠ Used general parsing for: '{originalDate}'");
+                             LoggerService.LogInformation($"   ⚠ Used general parsing for: '{originalDate}'");
                         }
 
                         if (!parsed)
@@ -466,22 +471,22 @@ namespace CsvProcessing
                 }
             }
 
-            Console.WriteLine($"\n   Transformed: {dateTransformCount} dates");
-            Console.WriteLine($"   Errors: {dateErrorCount} dates");
-            Console.WriteLine($"   Output format: {_dateFormat}");
+             LoggerService.LogInformation($"\n   Transformed: {dateTransformCount} dates");
+             LoggerService.LogInformation($"   Errors: {dateErrorCount} dates");
+             LoggerService.LogInformation($"   Output format: {_dateFormat}");
 
             if (failedDates.Count > 0)
             {
-                Console.WriteLine($"\n   ⚠ Failed to parse {failedDates.Count} date(s):");
+                 LoggerService.LogInformation($"\n   ⚠ Failed to parse {failedDates.Count} date(s):");
                 foreach (var date in failedDates.Take(10))
                 {
-                    Console.WriteLine($"      - '{date}'");
+                     LoggerService.LogInformation($"      - '{date}'");
                 }
                 if (failedDates.Count > 10)
                 {
-                    Console.WriteLine($"      ... and {failedDates.Count - 10} more");
+                     LoggerService.LogInformation($"      ... and {failedDates.Count - 10} more");
                 }
-                Console.WriteLine($"\n   💡 Add the correct format to 'InputDateFormats' in appsettings.json");
+                 LoggerService.LogInformation($"\n   💡 Add the correct format to 'InputDateFormats' in appsettings.json");
             }
         }
 
@@ -503,7 +508,7 @@ namespace CsvProcessing
         /// </summary>
         private void WriteCsv(List<CsvRecord> records, List<string> header)
         {
-            Console.WriteLine($"\n💾 Writing {records.Count} records to output...");
+             LoggerService.LogInformation($"\n💾 Writing {records.Count} records to output...");
 
             try
             {
@@ -532,15 +537,15 @@ namespace CsvProcessing
                     }
                 } // ✅ File handles are released HERE when using block exits
 
-                Console.WriteLine($"   ✅ Successfully wrote {records.Count} records");
+                 LoggerService.LogInformation($"   ✅ Successfully wrote {records.Count} records");
 
                 // ✅ NOW it's safe to verify - file is closed
                 var verifyLines = File.ReadAllLines(_outputCsvPath, Encoding.UTF8);
-                Console.WriteLine($"   ✅ Verification: File contains {verifyLines.Length} lines (including header)");
+                 LoggerService.LogInformation($"   ✅ Verification: File contains {verifyLines.Length} lines (including header)");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Write failed: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Write failed: {ex.Message}");
                 throw;
             }
         }
@@ -551,45 +556,45 @@ namespace CsvProcessing
         /// </summary>
         private void PrintProcessingDiagnostics()
         {
-            Console.WriteLine("\n" + new string('═', 70));
-            Console.WriteLine("📊 CSV PROCESSING DIAGNOSTICS");
-            Console.WriteLine(new string('═', 70));
+             LoggerService.LogInformation("\n" + new string('═', 70));
+             LoggerService.LogInformation("📊 CSV PROCESSING DIAGNOSTICS");
+             LoggerService.LogInformation(new string('═', 70));
 
-            Console.WriteLine($"Total input rows (excluding header): {_totalInputRows}");
-            Console.WriteLine($"Successfully parsed rows: {_successfullyParsedRows}");
-            Console.WriteLine($"Skipped empty rows: {_skippedEmptyRows}");
-            Console.WriteLine($"Malformed/bad data rows: {_malformedRows}");
-            Console.WriteLine($"Other errors: {_processingErrors.Count - _malformedRows}");
+             LoggerService.LogInformation($"Total input rows (excluding header): {_totalInputRows}");
+             LoggerService.LogInformation($"Successfully parsed rows: {_successfullyParsedRows}");
+             LoggerService.LogInformation($"Skipped empty rows: {_skippedEmptyRows}");
+             LoggerService.LogInformation($"Malformed/bad data rows: {_malformedRows}");
+             LoggerService.LogInformation($"Other errors: {_processingErrors.Count - _malformedRows}");
 
             int lostRows = _totalInputRows - _successfullyParsedRows;
             if (lostRows > 0)
             {
-                Console.WriteLine($"\n⚠️  ROWS LOST: {lostRows}");
-                Console.WriteLine($"   Breakdown:");
-                Console.WriteLine($"   - Empty rows: {_skippedEmptyRows}");
-                Console.WriteLine($"   - Malformed data: {_malformedRows}");
-                Console.WriteLine($"   - Other errors: {_processingErrors.Count - _malformedRows}");
+                 LoggerService.LogInformation($"\n⚠️  ROWS LOST: {lostRows}");
+                 LoggerService.LogInformation($"   Breakdown:");
+                 LoggerService.LogInformation($"   - Empty rows: {_skippedEmptyRows}");
+                 LoggerService.LogInformation($"   - Malformed data: {_malformedRows}");
+                 LoggerService.LogInformation($"   - Other errors: {_processingErrors.Count - _malformedRows}");
             }
 
             if (_processingErrors.Count > 0)
             {
-                Console.WriteLine($"\n❌ DETAILED ERRORS ({_processingErrors.Count} total):");
+                 LoggerService.LogInformation($"\n❌ DETAILED ERRORS ({_processingErrors.Count} total):");
                 var errorGroups = _processingErrors.GroupBy(e => e.ErrorType);
                 foreach (var group in errorGroups)
                 {
-                    Console.WriteLine($"\n   {group.Key}: {group.Count()} occurrences");
+                     LoggerService.LogInformation($"\n   {group.Key}: {group.Count()} occurrences");
                     foreach (var error in group.Take(5))
                     {
-                        Console.WriteLine($"      Row {error.RowNumber}: {error.Message}");
+                         LoggerService.LogInformation($"      Row {error.RowNumber}: {error.Message}");
                     }
                     if (group.Count() > 5)
                     {
-                        Console.WriteLine($"      ... and {group.Count() - 5} more");
+                         LoggerService.LogInformation($"      ... and {group.Count() - 5} more");
                     }
                 }
             }
 
-            Console.WriteLine(new string('═', 70));
+             LoggerService.LogInformation(new string('═', 70));
         }
 
         /// <summary>
@@ -599,29 +604,29 @@ namespace CsvProcessing
         {
             if (!File.Exists(_outputCsvPath))
             {
-                Console.WriteLine($"❌ Output CSV file not found: {_outputCsvPath}");
+                 LoggerService.LogInformation($"❌ Output CSV file not found: {_outputCsvPath}");
                 return;
             }
 
             var lines = File.ReadAllLines(_outputCsvPath, Encoding.UTF8).Take(maxRows + 1).ToList();
 
-            Console.WriteLine($"\n📋 Preview of processed CSV (first {maxRows} rows):");
-            Console.WriteLine(new string('═', 100));
+             LoggerService.LogInformation($"\n📋 Preview of processed CSV (first {maxRows} rows):");
+             LoggerService.LogInformation(new string('═', 100));
 
             foreach (var line in lines)
             {
                 // Truncate very long lines for display
                 if (line.Length > 150)
                 {
-                    Console.WriteLine(line.Substring(0, 147) + "...");
+                     LoggerService.LogInformation(line.Substring(0, 147) + "...");
                 }
                 else
                 {
-                    Console.WriteLine(line);
+                     LoggerService.LogInformation(line);
                 }
             }
 
-            Console.WriteLine(new string('═', 100));
+             LoggerService.LogInformation(new string('═', 100));
         }
     }
 
