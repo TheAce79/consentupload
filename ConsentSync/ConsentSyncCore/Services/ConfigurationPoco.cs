@@ -19,6 +19,50 @@ namespace ConsentSyncCore.Services
     }
 
 
+
+    /// <summary>
+    /// Bulk PDF Extraction configuration (standalone - can run at any phase)
+    /// Organized folder structure: 1_Input_Bulk, 2_Input_Scanned, 3_Output_Ready, 4_Error, 5_Archive
+    /// </summary>
+    public class BulkPdfExtractionConfig
+    {
+        public bool Enabled { get; set; }
+        public string Description { get; set; } = string.Empty;
+
+        // Base path for all PDF operations
+        public string BasePdfPath { get; set; } = string.Empty;
+
+        // Folder names (relative to BasePdfPath) - numbered for workflow clarity
+        public string InputBulkFolder { get; set; } = "1_Input_Bulk";
+        public string InputScannedFolder { get; set; } = "2_Input_Scanned";
+        public string OutputReadyFolder { get; set; } = "3_Output_Ready";
+        public string ErrorFolder { get; set; } = "4_Error";
+        public string ArchiveFolder { get; set; } = "5_Archive";
+
+        // Processing settings
+        public int PagesPerConsent { get; set; } = 1;
+        public int StartPage { get; set; } = 1;
+        public bool AutoDetectNames { get; set; } = true;
+
+        // Naming format: {ID}_{LastName}_{FirstName}_consent.pdf
+        public string NamingFormat { get; set; } = "{ID}_{LastName}_{FirstName}_consent";
+
+        public bool OverwriteExisting { get; set; } = false;
+        public bool MoveToArchiveAfterProcessing { get; set; } = true;
+        public bool MoveErrorPdfsToErrorFolder { get; set; } = true;
+
+    
+
+        // Computed properties for full paths
+        public string GetInputBulkPath() => Path.Combine(BasePdfPath, InputBulkFolder);
+        public string GetInputScannedPath() => Path.Combine(BasePdfPath, InputScannedFolder);
+        public string GetOutputReadyPath() => Path.Combine(BasePdfPath, OutputReadyFolder);
+        public string GetErrorPath() => Path.Combine(BasePdfPath, ErrorFolder);
+        public string GetArchivePath() => Path.Combine(BasePdfPath, ArchiveFolder);
+        public string GetArchiveBulkPath() => Path.Combine(GetArchivePath(), "Bulk");
+        public string GetArchiveScannedPath() => Path.Combine(GetArchivePath(), "Scanned");
+    }
+
     /// <summary>
     /// CSV Processing configuration
     /// </summary>

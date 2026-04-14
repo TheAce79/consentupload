@@ -1,14 +1,16 @@
 ﻿using ConsentSyncCore.Services;
-using ConsentSyncCore.Services.Phis;
 using ConsentSyncCore.Services.Browser;
+using ConsentSyncCore.Services.Pdf;
+using ConsentSyncCore.Services.Phis;
 using CsvProcessing;
 using Microsoft.Extensions.Configuration;
+using OpenQA.Selenium;
 using Orchestrator.Phase1;
 using Orchestrator.Phase2;
 using Orchestrator.Phase3;
 using Orchestrator.PrePhase3;
 using System.Text;
-using OpenQA.Selenium;
+using static Orchestrator.BulkPdfExtraction;
 
 
 namespace Orchestrator
@@ -18,10 +20,11 @@ namespace Orchestrator
 
         static async Task<int> Main(string[] args)
         {
-            // Register encoding provider for legacy encodings (required for CSV processing)
-            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
-            PrintHeader();
+           
+          
+
+           
 
             // Declare PHIS components at program scope
             IWebDriver? driver = null;
@@ -30,8 +33,97 @@ namespace Orchestrator
 
             try
             {
-                // Load configuration
+
+                // Register encoding provider for legacy encodings (required for CSV processing)
+                Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
+                PrintHeader();
+
+
+
+                Console.WriteLine("╔════════════════════════════════════════════════════════╗");
+                Console.WriteLine("║             ConsentSync - Automated System            ║");
+                Console.WriteLine("╚════════════════════════════════════════════════════════╝");
+
+                // ✅ Load configuration
                 var config = ConfigurationService.GetConfiguration();
+                var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+
+                // ✅ Initialize folder structure by creating BulkPdfExtractor instance
+                // (constructor automatically creates folders and README files)
+                Console.WriteLine($"\n📂 Initializing folder structure...");
+                try
+                {
+                    var _ = new BulkPdfExtractor(config); // This triggers EnsureDirectoriesExist() and CreateReadmeFiles()
+                    Console.WriteLine($"   ✅ Folder structure created/verified");
+                    Console.WriteLine($"   ✅ README files created");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"   ⚠️  Warning: Could not initialize folder structure: {ex.Message}");
+                }
+
+                // ✅ Display folder locations
+                Console.WriteLine($"\n📂 Working Directory: {bulkConfig.BasePdfPath}");
+                Console.WriteLine($"   Please place your PDF files in the appropriate folders:");
+                Console.WriteLine($"   - Bulk downloads → 1_Input_Bulk/");
+                Console.WriteLine($"   - Scanned forms  → 2_Input_Scanned/");
+                Console.WriteLine($"\n   ℹ️  Check README.txt files in each folder for details\n");
+
+
+                // Check for standalone bulk extraction command
+                if (args.Contains("--extract-bulk") || args.Contains("-b"))
+                {
+                    return await BulkPdfExtractionCommand.ExecuteAsync(args);
+                }
+
+
+
+                
+                if (bulkConfig.Enabled)
+                {
+                    Console.WriteLine("\n╔════════════════════════════════════════════════════════╗");
+                    Console.WriteLine("║           BULK PDF EXTRACTION (Pre-Processing)         ║");
+                    Console.WriteLine("╚════════════════════════════════════════════════════════╝");
+
+                    var bulkOrchestrator = new BulkPdfExtractionOrchestrator(config);
+
+                    if (bulkOrchestrator.IsPdfAvailable())
+                    {
+                        Console.WriteLine("\n💡 Bulk PDF detected - would you like to extract it now?");
+                        Console.WriteLine("   This will create individual PDFs for processing.");
+                        Console.WriteLine("\n   Press [Y] to extract, [N] to skip...");
+
+                        var key = Console.ReadKey(true);
+                        if (key.Key == ConsoleKey.Y)
+                        {
+                            var bulkResult = await bulkOrchestrator.RunAsync();
+
+                            if (!bulkResult.Success)
+                            {
+                                Console.WriteLine("\n⚠️  Bulk extraction had errors - continue anyway?");
+                                Console.WriteLine("   Press [Y] to continue, [N] to exit...");
+
+                                var continueKey = Console.ReadKey(true);
+                                if (continueKey.Key != ConsoleKey.Y)
+                                {
+                                    return 1;
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"\n💡 Bulk PDF extraction enabled but no bulk PDF found");
+                        Console.WriteLine($"   Place bulk PDF at: {bulkConfig.BasePdfPath}");
+                        Console.WriteLine($"   Continuing with normal workflow...");
+                    }
+                }
+
+
+                // ═══════════════════════════════════════════════════════════
+                // Continue with existing phases (CSV, Phase 1, 2, 3, etc.)
+                // ═══════════════════════════════════════════════════════════
 
                 // Get all phase configurations
                 var csvConfig = ConfigurationService.GetCsvConfig();

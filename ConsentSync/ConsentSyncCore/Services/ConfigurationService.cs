@@ -154,6 +154,58 @@ namespace ConsentSyncCore.Services
 
 
 
+        #region Bulk Pdf Configuration
+
+
+
+        /// <summary>
+        /// Get Bulk PDF Extraction configuration with new folder structure
+        /// </summary>
+        public static BulkPdfExtractionConfig GetBulkPdfExtractionConfig()
+        {
+            var config = GetConfiguration();
+            var section = config.GetSection("BulkPdfExtraction");
+
+            var bulkConfig = new BulkPdfExtractionConfig
+            {
+                Enabled = section.GetValue<bool>("Enabled", false),
+                Description = section.GetValue<string>("Description") ?? "",
+
+                // ✅ NEW: Base path and folder structure
+                BasePdfPath = section.GetValue<string>("BasePdfPath") ?? "",
+                InputBulkFolder = section.GetValue<string>("InputBulkFolder") ?? "1_Input_Bulk",
+                InputScannedFolder = section.GetValue<string>("InputScannedFolder") ?? "2_Input_Scanned",
+                OutputReadyFolder = section.GetValue<string>("OutputReadyFolder") ?? "3_Output_Ready",
+                ErrorFolder = section.GetValue<string>("ErrorFolder") ?? "4_Error",
+                ArchiveFolder = section.GetValue<string>("ArchiveFolder") ?? "5_Archive",
+
+                // Processing settings
+                PagesPerConsent = section.GetValue<int>("PagesPerConsent", 1),
+                StartPage = section.GetValue<int>("StartPage", 1),
+                AutoDetectNames = section.GetValue<bool>("AutoDetectNames", true),
+                NamingFormat = section.GetValue<string>("NamingFormat") ?? "{ID}_{LastName}_{FirstName}_consent",
+                OverwriteExisting = section.GetValue<bool>("OverwriteExisting", false),
+                MoveToArchiveAfterProcessing = section.GetValue<bool>("MoveToArchiveAfterProcessing", true),
+                MoveErrorPdfsToErrorFolder = section.GetValue<bool>("MoveErrorPdfsToErrorFolder", true),
+
+            };
+
+            // ✅ Resolve BasePdfPath with placeholders using ResolvePath
+            bulkConfig.BasePdfPath = ResolvePath(bulkConfig.BasePdfPath);
+
+
+
+            return bulkConfig;
+        }
+
+
+
+
+
+        #endregion Bulk Pdf Configuration
+
+
+
 
         #region CSV Processing Configuration
 
