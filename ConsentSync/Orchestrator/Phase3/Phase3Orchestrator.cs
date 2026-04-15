@@ -1,5 +1,4 @@
 ﻿
-
 using ConsentSyncCore.Models;
 using ConsentSyncCore.Services;
 using ConsentSyncCore.Services.Phis;
@@ -51,7 +50,7 @@ namespace Orchestrator.Phase3
         {
             LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
             LoggerService.LogInformation("║       ConsentSync - Phase 3: Upload to PHIS            ║");
-            LoggerService.LogInformation("║     TEST MODE: Set Context + Navigate to Consents      ║");
+            LoggerService.LogInformation("║   TEST MODE: Context + Navigate + Select Directive     ║");
             LoggerService.LogInformation("╚════════════════════════════════════════════════════════╝\n");
 
             var result = new Phase3Result();
@@ -98,7 +97,7 @@ namespace Orchestrator.Phase3
 
                 // Step 4: Process each client
                 LoggerService.LogInformation($"\n📋 Step 4: Processing {uniqueClients} clients...");
-                LoggerService.LogInformation($"   🧪 TEST MODE: Set context + Navigate to Immunization Service\n");
+                LoggerService.LogInformation($"   🧪 TEST MODE: Set context + Navigate + Select consent directives\n");
 
                 int successCount = 0;
                 int failureCount = 0;
@@ -117,7 +116,7 @@ namespace Orchestrator.Phase3
                     // Display documents for this client
                     foreach (var record in clientRecords)
                     {
-                        LoggerService.LogInformation($"   📄 {record.DocumentTitle} ({record.Description})");
+                        LoggerService.LogInformation($"   📄 {record.DocumentTitle} ({record.Description}) - Antigen: {record.PhisAntigen}");
                     }
 
                     try
@@ -158,14 +157,55 @@ namespace Orchestrator.Phase3
 
                         LoggerService.LogInformation($"   ✅ SUCCESS: On Immunization Service page");
 
-                        successCount++;
-                        result.SuccessfulUploads++;
+                        // Step C: Process each document for this client
+                        LoggerService.LogInformation($"\n   📄 Processing {clientRecords.Count} document(s)...");
 
-                        // TODO Phase 3.2: Add actual PDF upload here
-                        // foreach (var record in clientRecords)
-                        // {
-                        //     await UploadPdfAsync(record);
-                        // }
+                        int documentsProcessed = 0;
+                        foreach (var record in clientRecords)
+                        {
+                            LoggerService.LogInformation($"\n      Processing: {record.Description}");
+                            LoggerService.LogInformation($"      PhisAntigen: '{record.PhisAntigen}'");
+
+                            // Validate PhisAntigen
+                            if (string.IsNullOrWhiteSpace(record.PhisAntigen))
+                            {
+                                LoggerService.LogInformation($"      ⚠️  WARNING: PhisAntigen is empty, skipping");
+                                result.ErrorMessages.Add($"{clientId} - {record.Description}: PhisAntigen is empty");
+                                continue;
+                            }
+
+                            // Select the consent directive row matching the antigen
+                            bool directiveSelected = await _phisSearchService.SelectConsentDirectiveByAntigenAsync(record.PhisAntigen);
+
+                            if (!directiveSelected)
+                            {
+                                LoggerService.LogInformation($"      ❌ FAILED: Could not select consent directive for '{record.PhisAntigen}'");
+                                result.ErrorMessages.Add($"{clientId} - {record.Description}: Failed to select consent directive");
+                                continue;
+                            }
+
+                            LoggerService.LogInformation($"      ✅ SUCCESS: Consent directive selected");
+                            documentsProcessed++;
+
+                            // TODO Phase 3.3: Add actual document upload here
+                            // await UploadDocumentAsync(record);
+
+                            // Small delay between documents
+                            await Task.Delay(500);
+                        }
+
+                        if (documentsProcessed == clientRecords.Count)
+                        {
+                            successCount++;
+                            result.SuccessfulUploads++;
+                            LoggerService.LogInformation($"\n   ✅ ALL DOCUMENTS PROCESSED for client {clientId}");
+                        }
+                        else
+                        {
+                            failureCount++;
+                            result.FailedUploads++;
+                            LoggerService.LogInformation($"\n   ⚠️  PARTIAL SUCCESS: {documentsProcessed}/{clientRecords.Count} documents processed");
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -244,7 +284,7 @@ namespace Orchestrator.Phase3
             LoggerService.LogInformation($"Unique clients: {result.UploadReadyRecords}");
             LoggerService.LogInformation($"Total documents: {totalDocuments}");
             LoggerService.LogInformation($"\n🎯 Test Results:");
-            LoggerService.LogInformation($"   ✅ Successfully navigated: {successCount}");
+            LoggerService.LogInformation($"   ✅ Successfully processed: {successCount}");
             LoggerService.LogInformation($"   ❌ Failed: {failureCount}");
 
             if (successCount > 0)
@@ -271,13 +311,13 @@ namespace Orchestrator.Phase3
             LoggerService.LogInformation($"\n💡 Next Steps:");
             if (successCount == result.UploadReadyRecords)
             {
-                LoggerService.LogInformation($"   ✅ All clients successfully navigated to Immunization Service!");
+                LoggerService.LogInformation($"   ✅ All clients successfully processed!");
                 LoggerService.LogInformation($"   📝 Ready to implement PDF upload functionality");
             }
             else
             {
                 LoggerService.LogInformation($"   ⚠️  Review errors above before proceeding");
-                LoggerService.LogInformation($"   🔧 Fix any session, search, or navigation issues");
+                LoggerService.LogInformation($"   🔧 Fix any session, search, navigation, or directive selection issues");
             }
         }
 
@@ -285,7 +325,3 @@ namespace Orchestrator.Phase3
 
     }
 }
-
-
-
-

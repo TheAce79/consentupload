@@ -990,6 +990,183 @@ namespace ConsentSyncCore.Services.Phis
 
 
 
+
+
+        #region Phase 3 - Consent Directive Selection
+
+
+
+
+
+        /// <summary>
+        /// Find and select the consent directive row matching the specified antigen
+        /// Used after navigating to Immunization Service page
+        /// </summary>
+        /// <param name="phisAntigen">The antigen name to search for (e.g., "HPV-9", "Tetanus (T)", "Men-C-ACYW-135")</param>
+        /// <returns>True if row found and selected, false otherwise</returns>
+        public async Task<bool> SelectConsentDirectiveByAntigenAsync(string phisAntigen)
+        {
+            try
+            {
+                Console.WriteLine($"   🔍 Searching for consent directive with antigen: '{phisAntigen}'");
+
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+
+                // Wait for the consent directives table to be present
+                var tableId = "consentForm:ConsentDataTable:dataTable_data";
+                _wait.Until(d => d.FindElements(By.Id(tableId)).Count > 0);
+
+                Console.WriteLine($"   ✅ Consent directives table loaded");
+
+                // Find all rows in the table
+                var tbody = _driver.FindElement(By.Id(tableId));
+                var rows = tbody.FindElements(By.XPath(".//tr[@role='row']"));
+
+                Console.WriteLine($"   📊 Found {rows.Count} consent directive(s)");
+
+                // Search for the row with matching antigen
+                int matchingRowIndex = -1;
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    try
+                    {
+                        // Get all cells in the row
+                        var cells = rows[i].FindElements(By.TagName("td"));
+
+                        // The Antigen column is typically the 4th column (index 3)
+                        // Structure: [Checkbox] [Status] [Instruction] [Directive Type] [Antigen] [Active] [Effective From] [Effective To]
+                        if (cells.Count > 4)
+                        {
+                            var antigenCell = cells[4]; // Antigen column
+                            var antigenText = antigenCell.Text.Trim();
+
+                            Console.WriteLine($"      Row {i}: Antigen = '{antigenText}'");
+
+                            if (antigenText.Equals(phisAntigen, StringComparison.OrdinalIgnoreCase))
+                            {
+                                matchingRowIndex = i;
+                                Console.WriteLine($"      ✅ MATCH FOUND at row {i}!");
+                                break;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"      ⚠️  Error reading row {i}: {ex.Message}");
+                    }
+                }
+
+                if (matchingRowIndex == -1)
+                {
+                    Console.WriteLine($"   ❌ No consent directive found for antigen: '{phisAntigen}'");
+                    return false;
+                }
+
+                // Select the checkbox for the matching row
+                Console.WriteLine($"   🎯 Selecting checkbox for row {matchingRowIndex}...");
+
+                // Method 1: Try to find and click the checkbox directly
+                try
+                {
+                    var checkboxCell = rows[matchingRowIndex].FindElement(By.CssSelector(".ui-chkbox"));
+                    var checkbox = checkboxCell.FindElement(By.CssSelector(".ui-chkbox-box"));
+
+                    // Click using JavaScript for reliability
+                    js.ExecuteScript("arguments[0].click();", checkbox);
+
+                    Console.WriteLine($"   ✅ Checkbox clicked for row {matchingRowIndex}");
+                    await Task.Delay(_phisConfig.AjaxWaitMs);
+
+                    // Verify checkbox is checked
+                    var isChecked = checkbox.GetAttribute("class").Contains("ui-state-active");
+                    if (!isChecked)
+                    {
+                        Console.WriteLine($"   ⚠️  Checkbox may not be selected, retrying...");
+                        js.ExecuteScript("arguments[0].click();", checkbox);
+                        await Task.Delay(500);
+                    }
+
+                    // Update session activity
+                    _sessionManager.UpdateActivity();
+
+                    Console.WriteLine($"   ✅ Successfully selected consent directive for '{phisAntigen}'");
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"   ⚠️  Direct click failed: {ex.Message}");
+                    Console.WriteLine($"   🔄 Trying PrimeFaces AJAX approach...");
+
+                    // Method 2: Use PrimeFaces AJAX (based on network trace)
+                    return await SelectConsentDirectiveViaAjaxAsync(matchingRowIndex);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Error selecting consent directive: {ex.Message}");
+                return false;
+            }
+        }
+
+
+
+
+        /// <summary>
+        /// Select consent directive row using PrimeFaces AJAX request (fallback method)
+        /// </summary>
+        private async Task<bool> SelectConsentDirectiveViaAjaxAsync(int rowIndex)
+        {
+            try
+            {
+                Console.WriteLine($"   🔄 Using PrimeFaces AJAX to select row {rowIndex}...");
+
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+
+                // Trigger PrimeFaces AJAX checkbox selection based on network trace
+                var ajaxScript = $@"
+            PrimeFaces.ajax.Request.handle({{
+                source: 'consentForm:ConsentDataTable:dataTable',
+                process: 'consentForm:ConsentDataTable:dataTable',
+                update: 'consentForm:ConsentDataTable:rowActionsPanel',
+                params: [
+                    {{name: 'javax.faces.behavior.event', value: 'rowSelectCheckbox'}},
+                    {{name: 'javax.faces.partial.event', value: 'rowSelectCheckbox'}},
+                    {{name: 'consentForm:ConsentDataTable:dataTable_instantSelectedRowKey', value: '{rowIndex}'}},
+                    {{name: 'consentForm:ConsentDataTable:dataTable_selection', value: '{rowIndex}'}}
+                ],
+                oncomplete: function() {{
+                    console.log('Row {rowIndex} selected via AJAX');
+                }}
+            }});
+        ";
+
+                js.ExecuteScript(ajaxScript);
+
+                Console.WriteLine($"   ✅ AJAX request sent for row {rowIndex}");
+                await Task.Delay(_phisConfig.AjaxWaitMs * 2); // Extra wait for AJAX
+
+                // Update session activity
+                _sessionManager.UpdateActivity();
+
+                Console.WriteLine($"   ✅ Row {rowIndex} selected via PrimeFaces AJAX");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ AJAX selection failed: {ex.Message}");
+                return false;
+            }
+        }
+
+
+
+
+
+
+        #endregion Phase 3 - Consent Directive Selection
+
+
+
         #region Helper Methods
 
 
