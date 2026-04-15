@@ -260,6 +260,7 @@ namespace Orchestrator
                     {
                         try
                         {
+                            // ✅ FIX: Initialize PHIS session if not already done
                             if (driver == null || phisSearchService == null || sessionManager == null)
                             {
                                 LoggerService.LogWarning("⚠️  PHIS components not initialized. Initializing now...");
@@ -268,19 +269,22 @@ namespace Orchestrator
                                 var driverFactory = new ChromeDriverFactory(config);
                                 driver = driverFactory.CreateDriver();
 
-                                var phisConfig = ConfigurationService.GetPhisConfig();
-                                driver.Navigate().GoToUrl(phisConfig.LoginUrl);
-
-                                Console.WriteLine($"\n⏳ Please log into PHIS manually...");
-                                Console.WriteLine($"   You have {phisConfig.ManualLoginWaitSeconds} seconds");
-                                Console.WriteLine($"   Press any key once you're logged in...");
-                                Console.ReadKey();
-
                                 var resultExtractor = new PhisResultExtractor(config);
                                 sessionManager = new PhisSessionManager(driver, config);
                                 phisSearchService = new PhisSearchService(driver, config, resultExtractor, sessionManager);
 
-                                LoggerService.LogInformation("✅ PHIS components initialized");
+                                // ✅ CRITICAL FIX: Perform login to establish session
+                                LoggerService.LogInformation("\n🔐 Establishing PHIS session...");
+                                bool loginSuccess = sessionManager.Login();
+
+                                if (!loginSuccess)
+                                {
+                                    LoggerService.LogError("❌ Failed to establish PHIS session!");
+                                    LoggerService.LogInformation("   💡 Please ensure you can access PHIS and try again");
+                                    return 1;
+                                }
+
+                                LoggerService.LogInformation("✅ PHIS session established successfully");
                             }
                             else
                             {
