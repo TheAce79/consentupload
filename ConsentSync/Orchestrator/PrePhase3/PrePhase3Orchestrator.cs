@@ -4,8 +4,6 @@ using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Orchestrator.Phase1;
-using Orchestrator.Phase2;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -185,6 +183,12 @@ namespace Orchestrator.PrePhase3
                 File.Copy(sourcePdfPath, destinationPath, overwrite: true);
                  LoggerService.LogInformation($"         → Created: {newFileName}");
 
+                // ✅ Map Description to PhisAntigen
+                var description = $"Consent{vaccineType}";
+                var phisAntigen = MapDescriptionToPhisAntigen(description);
+
+                 LoggerService.LogInformation($"         → PhisAntigen: {phisAntigen}");
+
                 // Add to upload records
                 uploadRecords.Add(new UploadRecord
                 {
@@ -192,7 +196,8 @@ namespace Orchestrator.PrePhase3
                     LastName = record.LastName,
                     FirstName = record.FirstName,
                     DocumentTitle = documentTitle,
-                    Description = $"Consent{vaccineType}",
+                    Description = description,
+                    PhisAntigen = phisAntigen, // ✅ NEW
                     IsFeuilleRose = false,
                     Status = "",
                     IsFeuilleRoseUpload = false
@@ -203,6 +208,25 @@ namespace Orchestrator.PrePhase3
 
             await Task.CompletedTask;
             return filesGenerated;
+        }
+
+        /// <summary>
+        /// ✅ NEW: Map Description to PHIS Antigen name using configuration
+        /// </summary>
+        private string MapDescriptionToPhisAntigen(string description)
+        {
+            if (string.IsNullOrWhiteSpace(description))
+                return string.Empty;
+
+            // Check if mapping exists in configuration
+            if (_prePhase3Config.AntigenMapping.TryGetValue(description, out var phisAntigen))
+            {
+                return phisAntigen;
+            }
+
+            // Fallback: log warning and return empty
+             LoggerService.LogInformation($"         ⚠️  WARNING: No antigen mapping found for '{description}'");
+            return string.Empty;
         }
 
         /// <summary>

@@ -382,18 +382,21 @@ namespace ConsentSyncCore.Services
         public static PrePhase3Config GetPrePhase3Config()
         {
             var config = GetConfiguration();
-            return new PrePhase3Config
+            var prePhase3Config = new PrePhase3Config
             {
                 Enabled = config.GetValue<bool>("PrePhase3:Enabled", true),
                 Description = config["PrePhase3:Description"] ?? "Validate and prepare PDFs for upload",
-
-                // ✅ Resolve paths with placeholders
                 ValidationCsvPath = ResolvePath(config["PrePhase3:ValidationCsvPath"] ?? ""),
                 ValidationCsvFileName = config["PrePhase3:ValidationCsvFileName"] ?? "Validation_Results.csv",
-               
                 OutputPath = ResolvePath(config["PrePhase3:OutputPath"] ?? ""),
-                MinMatchScoreToAutoAccept = config.GetValue<double>("PrePhase3:MinMatchScoreToAutoAccept", 90.0)
+                MinMatchScoreToAutoAccept = config.GetValue<double>("PrePhase3:MinMatchScoreToAutoAccept", 90.0),
+
+                // ✅ Load antigen mapping
+                AntigenMapping = config.GetSection("PrePhase3:AntigenMapping").Get<Dictionary<string, string>>()
+                    ?? new Dictionary<string, string>()
             };
+
+            return prePhase3Config;
         }
 
 
