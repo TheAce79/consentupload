@@ -1010,12 +1010,16 @@ namespace ConsentSyncCore.Services.Phis
             {
                 Console.WriteLine($"   🔍 Searching for consent directive with antigen: '{phisAntigen}'");
 
-                // First attempt: Search with current filters (Active only)
+                // Wait for the page to fully load after navigation
+                await Task.Delay(2000); // Give time for the table to load
+
+                // First attempt: Search with current filters (Active only by default)
                 int matchingRowIndex = await FindConsentDirectiveRowAsync(phisAntigen);
 
                 if (matchingRowIndex == -1)
                 {
-                    Console.WriteLine($"   ⚠️  Not found in Active records, expanding filter to include Inactive...");
+                    Console.WriteLine($"   ⚠️  Not found in Active records (or table is empty)");
+                    Console.WriteLine($"   🔧 Applying Inactive filter to show all records...");
 
                     // Apply filter to show both Active and Inactive
                     bool filterApplied = await ApplyActiveInactiveFilterAsync();
@@ -1026,10 +1030,10 @@ namespace ConsentSyncCore.Services.Phis
                         return false;
                     }
 
-                    Console.WriteLine($"   ✅ Filter applied, searching again...");
+                    Console.WriteLine($"   ✅ Filter applied successfully");
 
-                    // Wait for table to refresh after filter
-                    await Task.Delay(_phisConfig.AjaxWaitMs * 2);
+                    // Wait for table to refresh after filter (important!)
+                    await Task.Delay(_phisConfig.AjaxWaitMs * 3); // Extra time for AJAX and table refresh
 
                     // Second attempt: Search with Active + Inactive filters
                     matchingRowIndex = await FindConsentDirectiveRowAsync(phisAntigen);
@@ -1042,7 +1046,7 @@ namespace ConsentSyncCore.Services.Phis
                 }
 
                 // Select the checkbox for the matching row
-                Console.WriteLine($"   🎯 Selecting checkbox for row {matchingRowIndex}...");
+                Console.WriteLine($"   🎯 Found at row {matchingRowIndex}, selecting checkbox...");
 
                 return await SelectConsentDirectiveCheckboxAsync(matchingRowIndex);
             }
@@ -1052,7 +1056,6 @@ namespace ConsentSyncCore.Services.Phis
                 return false;
             }
         }
-
 
 
 
@@ -1066,9 +1069,18 @@ namespace ConsentSyncCore.Services.Phis
             {
                 // Wait for the consent directives table to be present
                 var tableId = "consentForm:ConsentDataTable:dataTable_data";
-                _wait.Until(d => d.FindElements(By.Id(tableId)).Count > 0);
 
-                Console.WriteLine($"      📊 Searching table for antigen...");
+                try
+                {
+                    _wait.Until(d => d.FindElements(By.Id(tableId)).Count > 0);
+                }
+                catch (WebDriverTimeoutException)
+                {
+                    Console.WriteLine($"      ⚠️  Consent directives table not found");
+                    return -1;
+                }
+
+                Console.WriteLine($"      📊 Table loaded, searching for antigen...");
 
                 // Find all rows in the table
                 var tbody = _driver.FindElement(By.Id(tableId));
@@ -1076,11 +1088,11 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (rows.Count == 0)
                 {
-                    Console.WriteLine($"      ⚠️  No rows found in consent directives table");
+                    Console.WriteLine($"      ⚠️  Table is empty (no consent directives found)");
                     return -1;
                 }
 
-                Console.WriteLine($"      📊 Found {rows.Count} consent directive(s)");
+                Console.WriteLine($"      📊 Found {rows.Count} consent directive(s) in table");
 
                 // Search for the row with matching antigen
                 for (int i = 0; i < rows.Count; i++)
@@ -1090,20 +1102,13 @@ namespace ConsentSyncCore.Services.Phis
                         // Get all cells in the row
                         var cells = rows[i].FindElements(By.TagName("td"));
 
-                        // The Antigen column is typically the 4th column (index 4 after checkbox)
-                        // Structure: [Checkbox] [Status] [Instruction] [Directive Type] [Antigen] [Active] [Effective From] [Effective To]
-                        if (cells.Count > 4)
+                        // Based on your HTML, the structure is:
+                        // [0: Checkbox] [1: Toggle] [2: Icon] [3: Status] [4: Instruction] [5: Directive Type] [6: Antigen] [7: Active] [8: Effective From] [9: Effective To]
+                        if (cells.Count > 6)
                         {
-                            // Find the antigen column - it might vary, so check by header or content
-                            string antigenText = "";
+                            var antigenText = cells[6].Text.Trim(); // Antigen is at index 6
 
-                            // Try column index 4 first (typical Antigen column)
-                            if (cells.Count > 4)
-                            {
-                                antigenText = cells[4].Text.Trim();
-                            }
-
-                            Console.WriteLine($"         Row {i}: Antigen = '{antigenText}'");
+                            Console.WriteLine($"         Row {i}: Antigen = '{antigenText}' (data-ri='{rows[i].GetAttribute("data-ri")}')");
 
                             if (antigenText.Equals(phisAntigen, StringComparison.OrdinalIgnoreCase))
                             {
@@ -1118,6 +1123,7 @@ namespace ConsentSyncCore.Services.Phis
                     }
                 }
 
+                Console.WriteLine($"      ❌ Antigen '{phisAntigen}' not found in {rows.Count} row(s)");
                 return -1; // Not found
             }
             catch (Exception ex)
@@ -1138,63 +1144,74 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"      🔧 Applying Active/Inactive filter...");
+                Console.WriteLine($"      🔧 Applying Active + Inactive filter...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
-                // Based on network trace, we need to:
-                // 1. Click the Active filter dropdown
-                // 2. Select both "Active" and "Inactive" checkboxes
-                // 3. Trigger the filter event
+                // Get the current ViewState
+                var viewState = (string)js.ExecuteScript(@"
+            return document.querySelector('input[name=""javax.faces.ViewState""]')?.value || '';
+        ") ?? "";
 
-                // Method 1: Try using PrimeFaces AJAX filter event (most reliable based on network trace)
-                var filterScript = @"
-            // Get the filter checkboxes
-            var activeCheckbox = document.querySelector('input[name=""consentForm:ConsentDataTable:dataTable:activeFilter""][value=""Active""]');
-            var inactiveCheckbox = document.querySelector('input[name=""consentForm:ConsentDataTable:dataTable:activeFilter""][value=""Inactive""]');
+                Console.WriteLine($"      📝 ViewState: {viewState.Substring(0, Math.Min(20, viewState.Length))}...");
+
+                // Build the filter request exactly as shown in your network trace
+                var filterScript = $@"
+            console.log('Applying Active + Inactive filter...');
             
-            if (activeCheckbox && inactiveCheckbox) {
-                // Ensure both are checked
-                activeCheckbox.checked = true;
-                inactiveCheckbox.checked = true;
-                
-                console.log('Active and Inactive checkboxes checked');
-                
-                // Trigger PrimeFaces filter event
-                PrimeFaces.ajax.Request.handle({
-                    source: 'consentForm:ConsentDataTable:dataTable',
-                    process: 'consentForm:ConsentDataTable:dataTable',
-                    update: 'consentForm:ConsentDataTable:rowActionsPanel consentForm:ConsentDataTable:dataTable',
-                    params: [
-                        {name: 'javax.faces.behavior.event', value: 'filter'},
-                        {name: 'javax.faces.partial.event', value: 'filter'},
-                        {name: 'consentForm:ConsentDataTable:dataTable_filtering', value: 'true'},
-                        {name: 'consentForm:ConsentDataTable:dataTable_encodeFeature', value: 'true'},
-                        {name: 'consentForm:ConsentDataTable:dataTable:activeFilter', value: 'Active'},
-                        {name: 'consentForm:ConsentDataTable:dataTable:activeFilter', value: 'Inactive'}
-                    ],
-                    oncomplete: function() {
-                        console.log('Filter applied successfully');
-                    }
-                });
-                
-                return true;
-            } else {
-                console.error('Active or Inactive checkbox not found');
-                return false;
-            }
+            // Build params object matching network trace
+            var params = {{}};
+            params['javax.faces.partial.ajax'] = 'true';
+            params['javax.faces.source'] = 'consentForm:ConsentDataTable:dataTable';
+            params['primefaces.ignoreautoupdate'] = 'true';
+            params['javax.faces.partial.execute'] = 'consentForm:ConsentDataTable:dataTable';
+            params['javax.faces.partial.render'] = 'consentForm:ConsentDataTable:rowActionsPanel consentForm:ConsentDataTable:dataTable';
+            params['javax.faces.behavior.event'] = 'filter';
+            params['javax.faces.partial.event'] = 'filter';
+            params['consentForm:ConsentDataTable:dataTable_filtering'] = 'true';
+            params['consentForm:ConsentDataTable:dataTable_encodeFeature'] = 'true';
+            
+            // Filter values
+            params['consentForm:ConsentDataTable:dataTable:statusFilter_focus'] = '';
+            params['consentForm:ConsentDataTable:dataTable:statusFilter'] = 'Confirmed';
+            params['consentForm:ConsentDataTable:dataTable:instructionFilter_focus'] = '';
+            params['consentForm:ConsentDataTable:dataTable:antigenFilter_focus'] = '';
+            params['consentForm:ConsentDataTable:dataTable:activeFilter_focus'] = '';
+            
+            // This is the key: set both Active and Inactive
+            params['consentForm:ConsentDataTable:dataTable:activeFilter'] = ['Active', 'Inactive'];
+            
+            params['consentForm:ConsentDataTable:dataTable_rppDD'] = '10';
+            params['consentForm:ConsentDataTable:dataTable_selection'] = '';
+            params['javax.faces.ViewState'] = '{viewState}';
+            
+            // Send the AJAX request
+            PrimeFaces.ajax.Request.handle({{
+                source: 'consentForm:ConsentDataTable:dataTable',
+                process: 'consentForm:ConsentDataTable:dataTable',
+                update: 'consentForm:ConsentDataTable:rowActionsPanel consentForm:ConsentDataTable:dataTable',
+                params: params,
+                formId: 'consentForm',
+                oncomplete: function(xhr, status, args) {{
+                    console.log('Filter applied. Status:', status, 'Total records:', args?.totalRecords);
+                }}
+            }});
+            
+            return true;
         ";
 
                 var result = (bool)js.ExecuteScript(filterScript);
 
                 if (!result)
                 {
-                    Console.WriteLine($"      ⚠️  JavaScript method failed, trying direct interaction...");
+                    Console.WriteLine($"      ⚠️  JavaScript filter failed, trying direct click method...");
                     return await ApplyActiveInactiveFilterViaClickAsync();
                 }
 
-                Console.WriteLine($"      ✅ Filter applied via JavaScript");
-                await Task.Delay(_phisConfig.AjaxWaitMs * 2); // Wait for filter to process
+                Console.WriteLine($"      ✅ Filter AJAX request sent");
+
+                // Wait longer for the filter to apply and table to refresh
+                await Task.Delay(_phisConfig.AjaxWaitMs * 3);
 
                 _sessionManager.UpdateActivity();
                 return true;
@@ -1207,7 +1224,6 @@ namespace ConsentSyncCore.Services.Phis
                 return await ApplyActiveInactiveFilterViaClickAsync();
             }
         }
-
 
 
         /// <summary>
