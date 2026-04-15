@@ -233,11 +233,20 @@ namespace ConsentSyncCore.Services
 
 
 
+
     /// <summary>
     /// Phase 3 Navigation configuration
     /// </summary>
     public class Phase3NavigationConfig
     {
+        // Immunization Service navigation
+        public string ImmunizationServiceUrl { get; set; } = string.Empty;
+        public string ImmunizationServicePageTitle { get; set; } = string.Empty;
+        public string PageTitleElementId { get; set; } = string.Empty;
+        public string ConsentDirectivesMenuId { get; set; } = string.Empty;
+        public string ImmunizationServiceMenuId { get; set; } = string.Empty;
+
+        // Document upload elements
         public string DocumentsSectionId { get; set; } = string.Empty;
         public string UploadButtonId { get; set; } = string.Empty;
         public string DocumentTitleFieldId { get; set; } = string.Empty;

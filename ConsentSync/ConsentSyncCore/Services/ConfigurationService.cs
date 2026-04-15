@@ -439,9 +439,14 @@ namespace ConsentSyncCore.Services
                     UseCustomFileRosePerVaccine = phase3Section.GetValue<bool>("FileRose:UseCustomFileRosePerVaccine")
                 },
 
-                // Navigation section
+                // Navigation section - ✅ UPDATED
                 Navigation = new Phase3NavigationConfig
                 {
+                    ImmunizationServiceUrl = phase3Section.GetValue<string>("Navigation:ImmunizationServiceUrl") ?? string.Empty,
+                    ImmunizationServicePageTitle = phase3Section.GetValue<string>("Navigation:ImmunizationServicePageTitle") ?? string.Empty,
+                    PageTitleElementId = phase3Section.GetValue<string>("Navigation:PageTitleElementId") ?? string.Empty,
+                    ConsentDirectivesMenuId = phase3Section.GetValue<string>("Navigation:ConsentDirectivesMenuId") ?? string.Empty,
+                    ImmunizationServiceMenuId = phase3Section.GetValue<string>("Navigation:ImmunizationServiceMenuId") ?? string.Empty,
                     DocumentsSectionId = phase3Section.GetValue<string>("Navigation:DocumentsSectionId") ?? string.Empty,
                     UploadButtonId = phase3Section.GetValue<string>("Navigation:UploadButtonId") ?? string.Empty,
                     DocumentTitleFieldId = phase3Section.GetValue<string>("Navigation:DocumentTitleFieldId") ?? string.Empty,
@@ -466,6 +471,8 @@ namespace ConsentSyncCore.Services
 
             return phase3Config;
         }
+
+
 
 
         /// <summary>

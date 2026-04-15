@@ -646,6 +646,7 @@ namespace ConsentSyncCore.Services.Phis
 
         #region Phase 3 - Set In Context
 
+
         /// <summary>
         /// Select the first search result and click "Set In Context"
         /// Used in Phase 3 after searching by Client ID
@@ -715,6 +716,9 @@ namespace ConsentSyncCore.Services.Phis
         }
 
 
+
+
+       
 
         /// <summary>
         /// Alternative method using network trace approach (more reliable for PrimeFaces)
@@ -817,6 +821,169 @@ namespace ConsentSyncCore.Services.Phis
                 return false;
             }
         }
+
+
+
+        // Update the NavigateToImmunizationServiceAsync method to use config values:
+
+        /// <summary>
+        /// Navigate to Consent Directives > Immunization Service page
+        /// Called after setting client in context
+        /// </summary>
+        public async Task<bool> NavigateToImmunizationServiceAsync()
+        {
+            try
+            {
+                Console.WriteLine($"   🧭 Navigating to Consent Directives > Immunization Service...");
+
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+
+                // ✅ Get navigation config
+                var phase3Config = ConfigurationService.GetPhase3Config();
+                var navConfig = phase3Config.Navigation;
+
+                // Method 1: Direct URL navigation (most reliable)
+                var baseUrl = _phisConfig.LoginUrl.Replace("/phsdsm/", "");
+                var immunizationUrl = $"{baseUrl}{navConfig.ImmunizationServiceUrl}";
+
+                Console.WriteLine($"   📍 Navigating to: {immunizationUrl}");
+                _driver.Navigate().GoToUrl(immunizationUrl);
+
+                // Wait for page to load
+                await Task.Delay(_phisConfig.PageLoadDelayMs);
+
+                // ✅ Wait for the page title to match expected value from config
+                try
+                {
+                    _wait.Until(d =>
+                    {
+                        // Check if we're on the Immunization Service page
+                        var titleElement = d.FindElements(By.Id(navConfig.PageTitleElementId));
+                        if (titleElement.Count > 0)
+                        {
+                            var actualTitle = titleElement[0].Text;
+                            var expectedTitle = navConfig.ImmunizationServicePageTitle;
+
+                            bool titleMatches = actualTitle.Equals(expectedTitle, StringComparison.OrdinalIgnoreCase);
+
+                            if (!titleMatches)
+                            {
+                                Console.WriteLine($"   ⚠️  Title mismatch:");
+                                Console.WriteLine($"      Expected: '{expectedTitle}'");
+                                Console.WriteLine($"      Got: '{actualTitle}'");
+                            }
+
+                            return titleMatches;
+                        }
+                        return false;
+                    });
+
+                    Console.WriteLine($"   ✅ Page title verified: '{navConfig.ImmunizationServicePageTitle}'");
+                    Console.WriteLine($"   ✅ Successfully navigated to Immunization Service page");
+
+                    // Update session activity
+                    _sessionManager.UpdateActivity();
+
+                    return true;
+                }
+                catch (WebDriverTimeoutException)
+                {
+                    Console.WriteLine($"   ⚠️  Page title verification timed out");
+
+                    // Check if we can find the consent table as fallback verification
+                    var consentTable = _driver.FindElements(By.CssSelector("table[role='grid']"));
+                    if (consentTable.Count > 0)
+                    {
+                        Console.WriteLine($"   ✅ Found consent table - assuming navigation successful");
+                        _sessionManager.UpdateActivity();
+                        return true;
+                    }
+
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Error navigating to Immunization Service: {ex.Message}");
+                return false;
+            }
+        }
+
+
+        /// <summary>
+        /// Alternative method: Navigate using menu clicks (if direct URL doesn't work)
+        /// </summary>
+        public async Task<bool> NavigateToImmunizationServiceViaMenuAsync()
+        {
+            try
+            {
+                Console.WriteLine($"   🧭 Navigating via menu: Consent Directives > Immunization Service...");
+
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+
+                // Step 1: Find and expand "Consent Directives" menu
+                Console.WriteLine($"   📂 Expanding 'Consent Directives' menu...");
+
+                var consentDirectivesMenuId = "menu:comibmpdcephsimmunization_ConsentDirectives";
+
+                // Wait for menu to be present
+                _wait.Until(d => d.FindElements(By.Id(consentDirectivesMenuId)).Count > 0);
+
+                // Check if menu is already expanded
+                var consentDirectivesMenu = _driver.FindElement(By.Id(consentDirectivesMenuId));
+                var isExpanded = consentDirectivesMenu.GetAttribute("class").Contains("layout-menubar-subfolder-open");
+
+                if (!isExpanded)
+                {
+                    // Click to expand
+                    var menuToggle = consentDirectivesMenu.FindElement(By.CssSelector("a[onclick*='toggleSubMenu']"));
+                    js.ExecuteScript("arguments[0].click();", menuToggle);
+
+                    Console.WriteLine($"   ✅ Expanded 'Consent Directives' menu");
+                    await Task.Delay(500); // Wait for menu animation
+                }
+                else
+                {
+                    Console.WriteLine($"   ℹ️  'Consent Directives' menu already expanded");
+                }
+
+                // Step 2: Click "Immunization Service" submenu item
+                Console.WriteLine($"   🎯 Clicking 'Immunization Service'...");
+
+                var immunizationServiceMenuId = "menu:comibmpdcephsimmunization_ImmunizationService";
+                var immunizationServiceLink = _driver.FindElement(By.CssSelector($"#{immunizationServiceMenuId} a"));
+
+                js.ExecuteScript("arguments[0].click();", immunizationServiceLink);
+
+                Console.WriteLine($"   ✅ Clicked 'Immunization Service'");
+                await Task.Delay(_phisConfig.PageLoadDelayMs);
+
+                // Step 3: Verify we're on the correct page
+                _wait.Until(d =>
+                {
+                    var titleElement = d.FindElements(By.Id("layout-toolbar-title"));
+                    if (titleElement.Count > 0)
+                    {
+                        var title = titleElement[0].Text;
+                        return title.Contains("Consent Directives") && title.Contains("Immunization Service");
+                    }
+                    return false;
+                });
+
+                Console.WriteLine($"   ✅ Successfully navigated to Immunization Service page via menu");
+
+                // Update session activity
+                _sessionManager.UpdateActivity();
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Error navigating via menu: {ex.Message}");
+                return false;
+            }
+        }
+
 
 
         #endregion Phase 3 - Set In Context
