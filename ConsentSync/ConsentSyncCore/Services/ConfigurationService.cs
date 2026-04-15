@@ -390,7 +390,7 @@ namespace ConsentSyncCore.Services
                 // ✅ Resolve paths with placeholders
                 ValidationCsvPath = ResolvePath(config["PrePhase3:ValidationCsvPath"] ?? ""),
                 ValidationCsvFileName = config["PrePhase3:ValidationCsvFileName"] ?? "Validation_Results.csv",
-                PdfSourcePath = ResolvePath(config["PrePhase3:PdfSourcePath"] ?? ""),
+               
                 OutputPath = ResolvePath(config["PrePhase3:OutputPath"] ?? ""),
                 MinMatchScoreToAutoAccept = config.GetValue<double>("PrePhase3:MinMatchScoreToAutoAccept", 90.0)
             };

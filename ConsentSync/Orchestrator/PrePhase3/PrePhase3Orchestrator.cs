@@ -3,6 +3,9 @@ using ConsentSyncCore.Services;
 using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Orchestrator.Phase1;
+using Orchestrator.Phase2;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -20,6 +23,8 @@ namespace Orchestrator.PrePhase3
         private readonly PrePhase3Config _prePhase3Config;
         private readonly Phase2Config _phase2Config;
         private readonly SchoolContextConfig _schoolContext;
+        private readonly BulkPdfExtractionConfig _bulkPdfConfig;
+        private readonly ILogger<PrePhase3Orchestrator> _logger;
 
         public PrePhase3Orchestrator(IConfiguration? config = null)
         {
@@ -27,28 +32,30 @@ namespace Orchestrator.PrePhase3
             _prePhase3Config = ConfigurationService.GetPrePhase3Config();
             _phase2Config = ConfigurationService.GetPhase2Config();
             _schoolContext = ConfigurationService.GetSchoolContextConfig();
+            _bulkPdfConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+            _logger = LoggerService.GetLogger<PrePhase3Orchestrator>();
         }
 
 
         public async Task<PrePhase3Result> RunAsync()
         {
-            Console.WriteLine("╔════════════════════════════════════════════════════════╗");
-            Console.WriteLine("║      ConsentSync - Pre-Phase 3: Prepare for Upload     ║");
-            Console.WriteLine("╚════════════════════════════════════════════════════════╝\n");
+             LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
+             LoggerService.LogInformation("║      ConsentSync - Pre-Phase 3: Prepare for Upload     ║");
+             LoggerService.LogInformation("╚════════════════════════════════════════════════════════╝\n");
 
             var result = new PrePhase3Result();
 
             try
             {
                 // Step 1: Load Validation CSV
-                Console.WriteLine("📋 Step 1: Loading Validation_Results.csv...");
+                 LoggerService.LogInformation("📋 Step 1: Loading Validation_Results.csv...");
                 var validationRecords = LoadValidationCsv();
                 result.TotalRecords = validationRecords.Count;
 
-                Console.WriteLine($"   ✅ Loaded {validationRecords.Count} validation records");
+                 LoggerService.LogInformation($"   ✅ Loaded {validationRecords.Count} validation records");
 
                 // Step 2: Filter validated records
-                Console.WriteLine("\n📋 Step 2: Filtering validated records...");
+                 LoggerService.LogInformation("\n📋 Step 2: Filtering validated records...");
                 var validatedRecords = validationRecords
                     .Where(r =>
                         r.FileFound == true &&
@@ -59,23 +66,23 @@ namespace Orchestrator.PrePhase3
                 result.ValidatedRecords = validatedRecords.Count;
                 result.SkippedNotValidated = validationRecords.Count - validatedRecords.Count;
 
-                Console.WriteLine($"   ✅ Validated records: {validatedRecords.Count}");
-                Console.WriteLine($"   ⏭️  Skipped (not validated): {result.SkippedNotValidated}");
+                 LoggerService.LogInformation($"   ✅ Validated records: {validatedRecords.Count}");
+                 LoggerService.LogInformation($"   ⏭️  Skipped (not validated): {result.SkippedNotValidated}");
 
                 if (validatedRecords.Count == 0)
                 {
-                    Console.WriteLine("\n⚠️  No validated records to process!");
-                    Console.WriteLine("   💡 Please review Validation_Results.csv and fix FileFound/IsMatch flags");
+                     LoggerService.LogInformation("\n⚠️  No validated records to process!");
+                     LoggerService.LogInformation("   💡 Please review Validation_Results.csv and fix FileFound/IsMatch flags");
                     return result;
                 }
 
                 // Step 3: Process each validated record
-                Console.WriteLine($"\n📋 Step 3: Processing {validatedRecords.Count} validated PDFs...");
+                 LoggerService.LogInformation($"\n📋 Step 3: Processing {validatedRecords.Count} validated PDFs...");
                 var uploadRecords = new List<UploadRecord>();
 
                 foreach (var record in validatedRecords)
                 {
-                    Console.WriteLine($"\n   Processing: {record.FirstName} {record.LastName} (Client ID: {record.ClientId})");
+                     LoggerService.LogInformation($"\n   Processing: {record.FirstName} {record.LastName} (Client ID: {record.ClientId})");
 
                     try
                     {
@@ -84,13 +91,13 @@ namespace Orchestrator.PrePhase3
 
                         if (string.IsNullOrEmpty(pdfPath))
                         {
-                            Console.WriteLine($"      ⚠️  PDF not found for {record.ClientId}");
+                             LoggerService.LogInformation($"      ⚠️  PDF not found for {record.ClientId}");
                             result.SkippedMissingPdf++;
                             result.ErrorMessages.Add($"{record.ClientId}: PDF file not found");
                             continue;
                         }
 
-                        Console.WriteLine($"      Found PDF: {Path.GetFileName(pdfPath)}");
+                         LoggerService.LogInformation($"      Found PDF: {Path.GetFileName(pdfPath)}");
 
                         // Process based on grade
                         var generated = await ProcessPdfForGrade(
@@ -106,18 +113,18 @@ namespace Orchestrator.PrePhase3
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"      ❌ Error: {ex.Message}");
+                         LoggerService.LogInformation($"      ❌ Error: {ex.Message}");
                         result.ErrorMessages.Add($"{record.ClientId}: {ex.Message}");
                     }
                 }
 
                 // Step 4: Generate Upload_to_PHIS.csv
-                Console.WriteLine($"\n📋 Step 4: Generating Upload_to_PHIS.csv...");
+                 LoggerService.LogInformation($"\n📋 Step 4: Generating Upload_to_PHIS.csv...");
                 GenerateUploadCsv(uploadRecords);
                 result.UploadRecordsCreated = uploadRecords.Count;
 
                 // Step 5: Update Validation CSV with IsPdfSave flags
-                Console.WriteLine($"\n📋 Step 5: Updating Validation_Results.csv...");
+                 LoggerService.LogInformation($"\n📋 Step 5: Updating Validation_Results.csv...");
                 SaveValidationCsv(validationRecords);
 
                 // Step 6: Display summary
@@ -127,8 +134,8 @@ namespace Orchestrator.PrePhase3
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"\n❌ FATAL ERROR: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                 LoggerService.LogInformation($"\n❌ FATAL ERROR: {ex.Message}");
+                 LoggerService.LogInformation($"Stack trace: {ex.StackTrace}");
                 result.HasErrors = true;
                 return result;
             }
@@ -154,16 +161,16 @@ namespace Orchestrator.PrePhase3
             if (grade == "7" || grade.Contains("Grade 7", StringComparison.OrdinalIgnoreCase))
             {
                 vaccineTypes = new[] { "HPV9", "Tdap" };
-                Console.WriteLine($"      Grade 7 → Generating 2 files (HPV9, Tdap)");
+                 LoggerService.LogInformation($"      Grade 7 → Generating 2 files (HPV9, Tdap)");
             }
             else if (grade == "9" || grade.Contains("Grade 9", StringComparison.OrdinalIgnoreCase))
             {
                 vaccineTypes = new[] { "MenCACYW135" };
-                Console.WriteLine($"      Grade 9 → Generating 1 file (MenCACYW135)");
+                 LoggerService.LogInformation($"      Grade 9 → Generating 1 file (MenCACYW135)");
             }
             else
             {
-                Console.WriteLine($"      ⚠️  Unknown grade: {grade} - skipping");
+                 LoggerService.LogInformation($"      ⚠️  Unknown grade: {grade} - skipping");
                 return 0;
             }
 
@@ -176,7 +183,7 @@ namespace Orchestrator.PrePhase3
 
                 // Copy and rename file
                 File.Copy(sourcePdfPath, destinationPath, overwrite: true);
-                Console.WriteLine($"         → Created: {newFileName}");
+                 LoggerService.LogInformation($"         → Created: {newFileName}");
 
                 // Add to upload records
                 uploadRecords.Add(new UploadRecord
@@ -199,10 +206,13 @@ namespace Orchestrator.PrePhase3
         }
 
         /// <summary>
-        /// Find PDF file for a validation record
+        /// Find PDF file for a validation record using BulkPdfExtraction OutputReadyFolder
         /// </summary>
         private string? FindPdfForRecord(ValidationRecord record)
         {
+            // ✅ Use BulkPdfExtraction.OutputReadyFolder instead of PrePhase3.PdfSourcePath
+            var pdfSourcePath = _bulkPdfConfig.GetOutputReadyPath();
+
             // Try to find by extracted name first
             if (!string.IsNullOrEmpty(record.ExtractedName))
             {
@@ -210,7 +220,7 @@ namespace Orchestrator.PrePhase3
                 if (extractedParts.Length == 2)
                 {
                     var possibleFileName = $"{extractedParts[0]}_{extractedParts[1]}.pdf";
-                    var possiblePath = Path.Combine(_prePhase3Config.PdfSourcePath, possibleFileName);
+                    var possiblePath = Path.Combine(pdfSourcePath, possibleFileName);
 
                     if (File.Exists(possiblePath))
                         return possiblePath;
@@ -219,20 +229,26 @@ namespace Orchestrator.PrePhase3
 
             // Try by CSV name
             var csvFileName = $"{record.FirstName}_{record.LastName}.pdf";
-            var csvPath = Path.Combine(_prePhase3Config.PdfSourcePath, csvFileName);
+            var csvPath = Path.Combine(pdfSourcePath, csvFileName);
 
             if (File.Exists(csvPath))
                 return csvPath;
 
             // Try by ClientID
             var clientIdFileName = $"{record.ClientId}.pdf";
-            var clientIdPath = Path.Combine(_prePhase3Config.PdfSourcePath, clientIdFileName);
+            var clientIdPath = Path.Combine(pdfSourcePath, clientIdFileName);
 
             if (File.Exists(clientIdPath))
                 return clientIdPath;
 
             // Search all PDFs in directory
-            var allPdfs = Directory.GetFiles(_prePhase3Config.PdfSourcePath, "*.pdf");
+            if (!Directory.Exists(pdfSourcePath))
+            {
+                 LoggerService.LogInformation($"      ⚠️  PDF source directory does not exist: {pdfSourcePath}");
+                return null;
+            }
+
+            var allPdfs = Directory.GetFiles(pdfSourcePath, "*.pdf");
             foreach (var pdf in allPdfs)
             {
                 var fileName = Path.GetFileNameWithoutExtension(pdf);
@@ -278,7 +294,7 @@ namespace Orchestrator.PrePhase3
             csv.Context.RegisterClassMap<ValidationRecordMap>();
             csv.WriteRecords(records);
 
-            Console.WriteLine($"   ✅ Updated: {csvPath}");
+             LoggerService.LogInformation($"   ✅ Updated: {csvPath}");
         }
 
         /// <summary>
@@ -294,39 +310,42 @@ namespace Orchestrator.PrePhase3
             csv.Context.RegisterClassMap<UploadRecordMap>();
             csv.WriteRecords(records);
 
-            Console.WriteLine($"   ✅ Generated: {outputPath}");
-            Console.WriteLine($"   📊 Total upload records: {records.Count}");
+             LoggerService.LogInformation($"   ✅ Generated: {outputPath}");
+             LoggerService.LogInformation($"   📊 Total upload records: {records.Count}");
         }
 
         private void DisplaySummary(PrePhase3Result result)
         {
-            Console.WriteLine("\n" + new string('═', 60));
-            Console.WriteLine("📊 PRE-PHASE 3 COMPLETE - Final Summary");
-            Console.WriteLine(new string('═', 60));
-            Console.WriteLine($"Total validation records: {result.TotalRecords}");
-            Console.WriteLine($"✅ Validated records: {result.ValidatedRecords}");
-            Console.WriteLine($"⏭️  Skipped (not validated): {result.SkippedNotValidated}");
-            Console.WriteLine($"📄 PDFs processed: {result.PdfsProcessed}");
-            Console.WriteLine($"📄 Files generated: {result.FilesGenerated}");
-            Console.WriteLine($"📋 Upload records created: {result.UploadRecordsCreated}");
-            Console.WriteLine($"⚠️  Missing PDFs: {result.SkippedMissingPdf}");
-            Console.WriteLine(new string('═', 60));
+             LoggerService.LogInformation("\n" + new string('═', 60));
+             LoggerService.LogInformation("📊 PRE-PHASE 3 COMPLETE - Final Summary");
+             LoggerService.LogInformation(new string('═', 60));
+             LoggerService.LogInformation($"Total validation records: {result.TotalRecords}");
+             LoggerService.LogInformation($"✅ Validated records: {result.ValidatedRecords}");
+             LoggerService.LogInformation($"⏭️  Skipped (not validated): {result.SkippedNotValidated}");
+             LoggerService.LogInformation($"📄 PDFs processed: {result.PdfsProcessed}");
+             LoggerService.LogInformation($"📄 Files generated: {result.FilesGenerated}");
+             LoggerService.LogInformation($"📋 Upload records created: {result.UploadRecordsCreated}");
+             LoggerService.LogInformation($"⚠️  Missing PDFs: {result.SkippedMissingPdf}");
+             LoggerService.LogInformation(new string('═', 60));
 
             if (result.ErrorMessages.Count > 0)
             {
-                Console.WriteLine($"\n⚠️  Errors:");
+                 LoggerService.LogInformation($"\n⚠️  Errors:");
                 foreach (var error in result.ErrorMessages.Take(10))
                 {
-                    Console.WriteLine($"   - {error}");
+                     LoggerService.LogInformation($"   - {error}");
                 }
             }
 
             if (result.UploadRecordsCreated > 0)
             {
-                Console.WriteLine($"\n✅ Ready for Phase 3: Upload to PHIS");
-                Console.WriteLine($"   Upload CSV: Upload_to_PHIS.csv");
-                Console.WriteLine($"   Renamed PDFs ready in: {_prePhase3Config.OutputPath}");
+                 LoggerService.LogInformation($"\n✅ Ready for Phase 3: Upload to PHIS");
+                 LoggerService.LogInformation($"   Upload CSV: Upload_to_PHIS.csv");
+                 LoggerService.LogInformation($"   Renamed PDFs ready in: {_prePhase3Config.OutputPath}");
             }
+
+            // ✅ Display the PDF source path being used
+             LoggerService.LogInformation($"\n📁 PDF Source: {_bulkPdfConfig.GetOutputReadyPath()}");
         }
 
 

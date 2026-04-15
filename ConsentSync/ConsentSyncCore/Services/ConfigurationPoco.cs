@@ -161,7 +161,6 @@ namespace ConsentSyncCore.Services
         public string Description { get; set; } = string.Empty;
         public string ValidationCsvPath { get; set; } = string.Empty;
         public string ValidationCsvFileName { get; set; } = string.Empty;
-        public string PdfSourcePath { get; set; } = string.Empty;
         public string OutputPath { get; set; } = string.Empty;
         public double MinMatchScoreToAutoAccept { get; set; } = 90.0;
     }
