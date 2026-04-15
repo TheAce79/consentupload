@@ -341,10 +341,12 @@ namespace Orchestrator.Phase1
 
 
 
+
         /// <summary>
         /// Try fallback search strategies in order:
         /// 1. Medicare number search (if available)
         /// 2. Inverted date search (if no Medicare number)
+        /// Returns: true if a match meeting threshold was found, false if needs manual review
         /// </summary>
         private async Task<bool> TryFallbackSearchesAsync(
             StudentRecord student,
@@ -356,34 +358,52 @@ namespace Orchestrator.Phase1
             // Strategy 1: Try Medicare search if available
             if (!string.IsNullOrWhiteSpace(student.MedicareNumber))
             {
-                 LoggerService.LogInformation($"   🔄 Trying Medicare search...");
+                LoggerService.LogInformation($"   🔄 Trying Medicare search...");
                 var medicareSuccess = await TryMedicareSearchAsync(student, result);
                 if (medicareSuccess)
                 {
+                    // Medicare search found a match above threshold - done!
                     return true;
                 }
             }
 
-            // Strategy 2: Try inverted date - NOW passing original best match!
-             LoggerService.LogInformation($"   🔄 Trying inverted date search...");
+            // Strategy 2: Try inverted date search
+            LoggerService.LogInformation($"   🔄 Trying inverted date search...");
             var invertedSuccess = await TryInvertedDateSearchAsync(student, result, originalBestMatch, originalBestScore);
             if (invertedSuccess)
             {
+                // Inverted date search found a match above threshold - done!
                 return true;
             }
 
-            // All fallback strategies failed - mark for manual review
+            // ✅ All fallback strategies failed to find a match above threshold
+            // Mark for manual review and save the BEST suggestion we found
             student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
-            student.BestMatch = originalSuggestion ?? "";
             result.ManualReviewCount++;
 
-            if (!string.IsNullOrEmpty(originalSuggestion))
+            // ✅ CRITICAL: Choose the BEST match from all attempts
+            // Priority: inverted match (if exists) > original match
+            if (!string.IsNullOrEmpty(student.BestMatch))
             {
-                 LoggerService.LogInformation($"   💡 Best match saved: {originalSuggestion}");
+                // Inverted search already saved a better match
+                LoggerService.LogInformation($"   ⚠️  Needs manual review - Best suggestion: {student.BestMatch}");
+            }
+            else if (!string.IsNullOrEmpty(originalSuggestion))
+            {
+                // Use original match as suggestion
+                student.BestMatch = originalSuggestion;
+                LoggerService.LogInformation($"   ⚠️  Needs manual review - Best suggestion: {originalSuggestion}");
+            }
+            else
+            {
+                // No matches found at all
+                student.BestMatch = string.Empty;
+                LoggerService.LogInformation($"   ⚠️  Needs manual review - No suggestions available");
             }
 
             return false;
         }
+
 
 
 
@@ -452,11 +472,10 @@ namespace Orchestrator.Phase1
 
 
 
-
         /// <summary>
         /// Try searching with inverted date (MM/DD swapped to DD/MM)
         /// Handles cases where date was incorrectly entered (e.g., 2012-12-10 should be 2012-10-12)
-        /// NOW: Selects HIGHEST confidence match from BOTH original and inverted searches
+        /// Returns: true if match >= threshold found, false otherwise
         /// </summary>
         private async Task<bool> TryInvertedDateSearchAsync(
             StudentRecord student,
@@ -472,7 +491,7 @@ namespace Orchestrator.Phase1
                     System.Globalization.DateTimeStyles.None,
                     out DateTime originalDate))
                 {
-                     LoggerService.LogInformation($"   ⚠️  Cannot parse date for inversion: {student.DateOfBirth}");
+                    LoggerService.LogInformation($"   ⚠️  Cannot parse date for inversion: {student.DateOfBirth}");
                     return false;
                 }
 
@@ -483,11 +502,11 @@ namespace Orchestrator.Phase1
                 // Don't search if inverted date is the same (e.g., 2012-10-10)
                 if (invertedDateString == student.DateOfBirth)
                 {
-                     LoggerService.LogInformation($"   ℹ️  Date is symmetric, skipping inversion");
+                    LoggerService.LogInformation($"   ℹ️  Date is symmetric, skipping inversion");
                     return false;
                 }
 
-                 LoggerService.LogInformation($"   📅 Original: {student.DateOfBirth} → Inverted: {invertedDateString}");
+                LoggerService.LogInformation($"   📅 Original: {student.DateOfBirth} → Inverted: {invertedDateString}");
 
                 // Search with inverted date
                 var searchResult = await _searchService!.SearchByDobAsync(
@@ -498,13 +517,13 @@ namespace Orchestrator.Phase1
 
                 if (!searchResult.Success || !searchResult.HasResults)
                 {
-                     LoggerService.LogInformation($"   ⚠️  No results with inverted date");
+                    LoggerService.LogInformation($"   ⚠️  No results with inverted date");
                     return false;
                 }
 
-                 LoggerService.LogInformation($"   📊 Found {searchResult.Results.Count} result(s) with inverted date");
+                LoggerService.LogInformation($"   📊 Found {searchResult.Results.Count} result(s) with inverted date");
 
-                // ✅ KEY FIX: Evaluate ALL results from inverted search
+                // Evaluate ALL results from inverted search
                 var invertedMatches = searchResult.Results
                     .Select(r =>
                     {
@@ -518,95 +537,106 @@ namespace Orchestrator.Phase1
 
                 if (bestInvertedMatch == null)
                 {
-                     LoggerService.LogInformation($"   ⚠️  No confident match with inverted date");
+                    LoggerService.LogInformation($"   ⚠️  No confident match with inverted date");
                     return false;
                 }
 
-                 LoggerService.LogInformation($"   🔍 Best inverted match: {bestInvertedMatch.Result.FirstName} {bestInvertedMatch.Result.LastName}");
-                 LoggerService.LogInformation($"      Score: {bestInvertedMatch.FinalScore:F2}% (Name: {bestInvertedMatch.NameScore:F2}%)");
+                LoggerService.LogInformation($"   🔍 Best inverted match: {bestInvertedMatch.Result.FirstName} {bestInvertedMatch.Result.LastName}");
+                LoggerService.LogInformation($"      Score: {bestInvertedMatch.FinalScore:F2}% (Name: {bestInvertedMatch.NameScore:F2}%)");
 
-                // ✅ CRITICAL: Compare with original search's best match
+                // Compare with original search's best match
                 double compareScore = originalBestScore;
                 PhisSearchResult? compareMatch = originalBestMatch;
 
-                 LoggerService.LogInformation($"\n   📊 Comparing results:");
-                 LoggerService.LogInformation($"      Original date best: {(compareMatch != null ? $"{compareMatch.FirstName} {compareMatch.LastName} - {compareScore:F2}%" : "None")}");
-                 LoggerService.LogInformation($"      Inverted date best: {bestInvertedMatch.Result.FirstName} {bestInvertedMatch.Result.LastName} - {bestInvertedMatch.FinalScore:F2}%");
+                LoggerService.LogInformation($"\n   📊 Comparing results:");
+                LoggerService.LogInformation($"      Original date best: {(compareMatch != null ? $"{compareMatch.FirstName} {compareMatch.LastName} - {compareScore:F2}%" : "None")}");
+                LoggerService.LogInformation($"      Inverted date best: {bestInvertedMatch.Result.FirstName} {bestInvertedMatch.Result.LastName} - {bestInvertedMatch.FinalScore:F2}%");
 
-                // Select the HIGHEST confidence match regardless of which search found it
+                // Determine threshold
                 var threshold = searchResult.IsSingleResult
                     ? _fuzzyMatcher.SingleResultThreshold
                     : _fuzzyMatcher.MultipleResultsThreshold;
 
-                // Use the better of the two matches
+                // ✅ KEY FIX: Choose the BETTER match and check if it meets threshold
+                PhisSearchResult finalBestMatch;
+                double finalBestScore;
+                string dateUsed;
+
                 if (bestInvertedMatch.FinalScore > compareScore)
                 {
-                     LoggerService.LogInformation($"   ✅ Inverted date match is BETTER ({bestInvertedMatch.FinalScore:F2}% vs {compareScore:F2}%)");
-
-                    if (bestInvertedMatch.FinalScore >= threshold)
-                    {
-                        student.ClientId = bestInvertedMatch.Result.ClientId;
-                        student.ClientIdStatus = ClientIdStatus.Found;
-                        student.BestMatch = string.Empty;
-                        result.FoundCount++;
-                         LoggerService.LogInformation($"   ✅ Client ID found with INVERTED date: {bestInvertedMatch.Result.ClientId} (score: {bestInvertedMatch.FinalScore:F2}%)");
-                         LoggerService.LogInformation($"   ⚠️  NOTE: Date in CSV may be incorrect! Original: {student.DateOfBirth}, Worked: {invertedDateString}");
-                        return true;
-                    }
-                    else
-                    {
-                         LoggerService.LogInformation($"   ⚠️  Score still too low: {bestInvertedMatch.FinalScore:F2}% (threshold: {threshold}%)");
-
-                        // Save best match info for manual review
-                        string suggestion = $"{bestInvertedMatch.Result.FirstName}#{bestInvertedMatch.Result.LastName}#{bestInvertedMatch.Result.ClientId}#{bestInvertedMatch.FinalScore:F1}%";
-                        student.BestMatch = suggestion;
-                         LoggerService.LogInformation($"   💡 Best match saved: {suggestion}");
-                        return false;
-                    }
+                    // Inverted match is better
+                    finalBestMatch = bestInvertedMatch.Result;
+                    finalBestScore = bestInvertedMatch.FinalScore;
+                    dateUsed = "INVERTED";
+                    LoggerService.LogInformation($"   ✅ Inverted date match is BETTER ({bestInvertedMatch.FinalScore:F2}% vs {compareScore:F2}%)");
                 }
                 else
                 {
-                     LoggerService.LogInformation($"   ℹ️  Original date match is better ({compareScore:F2}% vs {bestInvertedMatch.FinalScore:F2}%)");
-
-                    // Original was better, but did it meet the threshold?
-                    if (compareMatch != null && compareScore >= threshold)
+                    // Original match is better (or equal)
+                    if (compareMatch == null)
                     {
-                        student.ClientId = compareMatch.ClientId;
-                        student.ClientIdStatus = ClientIdStatus.Found;
-                        student.BestMatch = string.Empty;
-                        result.FoundCount++;
-                         LoggerService.LogInformation($"   ✅ Using original date match: {compareMatch.ClientId} (score: {compareScore:F2}%)");
-                        return true;
+                        // No original match, use inverted
+                        finalBestMatch = bestInvertedMatch.Result;
+                        finalBestScore = bestInvertedMatch.FinalScore;
+                        dateUsed = "INVERTED";
+                        LoggerService.LogInformation($"   ℹ️  Using inverted match (no original match available)");
                     }
                     else
                     {
-                         LoggerService.LogInformation($"   ⚠️  Neither match meets threshold ({threshold}%)");
-
-                        // Save the better match for manual review
-                        if (compareMatch != null)
-                        {
-                            string suggestion = $"{compareMatch.FirstName}#{compareMatch.LastName}#{compareMatch.ClientId}#{compareScore:F1}%";
-                            student.BestMatch = suggestion;
-                             LoggerService.LogInformation($"   💡 Best match saved: {suggestion}");
-                        }
-                        return false;
+                        finalBestMatch = compareMatch;
+                        finalBestScore = compareScore;
+                        dateUsed = "ORIGINAL";
+                        LoggerService.LogInformation($"   ℹ️  Original date match is better ({compareScore:F2}% vs {bestInvertedMatch.FinalScore:F2}%)");
                     }
+                }
+
+                // ✅ CRITICAL DECISION: Does the best match meet the threshold?
+                if (finalBestScore >= threshold)
+                {
+                    // ✅ ACCEPT THE MATCH - No manual review needed!
+                    student.ClientId = finalBestMatch.ClientId;
+                    student.ClientIdStatus = ClientIdStatus.Found;
+                    student.BestMatch = string.Empty;
+                    result.FoundCount++;
+
+                    LoggerService.LogInformation($"   ✅ Client ID found with {dateUsed} date: {finalBestMatch.ClientId} (score: {finalBestScore:F2}%)");
+
+                    if (dateUsed == "INVERTED")
+                    {
+                        LoggerService.LogWarning($"   ⚠️  NOTE: Date in CSV may be incorrect! Original: {student.DateOfBirth}, Worked: {invertedDateString}");
+                    }
+
+                    return true; // ✅ Success - threshold met!
+                }
+                else
+                {
+                    // ❌ Below threshold - save as suggestion for manual review
+                    string suggestion = $"{finalBestMatch.FirstName}#{finalBestMatch.LastName}#{finalBestMatch.ClientId}#{finalBestScore:F1}%";
+                    student.BestMatch = suggestion;
+
+                    LoggerService.LogWarning($"   ⚠️  Best match score ({finalBestScore:F2}%) below threshold ({threshold}%)");
+                    LoggerService.LogInformation($"   💡 Best match saved for manual review: {suggestion}");
+
+                    if (dateUsed == "INVERTED")
+                    {
+                        LoggerService.LogInformation($"   💡 Hint: Try inverted date {invertedDateString} in manual review");
+                    }
+
+                    return false; // ❌ Needs manual review
                 }
             }
             catch (ArgumentOutOfRangeException)
             {
                 // Invalid date combination (e.g., trying to create Feb 30th)
-                 LoggerService.LogInformation($"   ⚠️  Date inversion creates invalid date");
+                LoggerService.LogInformation($"   ⚠️  Date inversion creates invalid date");
                 return false;
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"   ❌ Inverted date search error: {ex.Message}");
+                LoggerService.LogError($"   ❌ Inverted date search error: {ex.Message}", ex);
                 return false;
             }
         }
-
-
 
 
 
