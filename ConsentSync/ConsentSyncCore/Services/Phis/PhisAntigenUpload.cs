@@ -87,96 +87,71 @@ namespace ConsentSyncCore.Services.Phis
         /// Search for a document by title on the Context Documents page
         /// Returns true if document already exists
         /// </summary>
-        /// <param name="documentTitle">The document title to search for (e.g., "1066457_consentHPV9_2025-2026")</param>
         public async Task<bool> CheckIfDocumentExistsAsync(string documentTitle)
         {
             try
             {
-                 LoggerService.LogInformation($"      🔍 Searching for existing document: '{documentTitle}'");
+                Console.WriteLine($"      🔍 Searching for existing document: '{documentTitle}'");
 
-                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+                // Give page time to load
+                await Task.Delay(1000);
 
-                // Wait for the document list table to be present
-                await Task.Delay(1000); // Give page time to load
+                // ✅ Use correct selector from network trace:
+                // Link IDs: userDocumentListForm:docListCollapseSection:documentListDataTable:0:viewtitleLink
+                // Document title is the TEXT of the link, not the ID
+                var documentLinks = _driver.FindElements(By.XPath(
+                    "//a[contains(@id, 'viewtitleLink')]"));
 
-                // First, check if there are any documents in the list
-                var documentRows = _driver.FindElements(By.XPath("//table//a[contains(@id, '_consent')]"));
-
-                if (documentRows.Count == 0)
+                if (documentLinks.Count == 0)
                 {
-                     LoggerService.LogInformation($"      ℹ️  No documents found in the list");
+                    Console.WriteLine($"      ℹ️  No documents found in the list");
                     return false;
                 }
 
-                 LoggerService.LogInformation($"      📊 Found {documentRows.Count} document(s) in the list");
+                Console.WriteLine($"      📊 Found {documentLinks.Count} document(s) in the list");
 
-                // Search through visible documents for exact or partial match
-                foreach (var docLink in documentRows)
+                // Normalize search title for comparison
+                var normalizedSearchTitle = documentTitle
+                    .Replace(" ", "")
+                    .Replace("_", "")
+                    .ToLowerInvariant();
+
+                foreach (var link in documentLinks)
                 {
                     try
                     {
-                        var docText = docLink.Text.Trim();
+                        var docText = link.Text.Trim();
+                        if (string.IsNullOrWhiteSpace(docText)) continue;
 
-                        // Remove spaces and underscores for comparison
-                        var normalizedDocText = docText.Replace(" ", "").Replace("_", "").ToLowerInvariant();
-                        var normalizedSearchTitle = documentTitle.Replace(" ", "").Replace("_", "").ToLowerInvariant();
+                        var normalizedDocText = docText
+                            .Replace(" ", "")
+                            .Replace("_", "")
+                            .ToLowerInvariant();
 
-                         LoggerService.LogInformation($"         Comparing: '{docText}' vs '{documentTitle}'");
+                        Console.WriteLine($"         Comparing: '{docText}' vs '{documentTitle}'");
 
-                        // Check for exact match (after normalization)
+                        // ✅ Exact match after normalization
                         if (normalizedDocText.Equals(normalizedSearchTitle, StringComparison.OrdinalIgnoreCase))
                         {
-                             LoggerService.LogInformation($"      ✅ EXACT MATCH FOUND: '{docText}'");
+                            Console.WriteLine($"      ✅ EXACT MATCH FOUND: '{docText}'");
                             return true;
-                        }
-
-                        // Check if the document title contains the key parts (ClientID + consent type + year)
-                        // Example: searching for "1066457_consentHPV9_2025-2026"
-                        // Should match "1066457_consent HPV9_2025-2026" or similar variations
-
-                        var parts = documentTitle.Split('_');
-                        if (parts.Length >= 2)
-                        {
-                            var clientId = parts[0]; // e.g., "1066457"
-                            var consentType = parts[1].Replace("consent", "").ToLowerInvariant(); // e.g., "hpv9"
-
-                            if (normalizedDocText.Contains(clientId.ToLowerInvariant()) &&
-                                normalizedDocText.Contains(consentType))
-                            {
-                                 LoggerService.LogInformation($"      ⚠️  PARTIAL MATCH FOUND: '{docText}'");
-                                 LoggerService.LogInformation($"         This may be the same document with different naming");
-                                // You might want to return true here if partial matches should count
-                                // For now, we'll continue searching for exact match
-                            }
                         }
                     }
                     catch (Exception ex)
                     {
-                         LoggerService.LogInformation($"         ⚠️  Error reading document: {ex.Message}");
+                        Console.WriteLine($"         ⚠️  Error reading document link: {ex.Message}");
                     }
                 }
 
-                // If we want to use the search functionality on the page
-                 LoggerService.LogInformation($"      🔍 Trying page search functionality...");
-                bool foundViaSearch = await SearchDocumentViaPageSearchAsync(documentTitle);
-
-                if (foundViaSearch)
-                {
-                     LoggerService.LogInformation($"      ✅ Document found via page search");
-                    return true;
-                }
-
-                 LoggerService.LogInformation($"      ❌ Document not found: '{documentTitle}'");
+                Console.WriteLine($"      ❌ Document not found: '{documentTitle}'");
                 return false;
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"      ❌ Error checking for document: {ex.Message}");
+                Console.WriteLine($"      ❌ Error checking for document: {ex.Message}");
                 return false;
             }
         }
-
-
 
 
 

@@ -426,9 +426,10 @@ namespace Orchestrator.Phase3
 
 
         /// <summary>
-        /// Save Upload_to_PHIS.csv with updated VerifStatus values
+        /// Save Upload_to_PHIS.csv - updates ONLY the processed records,
+        /// preserving all other records in the original CSV
         /// </summary>
-        private void SaveUploadCsv(List<UploadRecord> uploadRecords)
+        private void SaveUploadCsv(List<UploadRecord> processedRecords)
         {
             try
             {
@@ -436,17 +437,60 @@ namespace Orchestrator.Phase3
                     _phase3Config.Input.UploadCsvPath,
                     _phase3Config.Input.UploadCsvFileName);
 
-                using var writer = new StreamWriter(csvPath, false, Encoding.UTF8);
-                using var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture));
+                // ✅ Step 1: Load ALL records from disk (not just the filtered test ones)
+                List<UploadRecord> allRecords;
 
-                csv.Context.RegisterClassMap<UploadRecordMap>();
-                csv.WriteRecords(uploadRecords);
+                var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
+                {
+                    MissingFieldFound = null,
+                    HeaderValidated = null,
+                    TrimOptions = TrimOptions.Trim,
+                    PrepareHeaderForMatch = args => args.Header.ToLower().Replace(" ", "")
+                };
+
+                using (var reader = new StreamReader(csvPath, Encoding.UTF8))
+                using (var csvReader = new CsvReader(reader, csvConfig))
+                {
+                    csvReader.Context.RegisterClassMap<UploadRecordMap>();
+                    allRecords = csvReader.GetRecords<UploadRecord>().ToList();
+                }
+
+                // ✅ Step 2: Build a lookup from the processed records by DocumentTitle (unique key)
+                var updatedLookup = processedRecords
+                    .ToDictionary(r => r.DocumentTitle, r => r.VerifStatus);
+
+                // ✅ Step 3: Update only the matching records in the full list
+                int updatedCount = 0;
+                foreach (var record in allRecords)
+                {
+                    if (updatedLookup.TryGetValue(record.DocumentTitle, out var newStatus))
+                    {
+                        if (record.VerifStatus != newStatus)
+                        {
+                            record.VerifStatus = newStatus;
+                            updatedCount++;
+                        }
+                    }
+                }
+
+                // ✅ Step 4: Write ALL records back to CSV
+                using var writer = new StreamWriter(csvPath, false, Encoding.UTF8);
+                using var csvWriter = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture));
+                csvWriter.Context.RegisterClassMap<UploadRecordMap>();
+                csvWriter.WriteRecords(allRecords);
+
+                if (updatedCount > 0)
+                {
+                    LoggerService.LogInformation($"      💾 CSV updated: {updatedCount} record(s) changed (all {allRecords.Count} rows preserved)");
+                }
             }
             catch (Exception ex)
             {
                 LoggerService.LogWarning($"      ⚠️  Could not save CSV: {ex.Message}");
             }
         }
+
+
 
         private void DisplaySummary(Phase3Result result, int successCount, int skipCount, int failureCount,
             int totalRecords, int alreadyVerified)
