@@ -203,6 +203,7 @@ namespace Orchestrator.Phase3
 
                         LoggerService.LogInformation($"   ✅ SUCCESS: Documents page opened");
 
+
                         // STEP E: Check if document already exists
                         LoggerService.LogInformation($"\n🔍 STEP E: Checking if document exists...");
                         LoggerService.LogInformation($"   Searching for: '{record.DocumentTitle}'");
@@ -227,21 +228,43 @@ namespace Orchestrator.Phase3
 
                         LoggerService.LogInformation($"   ℹ️  Document does NOT exist - upload needed");
 
-                        // STEP F: Upload document (TODO - not yet implemented)
-                        LoggerService.LogInformation($"\n📤 STEP F: Uploading document...");
-                        LoggerService.LogInformation($"   ⚠️  Upload functionality not yet implemented");
-                        LoggerService.LogInformation($"   💡 This will be implemented in the next phase");
+                        // ✅ STEP F: Click "Add New" to navigate to upload page
+                        LoggerService.LogInformation($"\n📤 STEP F: Navigating to upload page...");
 
-                        // For now, mark as not processed and navigate back
-                        record.VerifStatus = UploadVerificationStatus.NotProcessed;
+                        bool addNewClicked = await _phisSearchService.ClickAddNewDocumentButtonAsync();
+
+                        if (!addNewClicked)
+                        {
+                            LoggerService.LogInformation($"   ❌ FAILED: Could not open upload page");
+                            record.VerifStatus = UploadVerificationStatus.NeedsManualReview;
+                            result.ErrorMessages.Add($"{record.ClientID} - {record.Description}: Failed to open upload page");
+                            failureCount++;
+                            SaveUploadCsv(uploadRecords);
+                            continue;
+                        }
+
+                        LoggerService.LogInformation($"   ✅ SUCCESS: Upload page opened!");
+                        LoggerService.LogInformation($"   🎉 Ready for Ultimate Upload phase!");
+
+                        // ✅ TESTING MODE: Don't actually upload yet
+                        LoggerService.LogInformation($"\n   🧪 TESTING MODE: Upload functionality not yet implemented");
+                        LoggerService.LogInformation($"   💡 Document upload will be implemented next");
+                        LoggerService.LogInformation($"   📊 Current status: Navigation to upload page SUCCESSFUL");
+
+                        // ✅ DO NOT update VerifStatus in CSV yet (upload not done)
+                        // Just log success - CSV stays at NotProcessed
+                        LoggerService.LogInformation($"   ℹ️  VerifStatus remains NotProcessed (upload pending)");
 
                         // Navigate back for next document
                         await _phisSearchService.NavigateBackToSearchPagesAsync();
-                        SaveUploadCsv(uploadRecords);
 
+                        // ✅ Don't save CSV here - status unchanged
                         successCount++;
 
-                        LoggerService.LogInformation($"\n✅ DOCUMENT PROCESSED (ready for upload)");
+                        LoggerService.LogInformation($"\n✅ DOCUMENT PROCESSED (upload page verified)");
+
+                       
+
                     }
                     catch (Exception ex)
                     {
@@ -292,10 +315,9 @@ namespace Orchestrator.Phase3
             }
         }
 
+
         /// <summary>
-        /// Load Upload_to_PHIS.csv with lenient header validation
-        /// Orders by ClientID for optimized processing
-        /// Handles missing VerifStatus column gracefully
+        /// Load Upload_to_PHIS.csv with optional testing filters
         /// </summary>
         private List<UploadRecord> LoadUploadCsv()
         {
@@ -312,57 +334,83 @@ namespace Orchestrator.Phase3
 
             using var reader = new StreamReader(csvPath, Encoding.UTF8);
 
-            // ✅ Configure CsvHelper to handle missing columns gracefully
             var config = new CsvConfiguration(CultureInfo.InvariantCulture)
             {
-                // Don't throw exception if a mapped property doesn't have a matching header
                 MissingFieldFound = null,
-
-                // Don't throw exception if a header doesn't have a matching property
                 HeaderValidated = null,
-
-                // Trim whitespace from headers and fields
                 TrimOptions = TrimOptions.Trim,
-
-                // Prepare header for comparison (case-insensitive, remove spaces)
                 PrepareHeaderForMatch = args => args.Header.ToLower().Replace(" ", "")
             };
 
             using var csv = new CsvReader(reader, config);
-
             csv.Context.RegisterClassMap<UploadRecordMap>();
 
             try
             {
-                // ✅ Order by ClientID to group all documents for the same client together
-                // This optimizes PHIS navigation since we only need to "Set In Context" once per client
-                var records = csv.GetRecords<UploadRecord>()
-                    //.OrderBy(r => r.ClientID)
-                   // .ThenBy(r => r.PhisAntigen) // Secondary sort by antigen for consistent ordering
-                    .ToList();
+                var allRecords = csv.GetRecords<UploadRecord>().ToList();
 
-                LoggerService.LogInformation($"   ✅ Loaded {records.Count} records");
+                List<UploadRecord> records;
 
-                var uniqueClients = records.Select(r => r.ClientID).Distinct().Count();
-                LoggerService.LogInformation($"   👥 Unique clients: {uniqueClients}");
-                LoggerService.LogInformation($"   📊 Ordered by ClientID for optimized processing");
-
-                // ✅ Check if VerifStatus column was present
-                var hasVerifStatus = records.Any(r => r.VerifStatus != UploadVerificationStatus.NotProcessed);
-                if (!hasVerifStatus)
+                // ✅ Apply testing filters if enabled
+                if (_phase3Config.Testing.Enabled)
                 {
-                    LoggerService.LogInformation($"   ℹ️  VerifStatus column not found - all records set to NotProcessed");
+                    LoggerService.LogInformation($"\n   🧪 TESTING MODE ENABLED");
+
+                    records = allRecords;
+
+                    // Filter by Client IDs if specified
+                    if (_phase3Config.Testing.TestClientIds != null && _phase3Config.Testing.TestClientIds.Length > 0)
+                    {
+                        records = records
+                            .Where(r => _phase3Config.Testing.TestClientIds.Contains(r.ClientID))
+                            .ToList();
+
+                        LoggerService.LogInformation($"   🎯 Filtering to Client IDs: {string.Join(", ", _phase3Config.Testing.TestClientIds)}");
+                        LoggerService.LogInformation($"   📊 Total in CSV: {allRecords.Count} → Filtered: {records.Count}");
+                    }
+
+                    // Limit number of records if specified
+                    if (_phase3Config.Testing.MaxRecordsToProcess > 0 && records.Count > _phase3Config.Testing.MaxRecordsToProcess)
+                    {
+                        records = records.Take(_phase3Config.Testing.MaxRecordsToProcess).ToList();
+                        LoggerService.LogInformation($"   ⚠️  Limited to {_phase3Config.Testing.MaxRecordsToProcess} records for testing");
+                    }
+
+                    // Order by ClientID
+                    records = records
+                        .OrderBy(r => r.ClientID)
+                        .ThenBy(r => r.PhisAntigen)
+                        .ToList();
                 }
                 else
                 {
-                    var notProcessed = records.Count(r => r.VerifStatus == UploadVerificationStatus.NotProcessed);
-                    var success = records.Count(r => r.VerifStatus == UploadVerificationStatus.Success);
-                    var needsReview = records.Count(r => r.VerifStatus == UploadVerificationStatus.NeedsManualReview);
+                    // Production mode - process all
+                    records = allRecords
+                        .OrderBy(r => r.ClientID)
+                        .ThenBy(r => r.PhisAntigen)
+                        .ToList();
 
-                    LoggerService.LogInformation($"   📊 Status breakdown:");
-                    LoggerService.LogInformation($"      NotProcessed: {notProcessed}");
-                    LoggerService.LogInformation($"      Success: {success}");
-                    LoggerService.LogInformation($"      NeedsManualReview: {needsReview}");
+                    LoggerService.LogInformation($"   ✅ Loaded {records.Count} records (Production Mode)");
+                }
+
+                var uniqueClients = records.Select(r => r.ClientID).Distinct().Count();
+                LoggerService.LogInformation($"   👥 Unique clients to process: {uniqueClients}");
+                LoggerService.LogInformation($"   📊 Ordered by ClientID for optimized processing");
+
+                // Show details for small test sets
+                if (records.Count <= 20)
+                {
+                    LoggerService.LogInformation($"\n   📋 Records to process:");
+                    foreach (var record in records)
+                    {
+                        var statusIcon = record.VerifStatus switch
+                        {
+                            UploadVerificationStatus.Success => "✅",
+                            UploadVerificationStatus.NeedsManualReview => "❌",
+                            _ => "⏳"
+                        };
+                        LoggerService.LogInformation($"      {statusIcon} {record.ClientID} - {record.FirstName} {record.LastName} - {record.PhisAntigen} ({record.VerifStatus})");
+                    }
                 }
 
                 return records;
@@ -370,21 +418,9 @@ namespace Orchestrator.Phase3
             catch (Exception ex)
             {
                 LoggerService.LogError($"   ❌ Error reading CSV: {ex.Message}", ex);
-
-                // Try to show actual headers for debugging
-                try
-                {
-                    using var debugReader = new StreamReader(csvPath, Encoding.UTF8);
-                    var firstLine = debugReader.ReadLine();
-                    LoggerService.LogError($"   📄 Actual CSV headers: {firstLine}");
-                }
-                catch { }
-
                 throw;
             }
         }
-
-
 
 
 

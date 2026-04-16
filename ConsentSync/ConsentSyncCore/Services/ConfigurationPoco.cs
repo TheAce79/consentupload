@@ -194,6 +194,10 @@ namespace ConsentSyncCore.Services
 
         // Output
         public Phase3OutputConfig Output { get; set; } = new();
+
+
+        // ✅ NEW: Testing configuration
+        public Phase3TestingConfig Testing { get; set; } = new();
     }
 
 
@@ -268,6 +272,29 @@ namespace ConsentSyncCore.Services
         public string CompletedCsvFileName { get; set; } = string.Empty;
     }
 
+
+    /// <summary>
+    /// Phase 3 Testing configuration
+    /// </summary>
+    public class Phase3TestingConfig
+    {
+        /// <summary>
+        /// Enable testing mode to filter to specific Client IDs
+        /// </summary>
+        public bool Enabled { get; set; } = false;
+
+        /// <summary>
+        /// List of Client IDs to process in testing mode
+        /// Leave empty to process all records
+        /// </summary>
+        public string[] TestClientIds { get; set; } = Array.Empty<string>();
+
+        /// <summary>
+        /// Maximum number of records to process in testing mode
+        /// Set to 0 for unlimited
+        /// </summary>
+        public int MaxRecordsToProcess { get; set; } = 0;
+    }
 
 
     /// <summary>

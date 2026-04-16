@@ -279,5 +279,107 @@ namespace ConsentSyncCore.Services.Phis
         }
 
 
+
+
+
+        /// <summary>
+        /// Click the "Add New" button to navigate to the document upload page
+        /// This is the final step before actually uploading the document
+        /// </summary>
+        public async Task<bool> ClickAddNewDocumentButtonAsync()
+        {
+            try
+            {
+                Console.WriteLine($"   📤 Clicking 'Add New' button to open upload form...");
+
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+
+                // The button ID from the network capture
+                var addNewButtonId = "userDocumentListForm:docListCollapseSection:addDocument";
+
+                // Wait for the button to be present and clickable
+                _wait.Until(d => d.FindElements(By.Id(addNewButtonId)).Count > 0);
+
+                var addNewButton = _driver.FindElement(By.Id(addNewButtonId));
+
+                // Verify the button is enabled
+                var isDisabled = addNewButton.GetAttribute("disabled");
+                var classes = addNewButton.GetAttribute("class");
+
+                if (!string.IsNullOrEmpty(isDisabled) || classes.Contains("buttonDisabled"))
+                {
+                    Console.WriteLine($"   ⚠️  'Add New' button is disabled");
+                    return false;
+                }
+
+                Console.WriteLine($"   ✅ 'Add New' button found and enabled");
+
+                // Execute the onclick JavaScript first (folder validation)
+                // From network capture: onclick="return checkSelectedFolder('hideUserTreeView:treeViewForm:hiddenFolderId');"
+                var onClickResult = js.ExecuteScript(
+                    "return checkSelectedFolder('hideUserTreeView:treeViewForm:hiddenFolderId');");
+
+                if (onClickResult is bool boolResult && !boolResult)
+                {
+                    Console.WriteLine($"   ⚠️  Folder validation failed - cannot add document");
+                    return false;
+                }
+
+                // Click the button using JavaScript for reliability
+                js.ExecuteScript("arguments[0].click();", addNewButton);
+
+                Console.WriteLine($"   ✅ 'Add New' button clicked");
+
+                // Wait for the Document Management page to load
+                await Task.Delay(_phisConfig.PageLoadDelayMs);
+
+                // Verify we're on the "Add New Document" page
+                try
+                {
+                    _wait.Until(d =>
+                    {
+                        // Check for the page title
+                        var titleElements = d.FindElements(By.Id("pageTitle"));
+                        if (titleElements.Count > 0 && titleElements[0].Text.Contains("Document Management"))
+                        {
+                            return true;
+                        }
+
+                        // Alternative: Check for the "Add New Document" section header
+                        var sectionHeaders = d.FindElements(By.XPath("//*[contains(text(), 'Add New Document')]"));
+                        return sectionHeaders.Count > 0;
+                    });
+
+                    Console.WriteLine($"   ✅ Document Management page loaded");
+                    Console.WriteLine($"   📄 Ready to upload document");
+
+                    _sessionManager.UpdateActivity();
+                    return true;
+                }
+                catch (WebDriverTimeoutException)
+                {
+                    Console.WriteLine($"   ⚠️  Page verification timed out");
+
+                    // Fallback: Check for the file upload input field
+                    var fileInputs = _driver.FindElements(By.Id("addNewDocumentForm:sectionAddNewDocumentDefault:fileuploadInput"));
+                    if (fileInputs.Count > 0)
+                    {
+                        Console.WriteLine($"   ✅ Upload form found - assuming navigation successful");
+                        _sessionManager.UpdateActivity();
+                        return true;
+                    }
+
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Error clicking 'Add New' button: {ex.Message}");
+                return false;
+            }
+        }
+
+
+
     }
 }
