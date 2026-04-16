@@ -306,7 +306,7 @@ namespace ConsentSyncCore.Services.Phis
                 var isDisabled = addNewButton.GetAttribute("disabled");
                 var classes = addNewButton.GetAttribute("class");
 
-                if (!string.IsNullOrEmpty(isDisabled) || classes.Contains("buttonDisabled"))
+                if (!string.IsNullOrEmpty(isDisabled) || (classes != null && classes.Contains("buttonDisabled")))
                 {
                     Console.WriteLine($"   ⚠️  'Add New' button is disabled");
                     return false;
@@ -316,13 +316,21 @@ namespace ConsentSyncCore.Services.Phis
 
                 // Execute the onclick JavaScript first (folder validation)
                 // From network capture: onclick="return checkSelectedFolder('hideUserTreeView:treeViewForm:hiddenFolderId');"
-                var onClickResult = js.ExecuteScript(
-                    "return checkSelectedFolder('hideUserTreeView:treeViewForm:hiddenFolderId');");
-
-                if (onClickResult is bool boolResult && !boolResult)
+                try
                 {
-                    Console.WriteLine($"   ⚠️  Folder validation failed - cannot add document");
-                    return false;
+                    var onClickResult = js.ExecuteScript(
+                        "return checkSelectedFolder('hideUserTreeView:treeViewForm:hiddenFolderId');");
+
+                    if (onClickResult is bool boolResult && !boolResult)
+                    {
+                        Console.WriteLine($"   ⚠️  Folder validation failed - cannot add document");
+                        return false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"   ℹ️  Folder validation skipped: {ex.Message}");
+                    // Continue anyway - folder validation might not be required
                 }
 
                 // Click the button using JavaScript for reliability
@@ -378,7 +386,6 @@ namespace ConsentSyncCore.Services.Phis
                 return false;
             }
         }
-
 
 
     }

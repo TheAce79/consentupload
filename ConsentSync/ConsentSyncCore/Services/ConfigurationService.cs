@@ -434,6 +434,14 @@ namespace ConsentSyncCore.Services
                     VerifyUploadSuccess = phase3Section.GetValue<bool>("Upload:VerifyUploadSuccess")
                 },
 
+                // ✅ Testing section - ADDED
+                Testing = new Phase3TestingConfig
+                {
+                    Enabled = phase3Section.GetValue<bool>("Testing:Enabled", false),
+                    TestClientIds = phase3Section.GetSection("Testing:TestClientIds").Get<string[]>() ?? Array.Empty<string>(),
+                    MaxRecordsToProcess = phase3Section.GetValue<int>("Testing:MaxRecordsToProcess", 0)
+                },
+
                 // FileRose section
                 FileRose = new Phase3FileRoseConfig
                 {
@@ -442,7 +450,7 @@ namespace ConsentSyncCore.Services
                     UseCustomFileRosePerVaccine = phase3Section.GetValue<bool>("FileRose:UseCustomFileRosePerVaccine")
                 },
 
-                // Navigation section - ✅ UPDATED
+                // Navigation section
                 Navigation = new Phase3NavigationConfig
                 {
                     ImmunizationServiceUrl = phase3Section.GetValue<string>("Navigation:ImmunizationServiceUrl") ?? string.Empty,
@@ -474,7 +482,6 @@ namespace ConsentSyncCore.Services
 
             return phase3Config;
         }
-
 
 
 
