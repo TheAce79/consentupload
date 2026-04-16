@@ -1,4 +1,6 @@
-﻿using CsvHelper.Configuration;
+﻿using CsvHelper;
+using CsvHelper.Configuration;
+using CsvHelper.TypeConversion;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -7,6 +9,22 @@ using System.Threading.Tasks;
 
 namespace ConsentSyncCore.Models
 {
+    /// <summary>
+    /// Verification status for document upload
+    /// </summary>
+    public enum UploadVerificationStatus
+    {
+        /// <summary>Not yet processed</summary>
+        NotProcessed = 0,
+
+        /// <summary>Successfully uploaded or already exists</summary>
+        Success = 1,
+
+        /// <summary>Failed - needs manual review</summary>
+        NeedsManualReview = 2
+    }
+
+
     public class UploadRecord
     {
 
@@ -23,7 +41,47 @@ namespace ConsentSyncCore.Models
         public bool IsFeuilleRoseUpload { get; set; } = false;
 
 
+
+        /// <summary>
+        /// Verification status for document upload
+        /// </summary>
+        public UploadVerificationStatus VerifStatus { get; set; } = UploadVerificationStatus.NotProcessed;
+
+
     }
+
+
+
+    /// <summary>
+    /// Custom converter for UploadVerificationStatus enum
+    /// Handles CSV serialization/deserialization
+    /// </summary>
+    public class UploadVerificationStatusConverter : DefaultTypeConverter
+    {
+        public override object ConvertFromString(string? text, IReaderRow row, MemberMapData memberMapData)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return UploadVerificationStatus.NotProcessed;
+
+            if (int.TryParse(text, out int value))
+            {
+                return (UploadVerificationStatus)value;
+            }
+
+            return UploadVerificationStatus.NotProcessed;
+        }
+
+        public override string ConvertToString(object? value, IWriterRow row, MemberMapData memberMapData)
+        {
+            if (value is UploadVerificationStatus status)
+            {
+                return ((int)status).ToString();
+            }
+
+            return "0";
+        }
+    }
+
 
 
     /// <summary>
@@ -42,9 +100,14 @@ namespace ConsentSyncCore.Models
             Map(m => m.IsFeuilleRose).Name("IsFeuilleRose");
             Map(m => m.Status).Name("Status");
             Map(m => m.IsFeuilleRoseUpload).Name("IsFeuilleRoseUpload");
-        }
-    }
 
+            Map(m => m.VerifStatus).Name("VerifStatus")
+                .TypeConverter<UploadVerificationStatusConverter>();
+
+        }
+
+
+    }
 
 
 }

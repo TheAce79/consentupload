@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 
 namespace ConsentSyncCore.Services.Phis
 {
-    public class PhisSearchService
+    public partial class PhisSearchService
     {
         private readonly IWebDriver _driver;
         private readonly IConfiguration _config;

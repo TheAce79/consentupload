@@ -1,5 +1,4 @@
-﻿
-using ConsentSyncCore.Models;
+﻿using ConsentSyncCore.Models;
 using ConsentSyncCore.Services;
 using ConsentSyncCore.Services.Phis;
 using CsvHelper;
@@ -7,20 +6,13 @@ using CsvHelper.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using OpenQA.Selenium;
-using Orchestrator.Phase2;
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace Orchestrator.Phase3
 {
     public class Phase3Orchestrator
     {
-
-
         private readonly IConfiguration _config;
         private readonly Phase3Config _phase3Config;
         private readonly SchoolContextConfig _schoolContext;
@@ -44,13 +36,11 @@ namespace Orchestrator.Phase3
             _logger = LoggerService.GetLogger<Phase3Orchestrator>();
         }
 
-
-
         public async Task<Phase3Result> RunAsync()
         {
             LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
             LoggerService.LogInformation("║       ConsentSync - Phase 3: Upload to PHIS            ║");
-            LoggerService.LogInformation("║   TEST MODE: Context + Navigate + Select Directive     ║");
+            LoggerService.LogInformation("║         Process Each Document Row-by-Row               ║");
             LoggerService.LogInformation("╚════════════════════════════════════════════════════════╝\n");
 
             var result = new Phase3Result();
@@ -71,18 +61,23 @@ namespace Orchestrator.Phase3
                     return result;
                 }
 
-                // Step 2: Group by ClientID (multiple PDFs per client)
-                LoggerService.LogInformation("\n📋 Step 2: Grouping records by Client ID...");
-                var clientGroups = uploadRecords
-                    .Where(r => !string.IsNullOrWhiteSpace(r.ClientID))
-                    .GroupBy(r => r.ClientID)
+                // Step 2: Filter records to process (skip VerifStatus = Success)
+                LoggerService.LogInformation("\n📋 Step 2: Filtering records to process...");
+
+                var recordsToProcess = uploadRecords
+                    .Where(r => !string.IsNullOrWhiteSpace(r.ClientID) && r.VerifStatus != UploadVerificationStatus.Success)
                     .ToList();
 
-                var uniqueClients = clientGroups.Count;
-                result.UploadReadyRecords = uniqueClients;
+                var alreadyVerified = uploadRecords.Count - recordsToProcess.Count;
 
-                LoggerService.LogInformation($"   ✅ Found {uniqueClients} unique clients");
-                LoggerService.LogInformation($"   📄 Total documents to upload: {uploadRecords.Count}");
+                LoggerService.LogInformation($"   ✅ Records to process: {recordsToProcess.Count}");
+                LoggerService.LogInformation($"   ⏭️  Already verified (Success): {alreadyVerified}");
+
+                if (recordsToProcess.Count == 0)
+                {
+                    LoggerService.LogInformation("\n✅ All records already verified!");
+                    return result;
+                }
 
                 // Step 3: Verify session is active
                 LoggerService.LogInformation("\n📋 Step 3: Verifying PHIS session...");
@@ -95,49 +90,64 @@ namespace Orchestrator.Phase3
                 }
                 LoggerService.LogInformation("   ✅ PHIS session is active");
 
-                // Step 4: Process each client
-                LoggerService.LogInformation($"\n📋 Step 4: Processing {uniqueClients} clients...");
-                LoggerService.LogInformation($"   🧪 TEST MODE: Set context + Navigate + Select consent directives\n");
+                // Step 4: Process each record ONE BY ONE (row-by-row)
+                LoggerService.LogInformation($"\n📋 Step 4: Processing {recordsToProcess.Count} documents (row-by-row)...");
+                LoggerService.LogInformation($"   🔄 Each document will be processed from start to finish\n");
 
                 int successCount = 0;
+                int skipCount = 0;
                 int failureCount = 0;
+                int processedCount = 0;
 
-                foreach (var clientGroup in clientGroups)
+                foreach (var record in recordsToProcess)
                 {
-                    var clientId = clientGroup.Key;
-                    var clientRecords = clientGroup.ToList();
-                    var firstRecord = clientRecords.First();
+                    processedCount++;
 
-                    LoggerService.LogInformation($"\n{new string('─', 60)}");
-                    LoggerService.LogInformation($"Client: {firstRecord.FirstName} {firstRecord.LastName}");
-                    LoggerService.LogInformation($"Client ID: {clientId}");
-                    LoggerService.LogInformation($"Documents: {clientRecords.Count}");
-
-                    // Display documents for this client
-                    foreach (var record in clientRecords)
-                    {
-                        LoggerService.LogInformation($"   📄 {record.DocumentTitle} ({record.Description}) - Antigen: {record.PhisAntigen}");
-                    }
+                    LoggerService.LogInformation($"\n{new string('═', 70)}");
+                    LoggerService.LogInformation($"📄 DOCUMENT {processedCount}/{recordsToProcess.Count}");
+                    LoggerService.LogInformation($"{new string('═', 70)}");
+                    LoggerService.LogInformation($"Client: {record.FirstName} {record.LastName}");
+                    LoggerService.LogInformation($"Client ID: {record.ClientID}");
+                    LoggerService.LogInformation($"Document: {record.DocumentTitle}");
+                    LoggerService.LogInformation($"Description: {record.Description}");
+                    LoggerService.LogInformation($"Antigen: {record.PhisAntigen}");
+                    LoggerService.LogInformation($"Current VerifStatus: {record.VerifStatus}");
+                    LoggerService.LogInformation($"{new string('─', 70)}");
 
                     try
                     {
-                        // Step A: Search and set in context
-                        LoggerService.LogInformation($"\n   🔍 Searching and setting in context...");
-                        bool contextSet = await _phisSearchService.SearchByClientIdAndSetInContextAsync(clientId);
+                        // Validate required fields
+                        if (string.IsNullOrWhiteSpace(record.PhisAntigen))
+                        {
+                            LoggerService.LogInformation($"\n⚠️  WARNING: PhisAntigen is empty");
+                            record.VerifStatus = UploadVerificationStatus.NeedsManualReview;
+                            result.ErrorMessages.Add($"{record.ClientID} - {record.Description}: PhisAntigen is empty");
+                            failureCount++;
+                            SaveUploadCsv(uploadRecords);
+                            continue;
+                        }
+
+                        // STEP A: Search and set client in context
+                        LoggerService.LogInformation($"\n🔍 STEP A: Searching and setting client in context...");
+                        LoggerService.LogInformation($"   Client ID: {record.ClientID}");
+
+                        bool contextSet = await _phisSearchService.SearchByClientIdAndSetInContextAsync(record.ClientID);
 
                         if (!contextSet)
                         {
                             LoggerService.LogInformation($"   ❌ FAILED: Could not set client in context");
+                            record.VerifStatus = UploadVerificationStatus.NeedsManualReview;
+                            result.ErrorMessages.Add($"{record.ClientID}: Failed to set in context");
                             failureCount++;
-                            result.FailedUploads++;
-                            result.ErrorMessages.Add($"{clientId}: Failed to set in context");
-                            continue; // Skip to next client
+                            SaveUploadCsv(uploadRecords);
+                            continue;
                         }
 
                         LoggerService.LogInformation($"   ✅ SUCCESS: Client set in context");
 
-                        // Step B: Navigate to Immunization Service page
-                        LoggerService.LogInformation($"\n   🧭 Navigating to Immunization Service...");
+                        // STEP B: Navigate to Immunization Service page
+                        LoggerService.LogInformation($"\n🧭 STEP B: Navigating to Immunization Service...");
+
                         bool navigated = await _phisSearchService.NavigateToImmunizationServiceAsync();
 
                         if (!navigated)
@@ -149,76 +159,112 @@ namespace Orchestrator.Phase3
                         if (!navigated)
                         {
                             LoggerService.LogInformation($"   ❌ FAILED: Could not navigate to Immunization Service");
+                            record.VerifStatus = UploadVerificationStatus.NeedsManualReview;
+                            result.ErrorMessages.Add($"{record.ClientID}: Failed to navigate to Immunization Service");
                             failureCount++;
-                            result.FailedUploads++;
-                            result.ErrorMessages.Add($"{clientId}: Failed to navigate to Immunization Service");
+                            SaveUploadCsv(uploadRecords);
                             continue;
                         }
 
                         LoggerService.LogInformation($"   ✅ SUCCESS: On Immunization Service page");
 
-                        // Step C: Process each document for this client
-                        LoggerService.LogInformation($"\n   📄 Processing {clientRecords.Count} document(s)...");
+                        // STEP C: Select the consent directive matching the antigen
+                        LoggerService.LogInformation($"\n🎯 STEP C: Selecting consent directive...");
+                        LoggerService.LogInformation($"   Antigen: '{record.PhisAntigen}'");
 
-                        int documentsProcessed = 0;
-                        foreach (var record in clientRecords)
+                        bool directiveSelected = await _phisSearchService.SelectConsentDirectiveByAntigenAsync(record.PhisAntigen);
+
+                        if (!directiveSelected)
                         {
-                            LoggerService.LogInformation($"\n      Processing: {record.Description}");
-                            LoggerService.LogInformation($"      PhisAntigen: '{record.PhisAntigen}'");
-
-                            // Validate PhisAntigen
-                            if (string.IsNullOrWhiteSpace(record.PhisAntigen))
-                            {
-                                LoggerService.LogInformation($"      ⚠️  WARNING: PhisAntigen is empty, skipping");
-                                result.ErrorMessages.Add($"{clientId} - {record.Description}: PhisAntigen is empty");
-                                continue;
-                            }
-
-                            // Select the consent directive row matching the antigen
-                            bool directiveSelected = await _phisSearchService.SelectConsentDirectiveByAntigenAsync(record.PhisAntigen);
-
-                            if (!directiveSelected)
-                            {
-                                LoggerService.LogInformation($"      ❌ FAILED: Could not select consent directive for '{record.PhisAntigen}'");
-                                result.ErrorMessages.Add($"{clientId} - {record.Description}: Failed to select consent directive");
-                                continue;
-                            }
-
-                            LoggerService.LogInformation($"      ✅ SUCCESS: Consent directive selected");
-                            documentsProcessed++;
-
-                            // TODO Phase 3.3: Add actual document upload here
-                            // await UploadDocumentAsync(record);
-
-                            // Small delay between documents
-                            await Task.Delay(500);
-                        }
-
-                        if (documentsProcessed == clientRecords.Count)
-                        {
-                            successCount++;
-                            result.SuccessfulUploads++;
-                            LoggerService.LogInformation($"\n   ✅ ALL DOCUMENTS PROCESSED for client {clientId}");
-                        }
-                        else
-                        {
+                            LoggerService.LogInformation($"   ❌ FAILED: Could not select consent directive for '{record.PhisAntigen}'");
+                            record.VerifStatus = UploadVerificationStatus.NeedsManualReview;
+                            result.ErrorMessages.Add($"{record.ClientID} - {record.Description}: Failed to select consent directive");
                             failureCount++;
-                            result.FailedUploads++;
-                            LoggerService.LogInformation($"\n   ⚠️  PARTIAL SUCCESS: {documentsProcessed}/{clientRecords.Count} documents processed");
+                            SaveUploadCsv(uploadRecords);
+                            continue;
                         }
+
+                        LoggerService.LogInformation($"   ✅ SUCCESS: Consent directive selected");
+
+                        // STEP D: Click Documents button
+                        LoggerService.LogInformation($"\n📄 STEP D: Opening Documents page...");
+
+                        bool documentsPageOpened = await _phisSearchService.ClickDocumentsButtonAsync();
+
+                        if (!documentsPageOpened)
+                        {
+                            LoggerService.LogInformation($"   ❌ FAILED: Could not open Documents page");
+                            record.VerifStatus = UploadVerificationStatus.NeedsManualReview;
+                            result.ErrorMessages.Add($"{record.ClientID} - {record.Description}: Failed to open Documents page");
+                            failureCount++;
+                            SaveUploadCsv(uploadRecords);
+                            continue;
+                        }
+
+                        LoggerService.LogInformation($"   ✅ SUCCESS: Documents page opened");
+
+                        // STEP E: Check if document already exists
+                        LoggerService.LogInformation($"\n🔍 STEP E: Checking if document exists...");
+                        LoggerService.LogInformation($"   Searching for: '{record.DocumentTitle}'");
+
+                        bool documentExists = await _phisSearchService.CheckIfDocumentExistsAsync(record.DocumentTitle);
+
+                        if (documentExists)
+                        {
+                            LoggerService.LogInformation($"   ✅ DOCUMENT ALREADY EXISTS in PHIS!");
+                            LoggerService.LogInformation($"   ℹ️  Marking as verified (Success)");
+                            record.VerifStatus = UploadVerificationStatus.Success;
+                            skipCount++;
+                            result.SuccessfulUploads++;
+
+                            // Navigate back for next document
+                            await _phisSearchService.NavigateBackToSearchPagesAsync();
+                            SaveUploadCsv(uploadRecords);
+
+                            LoggerService.LogInformation($"\n✅ DOCUMENT VERIFIED (already exists)");
+                            continue;
+                        }
+
+                        LoggerService.LogInformation($"   ℹ️  Document does NOT exist - upload needed");
+
+                        // STEP F: Upload document (TODO - not yet implemented)
+                        LoggerService.LogInformation($"\n📤 STEP F: Uploading document...");
+                        LoggerService.LogInformation($"   ⚠️  Upload functionality not yet implemented");
+                        LoggerService.LogInformation($"   💡 This will be implemented in the next phase");
+
+                        // For now, mark as not processed and navigate back
+                        record.VerifStatus = UploadVerificationStatus.NotProcessed;
+
+                        // Navigate back for next document
+                        await _phisSearchService.NavigateBackToSearchPagesAsync();
+                        SaveUploadCsv(uploadRecords);
+
+                        successCount++;
+
+                        LoggerService.LogInformation($"\n✅ DOCUMENT PROCESSED (ready for upload)");
                     }
                     catch (Exception ex)
                     {
-                        LoggerService.LogInformation($"   ❌ ERROR: {ex.Message}");
+                        LoggerService.LogInformation($"\n❌ ERROR: {ex.Message}");
+                        LoggerService.LogInformation($"   Stack trace: {ex.StackTrace}");
+                        record.VerifStatus = UploadVerificationStatus.NeedsManualReview;
+                        result.ErrorMessages.Add($"{record.ClientID} - {record.Description}: {ex.Message}");
                         failureCount++;
-                        result.FailedUploads++;
-                        result.ErrorMessages.Add($"{clientId} ({firstRecord.FirstName} {firstRecord.LastName}): {ex.Message}");
+
+                        // Try to recover by navigating back
+                        try
+                        {
+                            await _phisSearchService.NavigateBackToSearchPagesAsync();
+                        }
+                        catch { }
+
+                        SaveUploadCsv(uploadRecords);
                     }
 
-                    // Session check every 10 clients
-                    if ((successCount + failureCount) % 10 == 0 && (successCount + failureCount) > 0)
+                    // Session check every 10 documents
+                    if (processedCount % 10 == 0)
                     {
-                        LoggerService.LogInformation($"\n   🔄 Session check after {successCount + failureCount} clients...");
+                        LoggerService.LogInformation($"\n🔄 Session check after {processedCount} documents...");
                         if (!_sessionManager.EnsureSessionValid())
                         {
                             LoggerService.LogInformation($"   ⚠️  Session expired! Please refresh");
@@ -228,12 +274,12 @@ namespace Orchestrator.Phase3
                         LoggerService.LogInformation($"   ✅ Session still active");
                     }
 
-                    // Small delay between clients
+                    // Small delay between documents
                     await Task.Delay(_phase3Config.Upload.DelayBetweenUploadsMs);
                 }
 
                 // Step 5: Display summary
-                DisplaySummary(result, successCount, failureCount, uploadRecords.Count);
+                DisplaySummary(result, successCount, skipCount, failureCount, uploadRecords.Count, alreadyVerified);
 
                 return result;
             }
@@ -245,10 +291,6 @@ namespace Orchestrator.Phase3
                 return result;
             }
         }
-
-
-
-
 
         /// <summary>
         /// Load Upload_to_PHIS.csv
@@ -273,27 +315,51 @@ namespace Orchestrator.Phase3
             return csv.GetRecords<UploadRecord>().ToList();
         }
 
-
-
-        private void DisplaySummary(Phase3Result result, int successCount, int failureCount, int totalDocuments)
+        /// <summary>
+        /// Save Upload_to_PHIS.csv with updated VerifStatus values
+        /// </summary>
+        private void SaveUploadCsv(List<UploadRecord> uploadRecords)
         {
-            LoggerService.LogInformation("\n" + new string('═', 60));
-            LoggerService.LogInformation("📊 PHASE 3 TEST RUN COMPLETE - Final Summary");
-            LoggerService.LogInformation(new string('═', 60));
-            LoggerService.LogInformation($"Total records in CSV: {result.TotalRecords}");
-            LoggerService.LogInformation($"Unique clients: {result.UploadReadyRecords}");
-            LoggerService.LogInformation($"Total documents: {totalDocuments}");
-            LoggerService.LogInformation($"\n🎯 Test Results:");
+            try
+            {
+                var csvPath = Path.Combine(
+                    _phase3Config.Input.UploadCsvPath,
+                    _phase3Config.Input.UploadCsvFileName);
+
+                using var writer = new StreamWriter(csvPath, false, Encoding.UTF8);
+                using var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture));
+
+                csv.Context.RegisterClassMap<UploadRecordMap>();
+                csv.WriteRecords(uploadRecords);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogWarning($"      ⚠️  Could not save CSV: {ex.Message}");
+            }
+        }
+
+        private void DisplaySummary(Phase3Result result, int successCount, int skipCount, int failureCount,
+            int totalRecords, int alreadyVerified)
+        {
+            LoggerService.LogInformation("\n" + new string('═', 70));
+            LoggerService.LogInformation("📊 PHASE 3 COMPLETE - Final Summary");
+            LoggerService.LogInformation(new string('═', 70));
+            LoggerService.LogInformation($"Total records in CSV: {totalRecords}");
+            LoggerService.LogInformation($"Already verified (skipped): {alreadyVerified}");
+            LoggerService.LogInformation($"Processed in this run: {successCount + skipCount + failureCount}");
+            LoggerService.LogInformation($"\n🎯 Results:");
             LoggerService.LogInformation($"   ✅ Successfully processed: {successCount}");
+            LoggerService.LogInformation($"   ⏭️  Already exist (skipped): {skipCount}");
             LoggerService.LogInformation($"   ❌ Failed: {failureCount}");
 
-            if (successCount > 0)
+            if (successCount + skipCount > 0)
             {
-                double successRate = (double)successCount / result.UploadReadyRecords * 100;
+                var total = successCount + skipCount + failureCount;
+                double successRate = total > 0 ? (double)(successCount + skipCount) / total * 100 : 0;
                 LoggerService.LogInformation($"   📈 Success rate: {successRate:F1}%");
             }
 
-            LoggerService.LogInformation(new string('═', 60));
+            LoggerService.LogInformation(new string('═', 70));
 
             if (result.ErrorMessages.Count > 0)
             {
@@ -309,19 +375,27 @@ namespace Orchestrator.Phase3
             }
 
             LoggerService.LogInformation($"\n💡 Next Steps:");
-            if (successCount == result.UploadReadyRecords)
+
+            var remainingToProcess = totalRecords - alreadyVerified - skipCount;
+
+            if (remainingToProcess == 0 && failureCount == 0)
             {
-                LoggerService.LogInformation($"   ✅ All clients successfully processed!");
-                LoggerService.LogInformation($"   📝 Ready to implement PDF upload functionality");
+                LoggerService.LogInformation($"   ✅ All documents verified!");
+                LoggerService.LogInformation($"   📝 Ready to implement upload functionality");
             }
-            else
+            else if (failureCount > 0)
             {
-                LoggerService.LogInformation($"   ⚠️  Review errors above before proceeding");
-                LoggerService.LogInformation($"   🔧 Fix any session, search, navigation, or directive selection issues");
+                LoggerService.LogInformation($"   ⚠️  {failureCount} document(s) failed - review errors above");
+                LoggerService.LogInformation($"   🔧 Fix issues and re-run Phase 3");
             }
+            else if (remainingToProcess > 0)
+            {
+                LoggerService.LogInformation($"   ℹ️  {remainingToProcess} document(s) still need upload");
+                LoggerService.LogInformation($"   📤 Implement upload functionality and re-run");
+            }
+
+            LoggerService.LogInformation($"\n📁 CSV updated with VerifStatus values");
+            LoggerService.LogInformation($"   Path: {_phase3Config.Input.UploadCsvPath}\\{_phase3Config.Input.UploadCsvFileName}");
         }
-
-
-
     }
 }
