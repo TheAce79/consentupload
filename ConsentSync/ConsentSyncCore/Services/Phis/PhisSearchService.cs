@@ -1137,8 +1137,115 @@ namespace ConsentSyncCore.Services.Phis
 
 
         /// <summary>
+        /// Apply Active/Inactive filter via AJAX request (fallback method)
+        /// </summary>
+        private async Task<bool> ApplyActiveInactiveFilterViaAjaxAsync()
+        {
+            try
+            {
+                Console.WriteLine($"      🔄 Trying AJAX method to apply filter...");
+
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+
+                // Get the current ViewState
+                var viewState = (string)js.ExecuteScript(@"
+            return document.querySelector('input[name=""javax.faces.ViewState""]')?.value || '';
+        ") ?? "";
+
+                if (string.IsNullOrEmpty(viewState))
+                {
+                    Console.WriteLine($"      ⚠️  Could not get ViewState");
+                }
+
+                // Build the filter AJAX request matching your network trace
+                var ajaxScript = $@"
+            try {{
+                console.log('Sending AJAX filter request...');
+                
+                // Create FormData to match the exact network trace
+                var formData = new FormData();
+                formData.append('javax.faces.partial.ajax', 'true');
+                formData.append('javax.faces.source', 'consentForm:ConsentDataTable:dataTable');
+                formData.append('primefaces.ignoreautoupdate', 'true');
+                formData.append('javax.faces.partial.execute', 'consentForm:ConsentDataTable:dataTable');
+                formData.append('javax.faces.partial.render', 'consentForm:ConsentDataTable:rowActionsPanel consentForm:ConsentDataTable:dataTable');
+                formData.append('javax.faces.behavior.event', 'filter');
+                formData.append('javax.faces.partial.event', 'filter');
+                formData.append('consentForm:ConsentDataTable:dataTable_filtering', 'true');
+                formData.append('consentForm:ConsentDataTable:dataTable_encodeFeature', 'true');
+                
+                // Filter form fields
+                formData.append('consentForm:ConsentDataTable:dataTable:statusFilter_focus', '');
+                formData.append('consentForm:ConsentDataTable:dataTable:statusFilter', 'Confirmed');
+                formData.append('consentForm:ConsentDataTable:dataTable:instructionFilter_focus', '');
+                formData.append('consentForm:ConsentDataTable:dataTable:antigenFilter_focus', '');
+                formData.append('consentForm:ConsentDataTable:dataTable:activeFilter_focus', '');
+                
+                // Critical: append Active and Inactive as separate entries
+                formData.append('consentForm:ConsentDataTable:dataTable:activeFilter', 'Active');
+                formData.append('consentForm:ConsentDataTable:dataTable:activeFilter', 'Inactive');
+                
+                formData.append('consentForm:ConsentDataTable:dataTable_rppDD', '10');
+                formData.append('consentForm:ConsentDataTable:dataTable_selection', '');
+                formData.append('javax.faces.ViewState', '{viewState}');
+                
+                // Send via PrimeFaces if available, otherwise use fetch
+                if (typeof PrimeFaces !== 'undefined' && PrimeFaces.ajax) {{
+                    PrimeFaces.ajax.Request.handle({{
+                        source: 'consentForm:ConsentDataTable:dataTable',
+                        process: 'consentForm:ConsentDataTable:dataTable',
+                        update: 'consentForm:ConsentDataTable:rowActionsPanel consentForm:ConsentDataTable:dataTable',
+                        formId: 'consentForm',
+                        params: Object.fromEntries(formData.entries()),
+                        oncomplete: function(xhr, status, args) {{
+                            console.log('AJAX filter complete. Status:', status);
+                        }}
+                    }});
+                    return true;
+                }} else {{
+                    console.error('PrimeFaces not available');
+                    return false;
+                }}
+            }} catch (error) {{
+                console.error('AJAX error:', error);
+                return false;
+            }}
+        ";
+
+                var ajaxResult = js.ExecuteScript(ajaxScript);
+
+                if (ajaxResult is bool ajaxBoolResult && !ajaxBoolResult)
+                {
+                    Console.WriteLine($"      ❌ AJAX method failed");
+                    return await ApplyActiveInactiveFilterViaClickAsync();
+                }
+
+                Console.WriteLine($"      ✅ AJAX filter request sent");
+                await Task.Delay(_phisConfig.AjaxWaitMs * 3);
+
+                _sessionManager.UpdateActivity();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"      ❌ AJAX method error: {ex.Message}");
+                return await ApplyActiveInactiveFilterViaClickAsync();
+            }
+        }
+
+
+
+
+
+
+
+
+
+
+
+        /// <summary>
         /// Apply Active and Inactive filter to show all consent directives
-        /// Based on network trace
+        /// Based on network trace and PrimeFaces SelectCheckboxMenu widget
         /// </summary>
         private async Task<bool> ApplyActiveInactiveFilterAsync()
         {
@@ -1148,70 +1255,72 @@ namespace ConsentSyncCore.Services.Phis
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
-                // Get the current ViewState
-                var viewState = (string)js.ExecuteScript(@"
-            return document.querySelector('input[name=""javax.faces.ViewState""]')?.value || '';
-        ") ?? "";
-
-                Console.WriteLine($"      📝 ViewState: {viewState.Substring(0, Math.Min(20, viewState.Length))}...");
-
-                // Build the filter request exactly as shown in your network trace
-                var filterScript = $@"
-            console.log('Applying Active + Inactive filter...');
-            
-            // Build params object matching network trace
-            var params = {{}};
-            params['javax.faces.partial.ajax'] = 'true';
-            params['javax.faces.source'] = 'consentForm:ConsentDataTable:dataTable';
-            params['primefaces.ignoreautoupdate'] = 'true';
-            params['javax.faces.partial.execute'] = 'consentForm:ConsentDataTable:dataTable';
-            params['javax.faces.partial.render'] = 'consentForm:ConsentDataTable:rowActionsPanel consentForm:ConsentDataTable:dataTable';
-            params['javax.faces.behavior.event'] = 'filter';
-            params['javax.faces.partial.event'] = 'filter';
-            params['consentForm:ConsentDataTable:dataTable_filtering'] = 'true';
-            params['consentForm:ConsentDataTable:dataTable_encodeFeature'] = 'true';
-            
-            // Filter values
-            params['consentForm:ConsentDataTable:dataTable:statusFilter_focus'] = '';
-            params['consentForm:ConsentDataTable:dataTable:statusFilter'] = 'Confirmed';
-            params['consentForm:ConsentDataTable:dataTable:instructionFilter_focus'] = '';
-            params['consentForm:ConsentDataTable:dataTable:antigenFilter_focus'] = '';
-            params['consentForm:ConsentDataTable:dataTable:activeFilter_focus'] = '';
-            
-            // This is the key: set both Active and Inactive
-            params['consentForm:ConsentDataTable:dataTable:activeFilter'] = ['Active', 'Inactive'];
-            
-            params['consentForm:ConsentDataTable:dataTable_rppDD'] = '10';
-            params['consentForm:ConsentDataTable:dataTable_selection'] = '';
-            params['javax.faces.ViewState'] = '{viewState}';
-            
-            // Send the AJAX request
-            PrimeFaces.ajax.Request.handle({{
-                source: 'consentForm:ConsentDataTable:dataTable',
-                process: 'consentForm:ConsentDataTable:dataTable',
-                update: 'consentForm:ConsentDataTable:rowActionsPanel consentForm:ConsentDataTable:dataTable',
-                params: params,
-                formId: 'consentForm',
-                oncomplete: function(xhr, status, args) {{
-                    console.log('Filter applied. Status:', status, 'Total records:', args?.totalRecords);
-                }}
-            }});
-            
-            return true;
+                // Method 1: Use PrimeFaces widget to check the Inactive checkbox
+                var widgetScript = @"
+            try {
+                console.log('Step 1: Checking if Inactive checkbox is already checked...');
+                
+                // Get the Inactive checkbox element
+                var inactiveCheckbox = document.getElementById('consentForm:ConsentDataTable:dataTable:activeFilter:1');
+                
+                if (!inactiveCheckbox) {
+                    console.error('Inactive checkbox not found!');
+                    return false;
+                }
+                
+                // Check if it's already checked
+                if (inactiveCheckbox.checked) {
+                    console.log('Inactive checkbox is already checked');
+                    return true;
+                }
+                
+                console.log('Step 2: Checking the Inactive checkbox...');
+                
+                // Check the checkbox
+                inactiveCheckbox.checked = true;
+                
+                // Trigger the onchange event to make PrimeFaces filter
+                var changeEvent = new Event('change', { bubbles: true });
+                inactiveCheckbox.dispatchEvent(changeEvent);
+                
+                // Also trigger the PrimeFaces widget filter directly
+                if (typeof PF === 'function' && PF('widget_consentForm_ConsentDataTable_dataTable')) {
+                    console.log('Step 3: Triggering PrimeFaces filter...');
+                    PF('widget_consentForm_ConsentDataTable_dataTable').filter();
+                }
+                
+                console.log('Filter applied successfully!');
+                return true;
+                
+            } catch (error) {
+                console.error('Error applying filter:', error);
+                return false;
+            }
         ";
 
-                var result = (bool)js.ExecuteScript(filterScript);
+                var result = js.ExecuteScript(widgetScript);
 
-                if (!result)
+                if (result is bool boolResult && !boolResult)
                 {
-                    Console.WriteLine($"      ⚠️  JavaScript filter failed, trying direct click method...");
-                    return await ApplyActiveInactiveFilterViaClickAsync();
+                    Console.WriteLine($"      ⚠️  Widget method failed, trying AJAX method...");
+                    return await ApplyActiveInactiveFilterViaAjaxAsync();
                 }
 
-                Console.WriteLine($"      ✅ Filter AJAX request sent");
+                Console.WriteLine($"      ✅ Inactive filter checkbox checked");
 
-                // Wait longer for the filter to apply and table to refresh
+                // Wait for the filter to apply and table to refresh
+                Console.WriteLine($"      ⏳ Waiting for table to refresh...");
                 await Task.Delay(_phisConfig.AjaxWaitMs * 3);
+
+                // Verify the filter was applied by checking if table has more rows
+                var tableId = "consentForm:ConsentDataTable:dataTable_data";
+                var tbody = _driver.FindElements(By.Id(tableId));
+
+                if (tbody.Count > 0)
+                {
+                    var rows = tbody[0].FindElements(By.XPath(".//tr[@role='row']"));
+                    Console.WriteLine($"      ✅ Table now has {rows.Count} row(s)");
+                }
 
                 _sessionManager.UpdateActivity();
                 return true;
@@ -1219,71 +1328,58 @@ namespace ConsentSyncCore.Services.Phis
             catch (Exception ex)
             {
                 Console.WriteLine($"      ❌ Error applying filter: {ex.Message}");
-
-                // Fallback to direct click method
-                return await ApplyActiveInactiveFilterViaClickAsync();
+                return await ApplyActiveInactiveFilterViaAjaxAsync();
             }
         }
 
 
+
+
         /// <summary>
-        /// Apply Active/Inactive filter by directly clicking the filter dropdown (fallback method)
+        /// Apply Active/Inactive filter by directly clicking UI elements (last resort fallback)
         /// </summary>
         private async Task<bool> ApplyActiveInactiveFilterViaClickAsync()
         {
             try
             {
-                Console.WriteLine($"      🖱️  Trying direct click on Active filter...");
+                Console.WriteLine($"      🖱️  Trying direct click method...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
-                // Step 1: Find and click the Active filter dropdown trigger
-                var activeFilterId = "consentForm:ConsentDataTable:dataTable:activeFilter";
+                // Step 1: Find the Inactive checkbox and check it
+                var inactiveCheckboxId = "consentForm:ConsentDataTable:dataTable:activeFilter:1";
 
-                // Wait for the filter dropdown to be present
-                _wait.Until(d => d.FindElements(By.Id(activeFilterId)).Count > 0);
+                _wait.Until(d => d.FindElements(By.Id(inactiveCheckboxId)).Count > 0);
 
-                // Find the dropdown trigger button
-                var filterTrigger = _driver.FindElement(By.CssSelector($"#{activeFilterId} .ui-selectcheckboxmenu-trigger"));
+                var inactiveCheckbox = _driver.FindElement(By.Id(inactiveCheckboxId));
 
-                // Click to open dropdown
-                js.ExecuteScript("arguments[0].click();", filterTrigger);
+                // Check if already checked
+                bool isChecked = inactiveCheckbox.Selected || inactiveCheckbox.GetAttribute("checked") == "checked";
 
-                Console.WriteLine($"      ✅ Opened Active filter dropdown");
-                await Task.Delay(500); // Wait for dropdown to open
-
-                // Step 2: Find and check the "Inactive" checkbox (Active should already be checked)
-                var inactiveCheckbox = _driver.FindElement(By.CssSelector($"input[name='{activeFilterId}'][value='Inactive']"));
-
-                // Check if it's already checked
-                bool isChecked = inactiveCheckbox.Selected;
-
-                if (!isChecked)
+                if (isChecked)
                 {
-                    // Click the checkbox label or the checkbox itself
-                    js.ExecuteScript("arguments[0].click();", inactiveCheckbox);
-                    Console.WriteLine($"      ✅ Selected 'Inactive' checkbox");
-                    await Task.Delay(500);
-                }
-                else
-                {
-                    Console.WriteLine($"      ℹ️  'Inactive' checkbox already selected");
+                    Console.WriteLine($"      ℹ️  Inactive checkbox is already checked");
+                    return true;
                 }
 
-                // Step 3: Close the dropdown by clicking outside or triggering the filter
-                // The filter should auto-apply when checkboxes are changed
+                // Click the checkbox using JavaScript
+                js.ExecuteScript(@"
+            var checkbox = arguments[0];
+            checkbox.checked = true;
+            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+        ", inactiveCheckbox);
 
-                // Wait for AJAX to complete
-                await Task.Delay(_phisConfig.AjaxWaitMs * 2);
+                Console.WriteLine($"      ✅ Clicked Inactive checkbox");
+
+                // Wait for filter to apply
+                await Task.Delay(_phisConfig.AjaxWaitMs * 3);
 
                 _sessionManager.UpdateActivity();
-
-                Console.WriteLine($"      ✅ Filter applied via direct click");
                 return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"      ❌ Direct click method failed: {ex.Message}");
+                Console.WriteLine($"      ❌ Direct click failed: {ex.Message}");
                 return false;
             }
         }
@@ -1308,72 +1404,135 @@ namespace ConsentSyncCore.Services.Phis
                 }
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+                var targetRow = rows[rowIndex];
 
-                // Method 1: Try using PrimeFaces AJAX first (more reliable for PrimeFaces applications)
-                Console.WriteLine($"   🔄 Attempting to select row {rowIndex} via PrimeFaces AJAX...");
-                bool ajaxSuccess = await SelectConsentDirectiveViaAjaxAsync(rowIndex);
+                Console.WriteLine($"   🎯 Attempting to select row {rowIndex}...");
 
-                if (ajaxSuccess)
+                // Method 1: Try direct checkbox click first (most reliable for visual feedback)
+                try
                 {
-                    // Verify the checkbox appears checked in the UI
-                    await Task.Delay(1000); // Wait for UI update
+                    Console.WriteLine($"   🖱️  Method 1: Direct checkbox click...");
 
-                    var checkbox = rows[rowIndex].FindElements(By.CssSelector(".ui-chkbox-box.ui-state-active"));
-                    if (checkbox.Count > 0)
+                    // Find the checkbox in the row
+                    var checkboxCell = targetRow.FindElement(By.CssSelector(".ui-chkbox"));
+                    var checkboxBox = checkboxCell.FindElement(By.CssSelector(".ui-chkbox-box"));
+                    var checkboxInput = checkboxCell.FindElement(By.CssSelector("input[type='checkbox']"));
+
+                    // Scroll to make checkbox visible
+                    js.ExecuteScript("arguments[0].scrollIntoView({block: 'center'});", checkboxBox);
+                    await Task.Delay(300);
+
+                    // Get the data-rk attribute (row key) for the AJAX call
+                    var rowKey = targetRow.GetAttribute("data-rk");
+                    var dataRi = targetRow.GetAttribute("data-ri");
+
+                    Console.WriteLine($"      Row key: {rowKey}, Data-ri: {dataRi}");
+
+                    // Click the checkbox box (visual element)
+                    js.ExecuteScript("arguments[0].click();", checkboxBox);
+
+                    Console.WriteLine($"      ✅ Checkbox clicked");
+                    await Task.Delay(_phisConfig.AjaxWaitMs);
+
+                    // Verify the checkbox is visually checked
+                    var isVisuallyChecked = checkboxBox.GetAttribute("class").Contains("ui-state-active");
+                    var isInputChecked = checkboxInput.Selected || checkboxInput.GetAttribute("checked") == "checked";
+
+                    Console.WriteLine($"      📊 Visual check: {isVisuallyChecked}, Input checked: {isInputChecked}");
+
+                    if (isVisuallyChecked || isInputChecked)
                     {
-                        Console.WriteLine($"   ✅ Checkbox visually confirmed as checked for row {rowIndex}");
+                        Console.WriteLine($"   ✅ Checkbox is visually checked!");
+
+                        // Verify Documents button is enabled
+                        bool buttonsEnabled = await VerifyRowSelectionAsync();
+
+                        if (buttonsEnabled)
+                        {
+                            Console.WriteLine($"   ✅ Documents button is enabled - selection confirmed!");
+                            _sessionManager.UpdateActivity();
+                            return true;
+                        }
+                        else
+                        {
+                            Console.WriteLine($"   ⚠️  Checkbox checked but Documents button not enabled yet");
+                            await Task.Delay(1000); // Give more time
+
+                            // Check again
+                            buttonsEnabled = await VerifyRowSelectionAsync();
+                            if (buttonsEnabled)
+                            {
+                                Console.WriteLine($"   ✅ Documents button now enabled!");
+                                _sessionManager.UpdateActivity();
+                                return true;
+                            }
+                        }
                     }
                     else
                     {
-                        Console.WriteLine($"   ℹ️  Row {rowIndex} selected (checkbox may not be visually updated)");
+                        Console.WriteLine($"   ⚠️  Checkbox not visually checked after click, trying AJAX method...");
                     }
-
-                    _sessionManager.UpdateActivity();
-                    return true;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"   ⚠️  Direct click failed: {ex.Message}");
                 }
 
-                // Method 2: Fallback to direct click if AJAX fails
-                Console.WriteLine($"   ⚠️  AJAX method didn't succeed, trying direct click...");
+                // Method 2: Use PrimeFaces AJAX as fallback
+                Console.WriteLine($"   🔄 Method 2: Using PrimeFaces AJAX...");
 
-                try
+                var rowKey2 = targetRow.GetAttribute("data-rk");
+                var dataRi2 = targetRow.GetAttribute("data-ri");
+
+                bool ajaxSuccess = await SelectConsentDirectiveViaAjaxAsync(rowIndex, rowKey2, dataRi2);
+
+                if (ajaxSuccess)
                 {
-                    var checkboxCell = rows[rowIndex].FindElement(By.CssSelector(".ui-chkbox"));
-                    var checkbox = checkboxCell.FindElement(By.CssSelector(".ui-chkbox-box"));
+                    // Wait for UI to update
+                    await Task.Delay(1500);
 
-                    // Scroll to the element
-                    js.ExecuteScript("arguments[0].scrollIntoView({block: 'center'});", checkbox);
-                    await Task.Delay(300);
+                    // Refresh the row element (DOM may have changed)
+                    tbody = _driver.FindElement(By.Id(tableId));
+                    rows = tbody.FindElements(By.XPath(".//tr[@role='row']"));
 
-                    // Click using JavaScript
-                    js.ExecuteScript("arguments[0].click();", checkbox);
-
-                    Console.WriteLine($"   ✅ Direct checkbox click performed for row {rowIndex}");
-                    await Task.Delay(_phisConfig.AjaxWaitMs);
-
-                    // Verify checkbox is checked
-                    var isChecked = checkbox.GetAttribute("class").Contains("ui-state-active");
-                    if (isChecked)
+                    if (rowIndex < rows.Count)
                     {
-                        Console.WriteLine($"   ✅ Checkbox confirmed as checked");
+                        var updatedRow = rows[rowIndex];
+                        var checkboxes = updatedRow.FindElements(By.CssSelector(".ui-chkbox-box.ui-state-active"));
+
+                        if (checkboxes.Count > 0)
+                        {
+                            Console.WriteLine($"   ✅ Checkbox is now visually checked after AJAX!");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"   ⚠️  AJAX completed but checkbox still not visually checked");
+                        }
+                    }
+
+                    // Verify Documents button
+                    bool buttonsEnabled = await VerifyRowSelectionAsync();
+
+                    if (buttonsEnabled)
+                    {
+                        Console.WriteLine($"   ✅ Row selection confirmed via Documents button!");
                         _sessionManager.UpdateActivity();
                         return true;
                     }
                     else
                     {
-                        Console.WriteLine($"   ⚠️  Checkbox may not be visually checked, but click was performed");
-                        _sessionManager.UpdateActivity();
-                        return true; // Return true as we performed the action
+                        Console.WriteLine($"   ⚠️  Documents button not enabled - selection may have failed");
+                        return false;
                     }
                 }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"   ❌ Direct click failed: {ex.Message}");
-                    return false;
-                }
+
+                Console.WriteLine($"   ❌ All selection methods failed");
+                return false;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"   ❌ Error selecting checkbox: {ex.Message}");
+                Console.WriteLine($"      Stack trace: {ex.StackTrace}");
                 return false;
             }
         }
@@ -1382,90 +1541,90 @@ namespace ConsentSyncCore.Services.Phis
 
 
         /// <summary>
-        /// Select consent directive row using PrimeFaces AJAX request (fallback method)
+        /// Select consent directive row using PrimeFaces AJAX request
         /// </summary>
-        private async Task<bool> SelectConsentDirectiveViaAjaxAsync(int rowIndex)
+        private async Task<bool> SelectConsentDirectiveViaAjaxAsync(int rowIndex, string rowKey, string dataRi)
         {
             try
             {
-                Console.WriteLine($"   🔄 Using PrimeFaces AJAX to select row {rowIndex}...");
+                Console.WriteLine($"   📡 Sending PrimeFaces AJAX selection...");
+                Console.WriteLine($"      Row index: {rowIndex}, Row key: {rowKey}, Data-ri: {dataRi}");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
-                // Get the current ViewState for the AJAX request
-                var viewStateScript = @"
-            return document.getElementById('javax.faces.ViewState') ? 
-                   document.getElementById('javax.faces.ViewState').value : 
-                   document.querySelector('input[name=""javax.faces.ViewState""]')?.value;
-        ";
+                // Get ViewState
+                var viewState = (string)js.ExecuteScript(@"
+            return document.querySelector('input[name=""javax.faces.ViewState""]')?.value || '';
+        ") ?? "";
 
-                var viewState = js.ExecuteScript(viewStateScript) as string ?? "";
+                // Use rowKey if available, otherwise use rowIndex
+                var selectionKey = !string.IsNullOrEmpty(rowKey) ? rowKey : rowIndex.ToString();
 
-                // Trigger PrimeFaces AJAX checkbox selection with all required parameters from network trace
                 var ajaxScript = $@"
-            // Build the proper AJAX request matching the network trace
-            var params = {{}};
-            params['javax.faces.partial.ajax'] = 'true';
-            params['javax.faces.source'] = 'consentForm:ConsentDataTable:dataTable';
-            params['javax.faces.partial.execute'] = 'consentForm:ConsentDataTable:dataTable';
-            params['javax.faces.partial.render'] = 'consentForm:ConsentDataTable:rowActionsPanel';
-            params['javax.faces.behavior.event'] = 'rowSelectCheckbox';
-            params['javax.faces.partial.event'] = 'rowSelectCheckbox';
-            params['consentForm:ConsentDataTable:dataTable_instantSelectedRowKey'] = '{rowIndex}';
-            
-            // Add filter values (important for PrimeFaces state management)
-            params['consentForm:ConsentDataTable:dataTable:statusFilter_focus'] = '';
-            params['consentForm:ConsentDataTable:dataTable:statusFilter'] = 'Confirmed';
-            params['consentForm:ConsentDataTable:dataTable:instructionFilter_focus'] = '';
-            params['consentForm:ConsentDataTable:dataTable:antigenFilter_focus'] = '';
-            params['consentForm:ConsentDataTable:dataTable:activeFilter_focus'] = '';
-            params['consentForm:ConsentDataTable:dataTable:activeFilter'] = 'Active';
-            params['consentForm:ConsentDataTable:dataTable_checkbox'] = 'on';
-            params['consentForm:ConsentDataTable:dataTable_rppDD'] = '10';
-            params['consentForm:ConsentDataTable:dataTable_selection'] = '{rowIndex}';
-            params['javax.faces.ViewState'] = '{viewState}';
+            try {{
+                console.log('Sending row selection AJAX for row index {rowIndex}, key: {selectionKey}');
+                
+                var params = {{}};
+                params['javax.faces.partial.ajax'] = 'true';
+                params['javax.faces.source'] = 'consentForm:ConsentDataTable:dataTable';
+                params['javax.faces.partial.execute'] = 'consentForm:ConsentDataTable:dataTable';
+                params['javax.faces.partial.render'] = 'consentForm:ConsentDataTable:rowActionsPanel';
+                params['javax.faces.behavior.event'] = 'rowSelectCheckbox';
+                params['javax.faces.partial.event'] = 'rowSelectCheckbox';
+                params['consentForm:ConsentDataTable:dataTable_instantSelectedRowKey'] = '{selectionKey}';
+                params['consentForm:ConsentDataTable:dataTable:statusFilter_focus'] = '';
+                params['consentForm:ConsentDataTable:dataTable:statusFilter'] = 'Confirmed';
+                params['consentForm:ConsentDataTable:dataTable:instructionFilter_focus'] = '';
+                params['consentForm:ConsentDataTable:dataTable:antigenFilter_focus'] = '';
+                params['consentForm:ConsentDataTable:dataTable:activeFilter_focus'] = '';
+                params['consentForm:ConsentDataTable:dataTable:activeFilter'] = 'Active';
+                params['consentForm:ConsentDataTable:dataTable_checkbox'] = 'on';
+                params['consentForm:ConsentDataTable:dataTable_rppDD'] = '10';
+                params['consentForm:ConsentDataTable:dataTable_selection'] = '{selectionKey}';
+                params['javax.faces.ViewState'] = '{viewState}';
 
-            // Use PrimeFaces AJAX API
-            PrimeFaces.ajax.Request.handle({{
-                source: 'consentForm:ConsentDataTable:dataTable',
-                process: 'consentForm:ConsentDataTable:dataTable',
-                update: 'consentForm:ConsentDataTable:rowActionsPanel',
-                params: params,
-                formId: 'consentForm',
-                oncomplete: function(xhr, status, args) {{
-                    console.log('Row {rowIndex} selection complete. Status:', status);
-                }}
-            }});
+                PrimeFaces.ajax.Request.handle({{
+                    source: 'consentForm:ConsentDataTable:dataTable',
+                    process: 'consentForm:ConsentDataTable:dataTable',
+                    update: 'consentForm:ConsentDataTable:rowActionsPanel',
+                    params: params,
+                    formId: 'consentForm',
+                    oncomplete: function(xhr, status, args) {{
+                        console.log('AJAX complete. Status:', status);
+                    }}
+                }});
+                
+                return true;
+            }} catch (error) {{
+                console.error('AJAX error:', error);
+                return false;
+            }}
         ";
 
-                js.ExecuteScript(ajaxScript);
+                var result = js.ExecuteScript(ajaxScript);
 
-                Console.WriteLine($"   ✅ AJAX request sent for row {rowIndex}");
-                await Task.Delay(_phisConfig.AjaxWaitMs * 2); // Wait for AJAX to complete
-
-                // Verify the row is actually selected by checking if action buttons are enabled
-                bool selectionVerified = await VerifyRowSelectionAsync();
-
-                if (selectionVerified)
+                if (result is bool boolResult && boolResult)
                 {
-                    Console.WriteLine($"   ✅ Row {rowIndex} selection verified");
+                    Console.WriteLine($"   ✅ AJAX request sent successfully");
+                    await Task.Delay(_phisConfig.AjaxWaitMs * 2);
+                    _sessionManager.UpdateActivity();
+                    return true;
                 }
                 else
                 {
-                    Console.WriteLine($"   ⚠️  Row {rowIndex} selected but verification inconclusive");
+                    Console.WriteLine($"   ❌ AJAX request failed");
+                    return false;
                 }
-
-                // Update session activity
-                _sessionManager.UpdateActivity();
-
-                return true; // Return true as the AJAX call was successful
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ AJAX selection failed: {ex.Message}");
+                Console.WriteLine($"   ❌ AJAX selection error: {ex.Message}");
                 return false;
             }
         }
+
+
+
 
 
 
@@ -1479,9 +1638,8 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                await Task.Delay(500); // Brief wait for UI update
+                await Task.Delay(500);
 
-                // Check if the "Documents" button is enabled (it becomes enabled when a row is selected)
                 var documentsButtonId = "consentForm:ConsentDataTable:DocumentsButton:actionButtonId:commandButtonId";
                 var documentsButton = _driver.FindElements(By.Id(documentsButtonId));
 
@@ -1490,42 +1648,37 @@ namespace ConsentSyncCore.Services.Phis
                     var isDisabled = documentsButton[0].GetAttribute("disabled");
                     var classes = documentsButton[0].GetAttribute("class");
 
-                    // If not disabled and doesn't have ui-state-disabled class, it's enabled
                     bool isEnabled = string.IsNullOrEmpty(isDisabled) && !classes.Contains("ui-state-disabled");
 
                     if (isEnabled)
                     {
-                        Console.WriteLine($"      ✅ Documents button is enabled - row successfully selected");
+                        Console.WriteLine($"      ✅ Documents button is enabled");
+                        return true;
                     }
                     else
                     {
-                        Console.WriteLine($"      ℹ️  Documents button is disabled - row may not be selected");
+                        Console.WriteLine($"      ℹ️  Documents button is disabled");
+                        return false;
                     }
-
-                    return isEnabled;
                 }
 
-                Console.WriteLine($"      ⚠️  Documents button not found, using fallback verification");
+                Console.WriteLine($"      ⚠️  Documents button not found");
 
-                // Fallback: check if any checkbox is marked as checked
-                var checkedBoxes = _driver.FindElements(By.CssSelector("#consentForm\\:ConsentDataTable\\:dataTable_data .ui-chkbox-box.ui-state-active"));
+                // Fallback: check for checked checkboxes
+                var checkedBoxes = _driver.FindElements(By.CssSelector(
+                    "#consentForm\\:ConsentDataTable\\:dataTable_data .ui-chkbox-box.ui-state-active"));
 
-                if (checkedBoxes.Count > 0)
-                {
-                    Console.WriteLine($"      ✅ Found {checkedBoxes.Count} checked checkbox(es)");
-                    return true;
-                }
+                var count = checkedBoxes.Count;
+                Console.WriteLine($"      ℹ️  Found {count} checked checkbox(es)");
 
-                Console.WriteLine($"      ⚠️  No checked checkboxes found");
-                return false;
+                return count > 0;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"      ⚠️  Could not verify selection: {ex.Message}");
-                return true; // Assume success if we can't verify
+                Console.WriteLine($"      ⚠️  Verification error: {ex.Message}");
+                return false;
             }
         }
-
 
 
 
