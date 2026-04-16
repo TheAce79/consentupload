@@ -19,7 +19,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                 LoggerService.LogInformation($"   📄 Clicking Documents button...");
+                LoggerService.LogInformation($"   📄 Clicking Documents button...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
@@ -43,7 +43,7 @@ namespace ConsentSyncCore.Services.Phis
                 // Click using JavaScript
                 js.ExecuteScript("arguments[0].click();", documentsButton);
 
-                 LoggerService.LogInformation($"   ✅ Documents button clicked");
+                LoggerService.LogInformation($"   ✅ Documents button clicked");
 
                 // Wait for Context Documents page to load
                 await Task.Delay(_phisConfig.PageLoadDelayMs);
@@ -54,19 +54,19 @@ namespace ConsentSyncCore.Services.Phis
                     _wait.Until(d => d.Title.Contains("Panorama") ||
                                    d.FindElements(By.XPath("//*[contains(text(), 'Context Documents')]")).Count > 0);
 
-                     LoggerService.LogInformation($"   ✅ Context Documents page loaded");
+                    LoggerService.LogInformation($"   ✅ Context Documents page loaded");
                     _sessionManager.UpdateActivity();
                     return true;
                 }
                 catch (WebDriverTimeoutException)
                 {
-                     LoggerService.LogInformation($"   ⚠️  Page verification timed out");
+                    LoggerService.LogInformation($"   ⚠️  Page verification timed out");
 
                     // Check if we can find the document list table as fallback
                     var docList = _driver.FindElements(By.XPath("//*[contains(text(), 'Document List')]"));
                     if (docList.Count > 0)
                     {
-                         LoggerService.LogInformation($"   ✅ Document List found - assuming navigation successful");
+                        LoggerService.LogInformation($"   ✅ Document List found - assuming navigation successful");
                         _sessionManager.UpdateActivity();
                         return true;
                     }
@@ -76,7 +76,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"   ❌ Error clicking Documents button: {ex.Message}");
+                LoggerService.LogInformation($"   ❌ Error clicking Documents button: {ex.Message}");
                 return false;
             }
         }
@@ -169,7 +169,7 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (searchInputs.Count == 0)
                 {
-                     LoggerService.LogInformation($"         ℹ️  Search box not found");
+                    LoggerService.LogInformation($"         ℹ️  Search box not found");
                     return false;
                 }
 
@@ -192,22 +192,20 @@ namespace ConsentSyncCore.Services.Phis
 
                     if (resultRows.Count > 0)
                     {
-                         LoggerService.LogInformation($"         ✅ Found in search results");
+                        LoggerService.LogInformation($"         ✅ Found in search results");
                         return true;
                     }
                 }
 
-                 LoggerService.LogInformation($"         ℹ️  Not found in search results");
+                LoggerService.LogInformation($"         ℹ️  Not found in search results");
                 return false;
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"         ⚠️  Search error: {ex.Message}");
+                LoggerService.LogInformation($"         ⚠️  Search error: {ex.Message}");
                 return false;
             }
         }
-
-
 
 
 
@@ -218,7 +216,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                 LoggerService.LogInformation($"      🔙 Navigating back to Consent Directives...");
+                LoggerService.LogInformation($"      🔙 Navigating back to Consent Directives...");
 
                 // Navigate to search page
                 await EnsureOnSearchPageAsync();
@@ -229,7 +227,7 @@ namespace ConsentSyncCore.Services.Phis
                 {
                     resetButton[0].Click();
                     await Task.Delay(1000);
-                     LoggerService.LogInformation($"      🧹 Reset button clicked");
+                    LoggerService.LogInformation($"      🧹 Reset button clicked");
                 }
 
                 // Verify we're on the search page with reset form
@@ -238,22 +236,20 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (searchForm.Count > 0)
                 {
-                     LoggerService.LogInformation($"      ✅ Ready for next search");
+                    LoggerService.LogInformation($"      ✅ Ready for next search");
                     _sessionManager.UpdateActivity();
                     return true;
                 }
 
-                 LoggerService.LogInformation($"      ⚠️  Search form not found after reset");
+                LoggerService.LogInformation($"      ⚠️  Search form not found after reset");
                 return false;
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"      ❌ Error navigating back: {ex.Message}");
+                LoggerService.LogInformation($"      ❌ Error navigating back: {ex.Message}");
                 return false;
             }
         }
-
-
 
 
 
@@ -290,7 +286,6 @@ namespace ConsentSyncCore.Services.Phis
                 Console.WriteLine($"   ✅ 'Add New' button found and enabled");
 
                 // Execute the onclick JavaScript first (folder validation)
-                // From network capture: onclick="return checkSelectedFolder('hideUserTreeView:treeViewForm:hiddenFolderId');"
                 try
                 {
                     var onClickResult = js.ExecuteScript(
@@ -305,37 +300,27 @@ namespace ConsentSyncCore.Services.Phis
                 catch (Exception ex)
                 {
                     Console.WriteLine($"   ℹ️  Folder validation skipped: {ex.Message}");
-                    // Continue anyway - folder validation might not be required
                 }
 
-                // Click the button using JavaScript for reliability
                 js.ExecuteScript("arguments[0].click();", addNewButton);
 
                 Console.WriteLine($"   ✅ 'Add New' button clicked");
 
-                // Wait for the Document Management page to load
                 await Task.Delay(_phisConfig.PageLoadDelayMs);
 
-                // Verify we're on the "Add New Document" page
                 try
                 {
                     _wait.Until(d =>
                     {
-                        // Check for the page title
                         var titleElements = d.FindElements(By.Id("pageTitle"));
                         if (titleElements.Count > 0 && titleElements[0].Text.Contains("Document Management"))
-                        {
                             return true;
-                        }
 
-                        // Alternative: Check for the "Add New Document" section header
                         var sectionHeaders = d.FindElements(By.XPath("//*[contains(text(), 'Add New Document')]"));
                         return sectionHeaders.Count > 0;
                     });
 
                     Console.WriteLine($"   ✅ Document Management page loaded");
-                    Console.WriteLine($"   📄 Ready to upload document");
-
                     _sessionManager.UpdateActivity();
                     return true;
                 }
@@ -343,7 +328,6 @@ namespace ConsentSyncCore.Services.Phis
                 {
                     Console.WriteLine($"   ⚠️  Page verification timed out");
 
-                    // Fallback: Check for the file upload input field
                     var fileInputs = _driver.FindElements(By.Id("addNewDocumentForm:sectionAddNewDocumentDefault:fileuploadInput"));
                     if (fileInputs.Count > 0)
                     {
@@ -363,5 +347,164 @@ namespace ConsentSyncCore.Services.Phis
         }
 
 
+        /// <summary>
+        /// Upload a document on the Add New Document page.
+        /// Steps:
+        ///   1. Set file path in the file input
+        ///   2. Click "Upload File" and wait for confirmation
+        ///   3. Fill Document Title and Description
+        ///   4. Click Submit
+        ///   5. Verify success
+        /// </summary>
+        /// <param name="pdfPath">Full path to the PDF file to upload</param>
+        /// <param name="documentTitle">Value for the Document Title field (record.DocumentTitle)</param>
+        /// <param name="description">Value for the Description textarea (record.Description)</param>
+        /// <returns>True if the document was submitted successfully</returns>
+        public async Task<bool> UploadDocumentAsync(string pdfPath, string documentTitle, string description)
+        {
+            try
+            {
+                LoggerService.LogInformation($"   📤 Starting document upload...");
+                LoggerService.LogInformation($"      File:  {Path.GetFileName(pdfPath)}");
+                LoggerService.LogInformation($"      Title: {documentTitle}");
+                LoggerService.LogInformation($"      Desc:  {description}");
+
+                if (!File.Exists(pdfPath))
+                {
+                    LoggerService.LogInformation($"   ❌ PDF file not found: {pdfPath}");
+                    return false;
+                }
+
+                // ── STEP 1: Set file path in the hidden <input type="file"> ──────────────
+                const string fileInputId = "addNewDocumentForm:sectionAddNewDocumentDefault:fileuploadInput";
+
+                _wait.Until(d => d.FindElements(By.Id(fileInputId)).Count > 0);
+                var fileInput = _driver.FindElement(By.Id(fileInputId));
+
+                // Make the file input visible/interactable so SendKeys works
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+                js.ExecuteScript("arguments[0].style.display='block'; arguments[0].style.visibility='visible'; arguments[0].removeAttribute('disabled');", fileInput);
+
+                fileInput.SendKeys(pdfPath);
+                LoggerService.LogInformation($"   ✅ File path set");
+
+                // Trigger the onchange handler so the Upload File button becomes enabled
+                js.ExecuteScript("onChangeFileUploadAction();");
+
+                await Task.Delay(500);
+
+                // ── STEP 2: Click "Upload File" ───────────────────────────────────────────
+                const string uploadBtnId = "addNewDocumentForm:sectionAddNewDocumentDefault:buttonUploadFile";
+
+                _wait.Until(d =>
+                {
+                    var btn = d.FindElements(By.Id(uploadBtnId));
+                    return btn.Count > 0 && string.IsNullOrEmpty(btn[0].GetAttribute("disabled"));
+                });
+
+                var uploadButton = _driver.FindElement(By.Id(uploadBtnId));
+                js.ExecuteScript("arguments[0].click();", uploadButton);
+                LoggerService.LogInformation($"   ✅ 'Upload File' button clicked");
+
+                // Wait for the progress refresher to show the uploaded filename
+                await Task.Delay(_phisConfig.PageLoadDelayMs * 2);
+
+                const string progressRefresherId = "addNewDocumentForm:sectionAddNewDocumentDefault:progressRefresher";
+                try
+                {
+                    _wait.Until(d =>
+                    {
+                        var refresher = d.FindElements(By.Id(progressRefresherId));
+                        if (refresher.Count == 0) return false;
+                        var text = refresher[0].Text;
+                        // The span shows "File uploaded: <filename>" after a successful upload
+                        return text.Contains("File uploaded", StringComparison.OrdinalIgnoreCase)
+                            || text.Contains(Path.GetFileName(pdfPath), StringComparison.OrdinalIgnoreCase);
+                    });
+                    LoggerService.LogInformation($"   ✅ File upload confirmed by server");
+                }
+                catch (WebDriverTimeoutException)
+                {
+                    LoggerService.LogInformation($"   ⚠️  Upload confirmation timed out – continuing anyway");
+                }
+
+                // ── STEP 3: Fill Document Title ───────────────────────────────────────────
+                const string titleFieldId = "addNewDocumentForm:sectionAddNewDocumentDefault:newDocumentTitle";
+
+                _wait.Until(d => d.FindElements(By.Id(titleFieldId)).Count > 0);
+                var titleField = _driver.FindElement(By.Id(titleFieldId));
+                titleField.Clear();
+                titleField.SendKeys(documentTitle);
+                LoggerService.LogInformation($"   ✅ Document title filled: '{documentTitle}'");
+
+                // ── STEP 4: Fill Description ──────────────────────────────────────────────
+                const string descFieldId = "addNewDocumentForm:sectionAddNewDocumentDefault:documentDescription";
+
+                _wait.Until(d => d.FindElements(By.Id(descFieldId)).Count > 0);
+                var descField = _driver.FindElement(By.Id(descFieldId));
+                descField.Clear();
+                descField.SendKeys(description);
+                LoggerService.LogInformation($"   ✅ Description filled: '{description}'");
+
+                // ── STEP 5: Click Submit ──────────────────────────────────────────────────
+                const string submitBtnId = "addNewDocumentForm:sectionAddNewDocumentDefault:cmdBtnSave2";
+
+                _wait.Until(d =>
+                {
+                    var btn = d.FindElements(By.Id(submitBtnId));
+                    return btn.Count > 0 && string.IsNullOrEmpty(btn[0].GetAttribute("disabled"));
+                });
+
+                var submitButton = _driver.FindElement(By.Id(submitBtnId));
+
+                // Prevent the file input from re-uploading on submit (mirrors onclick="disableFileUpload()")
+                js.ExecuteScript("disableFileUpload();");
+                js.ExecuteScript("arguments[0].click();", submitButton);
+                LoggerService.LogInformation($"   ✅ Submit button clicked");
+
+                // ── STEP 6: Verify success ────────────────────────────────────────────────
+                await Task.Delay(_phisConfig.PageLoadDelayMs * 2);
+
+                try
+                {
+                    // After a successful submit the page redirects back to the Context Documents list
+                    _wait.Until(d =>
+                    {
+                        // Success: back on the document list page
+                        var listLinks = d.FindElements(By.XPath("//a[contains(@id,'viewtitleLink')]"));
+                        if (listLinks.Count > 0) return true;
+
+                        // Also accept remaining on Document Management without an error message
+                        var errorMessages = d.FindElements(By.CssSelector(".errorMessage, .sysMessages .errorMessage"));
+                        return errorMessages.Count == 0 && d.Title.Contains("Panorama");
+                    });
+
+                    LoggerService.LogInformation($"   ✅ Document submitted successfully!");
+                    _sessionManager.UpdateActivity();
+                    return true;
+                }
+                catch (WebDriverTimeoutException)
+                {
+                    // Check for visible error messages on the page
+                    var errors = _driver.FindElements(By.CssSelector(".errorMessage"));
+                    if (errors.Count > 0)
+                    {
+                        var errorText = string.Join("; ", errors.Select(e => e.Text.Trim()).Where(t => !string.IsNullOrEmpty(t)));
+                        LoggerService.LogInformation($"   ❌ Submit failed – page errors: {errorText}");
+                        return false;
+                    }
+
+                    LoggerService.LogInformation($"   ⚠️  Submit verification timed out – assuming success");
+                    _sessionManager.UpdateActivity();
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogInformation($"   ❌ Upload error: {ex.Message}");
+                LoggerService.LogInformation($"      Stack: {ex.StackTrace}");
+                return false;
+            }
+        }
     }
 }

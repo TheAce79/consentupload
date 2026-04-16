@@ -203,7 +203,6 @@ namespace Orchestrator.Phase3
 
                         LoggerService.LogInformation($"   ✅ SUCCESS: Documents page opened");
 
-
                         // STEP E: Check if document already exists
                         LoggerService.LogInformation($"\n🔍 STEP E: Checking if document exists...");
                         LoggerService.LogInformation($"   Searching for: '{record.DocumentTitle}'");
@@ -218,7 +217,6 @@ namespace Orchestrator.Phase3
                             skipCount++;
                             result.SuccessfulUploads++;
 
-                            // Navigate back for next document
                             await _phisSearchService.NavigateBackToSearchPagesAsync();
                             SaveUploadCsv(uploadRecords);
 
@@ -228,7 +226,7 @@ namespace Orchestrator.Phase3
 
                         LoggerService.LogInformation($"   ℹ️  Document does NOT exist - upload needed");
 
-                        // ✅ STEP F: Click "Add New" to navigate to upload page
+                        // STEP F: Click "Add New" to navigate to upload page
                         LoggerService.LogInformation($"\n📤 STEP F: Navigating to upload page...");
 
                         bool addNewClicked = await _phisSearchService.ClickAddNewDocumentButtonAsync();
@@ -243,28 +241,54 @@ namespace Orchestrator.Phase3
                             continue;
                         }
 
-                        LoggerService.LogInformation($"   ✅ SUCCESS: Upload page opened!");
-                        LoggerService.LogInformation($"   🎉 Ready for Ultimate Upload phase!");
+                        LoggerService.LogInformation($"   ✅ SUCCESS: Upload page opened");
 
-                        // ✅ TESTING MODE: Don't actually upload yet
-                        LoggerService.LogInformation($"\n   🧪 TESTING MODE: Upload functionality not yet implemented");
-                        LoggerService.LogInformation($"   💡 Document upload will be implemented next");
-                        LoggerService.LogInformation($"   📊 Current status: Navigation to upload page SUCCESSFUL");
+                        // STEP G: Upload the PDF document
+                        LoggerService.LogInformation($"\n📎 STEP G: Uploading document...");
 
-                        // ✅ DO NOT update VerifStatus in CSV yet (upload not done)
-                        // Just log success - CSV stays at NotProcessed
-                        LoggerService.LogInformation($"   ℹ️  VerifStatus remains NotProcessed (upload pending)");
+                        var pdfFileName = $"{record.DocumentTitle}.pdf";
+                        var pdfPath = Path.Combine(_phase3Config.Input.PdfPath, pdfFileName);
+
+                        LoggerService.LogInformation($"   PDF path: {pdfPath}");
+
+                        if (!File.Exists(pdfPath))
+                        {
+                            LoggerService.LogInformation($"   ❌ FAILED: PDF file not found: {pdfPath}");
+                            record.VerifStatus = UploadVerificationStatus.NeedsManualReview;
+                            result.ErrorMessages.Add($"{record.ClientID} - {record.Description}: PDF not found at {pdfPath}");
+                            failureCount++;
+                            SaveUploadCsv(uploadRecords);
+                            continue;
+                        }
+
+                        bool uploaded = await _phisSearchService.UploadDocumentAsync(
+                            pdfPath,
+                            record.DocumentTitle,
+                            record.Description);
+
+                        if (!uploaded)
+                        {
+                            LoggerService.LogInformation($"   ❌ FAILED: Document upload failed");
+                            record.VerifStatus = UploadVerificationStatus.NeedsManualReview;
+                            result.ErrorMessages.Add($"{record.ClientID} - {record.Description}: Upload failed");
+                            failureCount++;
+                            SaveUploadCsv(uploadRecords);
+
+                            try { await _phisSearchService.NavigateBackToSearchPagesAsync(); } catch { }
+                            continue;
+                        }
+
+                        LoggerService.LogInformation($"   ✅ SUCCESS: Document uploaded!");
+
+                        record.VerifStatus = UploadVerificationStatus.Success;
+                        result.SuccessfulUploads++;
+                        successCount++;
+                        SaveUploadCsv(uploadRecords);
 
                         // Navigate back for next document
                         await _phisSearchService.NavigateBackToSearchPagesAsync();
 
-                        // ✅ Don't save CSV here - status unchanged
-                        successCount++;
-
-                        LoggerService.LogInformation($"\n✅ DOCUMENT PROCESSED (upload page verified)");
-
-                       
-
+                        LoggerService.LogInformation($"\n✅ DOCUMENT UPLOADED SUCCESSFULLY");
                     }
                     catch (Exception ex)
                     {
@@ -274,7 +298,6 @@ namespace Orchestrator.Phase3
                         result.ErrorMessages.Add($"{record.ClientID} - {record.Description}: {ex.Message}");
                         failureCount++;
 
-                        // Try to recover by navigating back
                         try
                         {
                             await _phisSearchService.NavigateBackToSearchPagesAsync();
@@ -351,14 +374,12 @@ namespace Orchestrator.Phase3
 
                 List<UploadRecord> records;
 
-                // ✅ Apply testing filters if enabled
                 if (_phase3Config.Testing.Enabled)
                 {
                     LoggerService.LogInformation($"\n   🧪 TESTING MODE ENABLED");
 
                     records = allRecords;
 
-                    // Filter by Client IDs if specified
                     if (_phase3Config.Testing.TestClientIds != null && _phase3Config.Testing.TestClientIds.Length > 0)
                     {
                         records = records
@@ -369,14 +390,12 @@ namespace Orchestrator.Phase3
                         LoggerService.LogInformation($"   📊 Total in CSV: {allRecords.Count} → Filtered: {records.Count}");
                     }
 
-                    // Limit number of records if specified
                     if (_phase3Config.Testing.MaxRecordsToProcess > 0 && records.Count > _phase3Config.Testing.MaxRecordsToProcess)
                     {
                         records = records.Take(_phase3Config.Testing.MaxRecordsToProcess).ToList();
                         LoggerService.LogInformation($"   ⚠️  Limited to {_phase3Config.Testing.MaxRecordsToProcess} records for testing");
                     }
 
-                    // Order by ClientID
                     records = records
                         .OrderBy(r => r.ClientID)
                         .ThenBy(r => r.PhisAntigen)
@@ -384,7 +403,6 @@ namespace Orchestrator.Phase3
                 }
                 else
                 {
-                    // Production mode - process all
                     records = allRecords
                         .OrderBy(r => r.ClientID)
                         .ThenBy(r => r.PhisAntigen)
@@ -397,7 +415,6 @@ namespace Orchestrator.Phase3
                 LoggerService.LogInformation($"   👥 Unique clients to process: {uniqueClients}");
                 LoggerService.LogInformation($"   📊 Ordered by ClientID for optimized processing");
 
-                // Show details for small test sets
                 if (records.Count <= 20)
                 {
                     LoggerService.LogInformation($"\n   📋 Records to process:");
@@ -423,8 +440,6 @@ namespace Orchestrator.Phase3
         }
 
 
-
-
         /// <summary>
         /// Save Upload_to_PHIS.csv - updates ONLY the processed records,
         /// preserving all other records in the original CSV
@@ -437,7 +452,6 @@ namespace Orchestrator.Phase3
                     _phase3Config.Input.UploadCsvPath,
                     _phase3Config.Input.UploadCsvFileName);
 
-                // ✅ Step 1: Load ALL records from disk (not just the filtered test ones)
                 List<UploadRecord> allRecords;
 
                 var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
@@ -455,11 +469,9 @@ namespace Orchestrator.Phase3
                     allRecords = csvReader.GetRecords<UploadRecord>().ToList();
                 }
 
-                // ✅ Step 2: Build a lookup from the processed records by DocumentTitle (unique key)
                 var updatedLookup = processedRecords
                     .ToDictionary(r => r.DocumentTitle, r => r.VerifStatus);
 
-                // ✅ Step 3: Update only the matching records in the full list
                 int updatedCount = 0;
                 foreach (var record in allRecords)
                 {
@@ -473,7 +485,6 @@ namespace Orchestrator.Phase3
                     }
                 }
 
-                // ✅ Step 4: Write ALL records back to CSV
                 using var writer = new StreamWriter(csvPath, false, Encoding.UTF8);
                 using var csvWriter = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture));
                 csvWriter.Context.RegisterClassMap<UploadRecordMap>();
@@ -491,7 +502,6 @@ namespace Orchestrator.Phase3
         }
 
 
-
         private void DisplaySummary(Phase3Result result, int successCount, int skipCount, int failureCount,
             int totalRecords, int alreadyVerified)
         {
@@ -502,7 +512,7 @@ namespace Orchestrator.Phase3
             LoggerService.LogInformation($"Already verified (skipped): {alreadyVerified}");
             LoggerService.LogInformation($"Processed in this run: {successCount + skipCount + failureCount}");
             LoggerService.LogInformation($"\n🎯 Results:");
-            LoggerService.LogInformation($"   ✅ Successfully processed: {successCount}");
+            LoggerService.LogInformation($"   ✅ Successfully uploaded: {successCount}");
             LoggerService.LogInformation($"   ⏭️  Already exist (skipped): {skipCount}");
             LoggerService.LogInformation($"   ❌ Failed: {failureCount}");
 
@@ -530,22 +540,14 @@ namespace Orchestrator.Phase3
 
             LoggerService.LogInformation($"\n💡 Next Steps:");
 
-            var remainingToProcess = totalRecords - alreadyVerified - skipCount;
-
-            if (remainingToProcess == 0 && failureCount == 0)
+            if (failureCount == 0 && result.ErrorMessages.Count == 0)
             {
-                LoggerService.LogInformation($"   ✅ All documents verified!");
-                LoggerService.LogInformation($"   📝 Ready to implement upload functionality");
+                LoggerService.LogInformation($"   ✅ All documents uploaded successfully!");
             }
             else if (failureCount > 0)
             {
                 LoggerService.LogInformation($"   ⚠️  {failureCount} document(s) failed - review errors above");
                 LoggerService.LogInformation($"   🔧 Fix issues and re-run Phase 3");
-            }
-            else if (remainingToProcess > 0)
-            {
-                LoggerService.LogInformation($"   ℹ️  {remainingToProcess} document(s) still need upload");
-                LoggerService.LogInformation($"   📤 Implement upload functionality and re-run");
             }
 
             LoggerService.LogInformation($"\n📁 CSV updated with VerifStatus values");
