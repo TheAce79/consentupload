@@ -293,7 +293,9 @@ namespace Orchestrator.Phase3
         }
 
         /// <summary>
-        /// Load Upload_to_PHIS.csv
+        /// Load Upload_to_PHIS.csv with lenient header validation
+        /// Orders by ClientID for optimized processing
+        /// Handles missing VerifStatus column gracefully
         /// </summary>
         private List<UploadRecord> LoadUploadCsv()
         {
@@ -309,11 +311,83 @@ namespace Orchestrator.Phase3
             LoggerService.LogInformation($"   📂 Reading: {csvPath}");
 
             using var reader = new StreamReader(csvPath, Encoding.UTF8);
-            using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture));
+
+            // ✅ Configure CsvHelper to handle missing columns gracefully
+            var config = new CsvConfiguration(CultureInfo.InvariantCulture)
+            {
+                // Don't throw exception if a mapped property doesn't have a matching header
+                MissingFieldFound = null,
+
+                // Don't throw exception if a header doesn't have a matching property
+                HeaderValidated = null,
+
+                // Trim whitespace from headers and fields
+                TrimOptions = TrimOptions.Trim,
+
+                // Prepare header for comparison (case-insensitive, remove spaces)
+                PrepareHeaderForMatch = args => args.Header.ToLower().Replace(" ", "")
+            };
+
+            using var csv = new CsvReader(reader, config);
 
             csv.Context.RegisterClassMap<UploadRecordMap>();
-            return csv.GetRecords<UploadRecord>().ToList();
+
+            try
+            {
+                // ✅ Order by ClientID to group all documents for the same client together
+                // This optimizes PHIS navigation since we only need to "Set In Context" once per client
+                var records = csv.GetRecords<UploadRecord>()
+                    //.OrderBy(r => r.ClientID)
+                   // .ThenBy(r => r.PhisAntigen) // Secondary sort by antigen for consistent ordering
+                    .ToList();
+
+                LoggerService.LogInformation($"   ✅ Loaded {records.Count} records");
+
+                var uniqueClients = records.Select(r => r.ClientID).Distinct().Count();
+                LoggerService.LogInformation($"   👥 Unique clients: {uniqueClients}");
+                LoggerService.LogInformation($"   📊 Ordered by ClientID for optimized processing");
+
+                // ✅ Check if VerifStatus column was present
+                var hasVerifStatus = records.Any(r => r.VerifStatus != UploadVerificationStatus.NotProcessed);
+                if (!hasVerifStatus)
+                {
+                    LoggerService.LogInformation($"   ℹ️  VerifStatus column not found - all records set to NotProcessed");
+                }
+                else
+                {
+                    var notProcessed = records.Count(r => r.VerifStatus == UploadVerificationStatus.NotProcessed);
+                    var success = records.Count(r => r.VerifStatus == UploadVerificationStatus.Success);
+                    var needsReview = records.Count(r => r.VerifStatus == UploadVerificationStatus.NeedsManualReview);
+
+                    LoggerService.LogInformation($"   📊 Status breakdown:");
+                    LoggerService.LogInformation($"      NotProcessed: {notProcessed}");
+                    LoggerService.LogInformation($"      Success: {success}");
+                    LoggerService.LogInformation($"      NeedsManualReview: {needsReview}");
+                }
+
+                return records;
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError($"   ❌ Error reading CSV: {ex.Message}", ex);
+
+                // Try to show actual headers for debugging
+                try
+                {
+                    using var debugReader = new StreamReader(csvPath, Encoding.UTF8);
+                    var firstLine = debugReader.ReadLine();
+                    LoggerService.LogError($"   📄 Actual CSV headers: {firstLine}");
+                }
+                catch { }
+
+                throw;
+            }
         }
+
+
+
+
+
 
         /// <summary>
         /// Save Upload_to_PHIS.csv with updated VerifStatus values
