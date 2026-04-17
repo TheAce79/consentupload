@@ -8,6 +8,8 @@ using Microsoft.Extensions.Logging;
 using OpenQA.Selenium;
 using System.Globalization;
 using System.Text;
+using ConsentSyncCore.Services.ConfigurationPoco;
+using ConsentSyncCore.Services.Configuration;
 
 namespace Orchestrator.Phase3
 {
@@ -247,7 +249,7 @@ namespace Orchestrator.Phase3
                         LoggerService.LogInformation($"\n📎 STEP G: Uploading document...");
 
                         var pdfFileName = $"{record.DocumentTitle}.pdf";
-                        var pdfPath = Path.Combine(_phase3Config.Input.PdfPath, pdfFileName);
+                        var pdfPath = Path.Combine(_phase3Config.Input.ConsentPath, pdfFileName);
 
                         LoggerService.LogInformation($"   PDF path: {pdfPath}");
 

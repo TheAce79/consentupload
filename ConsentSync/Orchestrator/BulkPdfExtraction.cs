@@ -1,5 +1,7 @@
 ﻿using ConsentSyncCore.Models;
 using ConsentSyncCore.Services;
+using ConsentSyncCore.Services.Configuration;
+using ConsentSyncCore.Services.ConfigurationPoco;
 using ConsentSyncCore.Services.Pdf;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;

@@ -1,5 +1,7 @@
 ﻿using ConsentSyncCore.Services;
 using ConsentSyncCore.Services.Browser;
+using ConsentSyncCore.Services.Configuration;
+using ConsentSyncCore.Services.ConfigurationPoco;
 using ConsentSyncCore.Services.Pdf;
 using ConsentSyncCore.Services.Phis;
 using CsvProcessing;
@@ -41,35 +43,29 @@ namespace Orchestrator
                 LoggerService.LogInformation("║             ConsentSync - Automated System            ║");
                 LoggerService.LogInformation("╚════════════════════════════════════════════════════════╝");
 
+
                 // ✅ Load configuration
                 var config = ConfigurationService.GetConfiguration();
+
+                // ✅ Create ALL csv + pdf + phis folders in one shot
+                WorkspaceInitializer.EnsureAllFoldersExist();
+
+                // Display where to drop files
                 var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+                var csvWs = ConfigurationService.GetCsvWorkspaceConfig();
 
-                // ✅ Initialize folder structure by creating BulkPdfExtractor instance
-                LoggerService.LogInformation("\n📂 Initializing folder structure...");
-                try
-                {
-                    var _ = new BulkPdfExtractor(config);
-                    LoggerService.LogInformation("   ✅ Folder structure created/verified");
-                    LoggerService.LogInformation("   ✅ README files created");
-                }
-                catch (Exception ex)
-                {
-                    LoggerService.LogWarning($"   ⚠️  Warning: Could not initialize folder structure: {ex.Message}");
-                }
-
-                // ✅ Display folder locations
-                LoggerService.LogInformation($"\n📂 Working Directory: {bulkConfig.BasePdfPath}");
-                LoggerService.LogInformation("   Please place your PDF files in the appropriate folders:");
-                LoggerService.LogInformation("   - Bulk downloads → 1_Input_Bulk/");
-                LoggerService.LogInformation("   - Scanned forms  → 2_Input_Scanned/");
-                LoggerService.LogInformation("\n   ℹ️  Check README.txt files in each folder for details\n");
+                LoggerService.LogInformation("📂 Drop your files here:");
+                LoggerService.LogInformation($"   CSV input  → {csvWs.GetConsentCsvPath()}");
+                LoggerService.LogInformation($"   Bulk PDFs  → {bulkConfig.GetInputBulkPath()}");
+                LoggerService.LogInformation($"   Scanned    → {bulkConfig.GetInputScannedPath()}\n");
 
                 // Check for standalone bulk extraction command
                 if (args.Contains("--extract-bulk") || args.Contains("-b"))
                 {
                     return await BulkPdfExtractionCommand.ExecuteAsync(args);
                 }
+
+
 
                 if (bulkConfig.Enabled)
                 {

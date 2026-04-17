@@ -5,8 +5,9 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using ConsentSyncCore.Services.ConfigurationPoco;
 
-namespace ConsentSyncCore.Services
+namespace ConsentSyncCore.Services.Configuration
 {
     /// <summary>
     /// Centralized logging service that supports both console and file logging

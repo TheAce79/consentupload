@@ -11,6 +11,8 @@ using Tesseract;
 using UglyToad.PdfPig;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Processing;
+using ConsentSyncCore.Services.ConfigurationPoco;
+using ConsentSyncCore.Services.Configuration;
 
 namespace ConsentSyncCore.Services.Pdf
 {

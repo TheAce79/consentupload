@@ -1,4 +1,6 @@
 ﻿using ConsentSyncCore.Models;
+using ConsentSyncCore.Services.Configuration;
+using ConsentSyncCore.Services.ConfigurationPoco;
 using Microsoft.Extensions.Configuration;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Support.UI;

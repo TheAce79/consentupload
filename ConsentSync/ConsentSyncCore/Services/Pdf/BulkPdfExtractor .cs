@@ -8,6 +8,8 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Writer;
+using ConsentSyncCore.Services.ConfigurationPoco;
+using ConsentSyncCore.Services.Configuration;
 
 namespace ConsentSyncCore.Services.Pdf
 {
@@ -604,26 +606,35 @@ namespace ConsentSyncCore.Services.Pdf
         #region File Management
 
 
+
         /// <summary>
-        /// Ensure all required directories exist and display structure
+        /// Ensure all required directories exist
         /// </summary>
         private void EnsureDirectoriesExist()
         {
             try
             {
-                // Create base path
                 Directory.CreateDirectory(_bulkConfig.BasePdfPath);
 
-                // Create all subfolders
+                // Top-level folders
                 Directory.CreateDirectory(_bulkConfig.GetInputBulkPath());
                 Directory.CreateDirectory(_bulkConfig.GetInputScannedPath());
                 Directory.CreateDirectory(_bulkConfig.GetOutputReadyPath());
+
+                // 4 FileRose Extraction — parent + two subfolders
+                Directory.CreateDirectory(_bulkConfig.GetFileRosePath());
+                Directory.CreateDirectory(_bulkConfig.GetFileRoseScanPath());
+                Directory.CreateDirectory(_bulkConfig.GetFileRoseOutputReadyPath());
+
+                Directory.CreateDirectory(_bulkConfig.GetDuplicateClientPath());
                 Directory.CreateDirectory(_bulkConfig.GetErrorPath());
+
+                // 7_Archive — parent + three subfolders
                 Directory.CreateDirectory(_bulkConfig.GetArchivePath());
                 Directory.CreateDirectory(_bulkConfig.GetArchiveBulkPath());
                 Directory.CreateDirectory(_bulkConfig.GetArchiveScannedPath());
+                Directory.CreateDirectory(_bulkConfig.GetArchiveFileRosePath());
 
-                // ✅ Create README files to guide users
                 CreateReadmeFiles();
             }
             catch (Exception ex)
@@ -631,7 +642,6 @@ namespace ConsentSyncCore.Services.Pdf
                 Console.WriteLine($"⚠️  Warning: Could not create folder structure: {ex.Message}");
             }
         }
-
 
         /// <summary>
         /// Move successfully processed PDF to 5_Archive
@@ -823,7 +833,6 @@ namespace ConsentSyncCore.Services.Pdf
 
 
 
-
         /// <summary>
         /// Create helpful README files in each folder
         /// </summary>
@@ -831,12 +840,11 @@ namespace ConsentSyncCore.Services.Pdf
         {
             try
             {
-                // 1_Input_Bulk README
-                var bulkReadmePath = Path.Combine(_bulkConfig.GetInputBulkPath(), "README.txt");
-                if (!File.Exists(bulkReadmePath))
-                {
-                    File.WriteAllText(bulkReadmePath,
-    @"📁 1_INPUT_BULK - Drop Bulk PDF Files Here
+                // ── 1_Input_Bulk ────────────────────────────────────────────────────────
+                var bulkReadme = Path.Combine(_bulkConfig.GetInputBulkPath(), "README.txt");
+                if (!File.Exists(bulkReadme))
+                    File.WriteAllText(bulkReadme,
+@"📁 1_INPUT_BULK - Drop Bulk PDF Files Here
 ==========================================
 
 Place your bulk consent PDF files here (e.g., BulkConsent.pdf downloaded from Vitalite).
@@ -845,22 +853,20 @@ The system will:
 ✓ Automatically detect this is a multi-page bulk file
 ✓ Split into individual consent PDFs
 ✓ Extract student names from each page
-✓ Save to 3_Output_Ready with naming: {ID}_{LastName}_{FirstName}_consent.pdf
-✓ Move original bulk file to 5_Archive/Bulk after successful processing
+✓ Save to 3_Output_Ready  →  {ID}_{LastName}_{FirstName}_consent.pdf
+✓ Move original bulk file to 7_Archive\Bulk after successful processing
 
 Example: BulkConsent.pdf (50 pages, 1 page per student)
-Result: 50 individual PDFs in 3_Output_Ready
+Result:  50 individual PDFs in 3_Output_Ready
 
 Note: Only PDF files are processed. Other file types will be ignored.
 ");
-                }
 
-                // 2_Input_Scanned README
-                var scannedReadmePath = Path.Combine(_bulkConfig.GetInputScannedPath(), "README.txt");
-                if (!File.Exists(scannedReadmePath))
-                {
-                    File.WriteAllText(scannedReadmePath,
-    @"📁 2_INPUT_SCANNED - Drop Scanned PDF Files Here
+                // ── 2_Input_Scanned ─────────────────────────────────────────────────────
+                var scannedReadme = Path.Combine(_bulkConfig.GetInputScannedPath(), "README.txt");
+                if (!File.Exists(scannedReadme))
+                    File.WriteAllText(scannedReadme,
+@"📁 2_INPUT_SCANNED - Drop Scanned PDF Files Here
 =================================================
 
 Place individual scanned consent forms here (typically 1-page PDFs from nursing office).
@@ -868,24 +874,22 @@ Place individual scanned consent forms here (typically 1-page PDFs from nursing 
 The system will:
 ✓ Automatically detect this is a single-page scan
 ✓ Extract student name from the PDF
-✓ Rename to: 1_{LastName}_{FirstName}_consent.pdf
+✓ Rename to: {ID}_{LastName}_{FirstName}_consent.pdf
 ✓ Move to 3_Output_Ready
-✓ Move original scan to 5_Archive/Scanned after successful processing
+✓ Move original scan to 7_Archive\Scanned after successful processing
 
 Example: scan001.pdf, scan002.pdf
-Result: Individual renamed PDFs in 3_Output_Ready
+Result:  Individual renamed PDFs in 3_Output_Ready
 
 Note: Each file should contain only ONE student's consent form.
 ");
-                }
 
-                // 3_Output_Ready README
-                var outputReadmePath = Path.Combine(_bulkConfig.GetOutputReadyPath(), "README.txt");
-                if (!File.Exists(outputReadmePath))
-                {
-                    File.WriteAllText(outputReadmePath,
-    @"📁 3_OUTPUT_READY - Processed PDFs Ready for Phase 3
-=====================================================
+                // ── 3_Output_Ready ──────────────────────────────────────────────────────
+                var outputReadme = Path.Combine(_bulkConfig.GetOutputReadyPath(), "README.txt");
+                if (!File.Exists(outputReadme))
+                    File.WriteAllText(outputReadme,
+@"📁 3_OUTPUT_READY - Processed Consent PDFs Ready for Phase 3
+=============================================================
 
 This folder contains processed consent PDFs ready for upload to PHIS.
 
@@ -893,24 +897,91 @@ File naming format: {ID}_{LastName}_{FirstName}_consent.pdf
 Examples:
   - 1_Smith_John_consent.pdf
   - 2_Leblanc_Marie_consent.pdf
-  - 3_Unknown_Unknown_consent.pdf ⚠️ (needs manual review)
 
-⚠️ IMPORTANT: Review files with 'Unknown' in the name
-   - These require manual identification
-   - Move to 4_Error if you cannot identify the student
-   - Or rename manually if you know the student's name
+⚠️  Files with 'Unknown' in the name require manual identification:
+   - Rename manually if you know the student
+   - Or move to 6_Error if the student cannot be identified
 
-✅ Phase 3 will use these files to upload to PHIS
+✅ Phase 3 will use these files to upload to PHIS.
    Do not delete or move files from here manually!
 ");
-                }
 
-                // 4_Error README
-                var errorReadmePath = Path.Combine(_bulkConfig.GetErrorPath(), "README.txt");
-                if (!File.Exists(errorReadmePath))
-                {
-                    File.WriteAllText(errorReadmePath,
-    @"📁 4_ERROR - Failed Processing or Unknown Students
+                // ── 4 FileRose Extraction / 1 Scan File Rose ────────────────────────────
+                var fileRoseScanReadme = Path.Combine(_bulkConfig.GetFileRoseScanPath(), "README.txt");
+                if (!File.Exists(fileRoseScanReadme))
+                    File.WriteAllText(fileRoseScanReadme,
+@"📁 1 SCAN FILE ROSE - Place File Rose Scans Here
+=================================================
+
+Place all scanned File Rose (feuille rose) documents in this folder.
+
+Naming convention:
+  Each File Rose MUST be saved as:  <ClientID>.pdf
+  Example: 106467.pdf
+
+The system will:
+✓ Read the Client ID from the filename
+✓ Extract and validate the File Rose content
+✓ Output the processed file to:  2_Output_Ready_FileRose\<ClientID>.pdf
+✓ Move the original scan to 7_Archive\FileRose after successful processing
+
+Requirements:
+  - One PDF per client
+  - Filename must be exactly the Client ID (digits only), e.g. 106467.pdf
+  - PDF should be a clear scan (300 DPI recommended)
+
+Note: Files whose names are not valid Client IDs will be skipped.
+");
+
+                // ── 4 FileRose Extraction / 2_Output_Ready_FileRose ─────────────────────
+                var fileRoseOutputReadme = Path.Combine(_bulkConfig.GetFileRoseOutputReadyPath(), "README.txt");
+                if (!File.Exists(fileRoseOutputReadme))
+                    File.WriteAllText(fileRoseOutputReadme,
+@"📁 2_OUTPUT_READY_FILEROSE - Extracted File Rose PDFs
+======================================================
+
+File Rose documents will be extracted here after processing scans from
+the '1 Scan File Rose' folder.
+
+File naming format: <ClientID>.pdf
+Example: 106467.pdf
+
+✅ These files are ready to be attached to the corresponding PHIS client record.
+   Do not rename or move files from here manually!
+");
+
+                // ── 5_Duplicate ─────────────────────────────────────────────────────────
+                var duplicateReadme = Path.Combine(_bulkConfig.GetDuplicateClientPath(), "README.txt");
+                if (!File.Exists(duplicateReadme))
+                    File.WriteAllText(duplicateReadme,
+@"📁 5_DUPLICATE - Duplicate Client ID PDFs
+==========================================
+
+This folder contains PDFs where the same Client ID appeared more than once
+during bulk extraction.
+
+Common reasons:
+⚠️  Student submitted the consent form multiple times
+⚠️  Two students share the same extracted name (rare)
+⚠️  Data-entry error in the source bulk PDF
+
+What to do:
+1. Review each file and its matching *_ERROR_*.txt log
+2. If it is a true duplicate (same student, submitted twice):
+   - Keep the better-quality copy in 3_Output_Ready
+   - Delete this duplicate
+3. If two DIFFERENT students share the same name:
+   - Add a middle initial or number suffix to distinguish them
+     Example: {ID}_Smith_John_2_consent.pdf
+   - Move the corrected file to 3_Output_Ready
+4. Files here will NOT be uploaded to PHIS until moved to 3_Output_Ready.
+");
+
+                // ── 6_Error ─────────────────────────────────────────────────────────────
+                var errorReadme = Path.Combine(_bulkConfig.GetErrorPath(), "README.txt");
+                if (!File.Exists(errorReadme))
+                    File.WriteAllText(errorReadme,
+@"📁 6_ERROR - Failed Processing or Unknown Students
 ===================================================
 
 This folder contains PDFs that failed processing or could not be identified.
@@ -928,29 +999,27 @@ What to do:
    - Re-scan at higher resolution (300 DPI minimum)
    - Ensure the form is properly aligned
    - Drop the new scan in 2_Input_Scanned
-
 4. For unidentifiable students:
    - Contact school/nursing office for clarification
    - Rename manually if you can identify them
-   - Move back to appropriate input folder for reprocessing
+   - Move back to the appropriate input folder for reprocessing
 
 Note: Files here will NOT be processed in Phase 3 until moved elsewhere.
 ");
-                }
 
-                // 5_Archive README
-                var archiveReadmePath = Path.Combine(_bulkConfig.GetArchivePath(), "README.txt");
-                if (!File.Exists(archiveReadmePath))
-                {
-                    File.WriteAllText(archiveReadmePath,
-    @"📁 5_ARCHIVE - Successfully Processed Original Files
+                // ── 7_Archive ───────────────────────────────────────────────────────────
+                var archiveReadme = Path.Combine(_bulkConfig.GetArchivePath(), "README.txt");
+                if (!File.Exists(archiveReadme))
+                    File.WriteAllText(archiveReadme,
+@"📁 7_ARCHIVE - Successfully Processed Original Files
 =====================================================
 
 This folder contains the original source files after successful processing.
 
 Structure:
-  📂 Bulk/    - Original bulk PDF files from Vitalite
-  📂 Scanned/ - Original scanned consent forms
+  📂 Bulk\      - Original bulk PDF files from Vitalite
+  📂 Scanned\   - Original scanned consent forms
+  📂 FileRose\  - Original scanned File Rose (feuille rose) documents
 
 Files are timestamped to prevent conflicts:
 Example: BulkConsent_20250114_143022.pdf
@@ -963,14 +1032,14 @@ Why keep archives?
 You can safely delete old archives after Phase 3 is complete and verified.
 Recommended: Keep for at least one school year.
 ");
-                }
             }
             catch (Exception ex)
             {
-                // Silently fail - README files are nice-to-have, not critical
+                // Silently fail — README files are nice-to-have, not critical
                 Console.WriteLine($"⚠️  Could not create README files: {ex.Message}");
             }
         }
+
 
 
 

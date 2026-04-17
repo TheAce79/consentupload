@@ -10,7 +10,8 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Globalization;
 using System.Text;
-
+using ConsentSyncCore.Services.ConfigurationPoco;
+using ConsentSyncCore.Services.Configuration;
 
 namespace Orchestrator.Phase2
 {
@@ -24,6 +25,8 @@ namespace Orchestrator.Phase2
         private readonly FuzzyMatcher _fuzzyMatcher;
         private readonly SchoolContextConfig _schoolContext;
         private readonly BulkPdfExtractionConfig _bulkPdfConfig;
+
+        private readonly PhisWorkspaceConfig _phisWorkspace;
         private readonly ILogger<Phase2Orchestrator> _logger;
 
         public Phase2Orchestrator(IConfiguration? config = null)
@@ -31,13 +34,32 @@ namespace Orchestrator.Phase2
             _config = config ?? ConfigurationService.GetConfiguration();
             _phase2Config = ConfigurationService.GetPhase2Config();
             _bulkPdfConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+            _phisWorkspace = ConfigurationService.GetPhisWorkspaceConfig();
 
             _schoolContext = ConfigurationService.GetSchoolContextConfig();
             _csvRepo = new StudentCsvRepository(_config);
             _fuzzyMatcher = new FuzzyMatcher();
             _logger = LoggerService.GetLogger<Phase2Orchestrator>();
+
+            // ✅ Ensure workspace folders exist on startup
+            EnsureWorkspaceFoldersExist();
         }
 
+
+        private void EnsureWorkspaceFoldersExist()
+        {
+            try
+            {
+                Directory.CreateDirectory(_phisWorkspace.GetToUploadPath());
+                Directory.CreateDirectory(_phisWorkspace.GetConsentUploadPath());
+                Directory.CreateDirectory(_phisWorkspace.GetFileRoseUploadPath());
+                Directory.CreateDirectory(_phisWorkspace.GetErrorPath());
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogInformation($"⚠️  Warning: Could not create workspace folders: {ex.Message}");
+            }
+        }
 
         private bool ValidateFolders()
         {

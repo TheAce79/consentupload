@@ -1,4 +1,4 @@
-﻿using ConsentSyncCore.Services;
+﻿using ConsentSyncCore.Services.Configuration;
 using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Extensions.Configuration;
@@ -9,6 +9,8 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+
+
 
 namespace CsvProcessing
 {
@@ -37,7 +39,7 @@ namespace CsvProcessing
             _config = config ?? throw new ArgumentNullException(nameof(config));
 
             // Use ConfigurationService to get resolved paths
-            var csvConfig = ConsentSyncCore.Services.ConfigurationService.GetCsvConfig();
+            var csvConfig = ConfigurationService.GetCsvConfig();
 
             // Paths are now pre-resolved by ConfigurationService
             _inputCsvPath = Path.Combine(csvConfig.InputCsvPath, csvConfig.InputCsvFileName);
