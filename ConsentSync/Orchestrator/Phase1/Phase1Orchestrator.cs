@@ -85,21 +85,24 @@ namespace Orchestrator.Phase1
         /// <summary>
         /// Run the complete Phase 1 workflow
         /// </summary>
+        /// <returns></returns>
+        /// 
+
         public async Task<Phase1Result> RunAsync()
         {
-             LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
-             LoggerService.LogInformation("║         ConsentSync - Phase 1: Search Client IDs       ║");
-             LoggerService.LogInformation("╚════════════════════════════════════════════════════════╝\n");
+            LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
+            LoggerService.LogInformation("║         ConsentSync - Phase 1: Search Client IDs       ║");
+            LoggerService.LogInformation("╚════════════════════════════════════════════════════════╝\n");
 
             var result = new Phase1Result();
 
             try
             {
-                // Step 1: Load and validate CSV
-                 LoggerService.LogInformation("📋 Step 1: Loading processed CSV...");
+                // ── Step 1: Load CSV ──────────────────────────────────────────
+                LoggerService.LogInformation("📋 Step 1: Loading processed CSV...");
                 if (!_csvRepo.ProcessedCsvExists())
                 {
-                     LoggerService.LogInformation("❌ Processed CSV not found. Please run  first.");
+                    LoggerService.LogInformation("❌ Processed CSV not found. Please run CSV processing first.");
                     return result;
                 }
 
@@ -107,62 +110,100 @@ namespace Orchestrator.Phase1
                 _currentStudentList = allStudents;
                 result.TotalStudents = allStudents.Count;
 
-                 LoggerService.LogInformation($"   ✅ Loaded {allStudents.Count} students");
+                LoggerService.LogInformation($"   ✅ Loaded {allStudents.Count} students");
                 _csvRepo.DisplayStatistics();
 
-                // Step 2: Filter unprocessed students
+                // ── Step 1b: Copy ClientId to duplicates from any PREVIOUS run ─
+                // On a re-run where primaries already have a ClientId, duplicates
+                // get their ClientId here and are excluded from the search queue.
+                int autoAssignedBefore = _csvRepo.AssignClientIdsFromDuplicates();
+                if (autoAssignedBefore > 0)
+                {
+                    LoggerService.LogInformation($"   ♻️  Pre-assigned ClientId to {autoAssignedBefore} duplicate(s) from previous run");
+                    allStudents = _csvRepo.ReadAll();
+                    _currentStudentList = allStudents;
+                }
+
+                // ── Step 2: Build search queue — primaries only ───────────────
+                // IsDuplicate rows are ALWAYS excluded: their ClientId will be
+                // copied from the primary after the search loop finishes.
                 var unprocessedStudents = allStudents
-                    .Where(s => s.ClientIdStatus == ClientIdStatus.NotProcessed)
+                    .Where(s => !s.IsDuplicate                              // never search duplicates
+                             && s.ClientIdStatus == ClientIdStatus.NotProcessed)
                     .ToList();
+
+                int skippedDuplicates = allStudents.Count(s => s.IsDuplicate);
+                if (skippedDuplicates > 0)
+                    LoggerService.LogInformation($"   ⏭️  {skippedDuplicates} duplicate row(s) excluded from PHIS search — ClientId will be copied after");
 
                 if (unprocessedStudents.Count == 0)
                 {
-                     LoggerService.LogInformation("\n✅ All students already processed!");
+                    LoggerService.LogInformation("\n✅ All primary students already processed!");
+                    // Still run the copy in case duplicates are pending
+                    int lateAssign = _csvRepo.AssignClientIdsFromDuplicates();
+                    if (lateAssign > 0)
+                    {
+                        LoggerService.LogInformation($"   ♻️  Copied ClientId to {lateAssign} pending duplicate(s)");
+                        result.DuplicatesAssigned = lateAssign;
+                    }
+                    DisplaySummary(result);
                     return result;
                 }
 
-                 LoggerService.LogInformation($"\n📊 Found {unprocessedStudents.Count} students to process");
+                LoggerService.LogInformation($"\n📊 {unprocessedStudents.Count} primary student(s) to search on PHIS");
                 result.ToProcessCount = unprocessedStudents.Count;
 
-                // Step 3: Initialize browser and services
-                 LoggerService.LogInformation("\n📋 Step 2: Initializing browser and services...");
+                // ── Step 3: Initialize browser ────────────────────────────────
+                LoggerService.LogInformation("\n📋 Step 2: Initializing browser and services...");
                 if (!InitializeServices())
                 {
-                     LoggerService.LogInformation("❌ Service initialization failed");
+                    LoggerService.LogInformation("❌ Service initialization failed");
                     return result;
                 }
 
-                // Step 4: Login to PHIS
-                 LoggerService.LogInformation("\n📋 Step 3: Logging into PHIS...");
+                // ── Step 4: Login ─────────────────────────────────────────────
+                LoggerService.LogInformation("\n📋 Step 3: Logging into PHIS...");
                 if (!_sessionManager!.Login())
                 {
-                     LoggerService.LogInformation("❌ Login failed. Cannot proceed.");
+                    LoggerService.LogInformation("❌ Login failed. Cannot proceed.");
                     return result;
                 }
+                LoggerService.LogInformation("✅ Login successful");
 
-                 LoggerService.LogInformation("✅ Login successful");
-
-                // Step 5: Process students
-                 LoggerService.LogInformation("\n📋 Step 4: Searching for Client IDs...");
+                // ── Step 5: PHIS search (primaries only) ──────────────────────
+                LoggerService.LogInformation("\n📋 Step 4: Searching for Client IDs...");
                 await ProcessStudentsAsync(unprocessedStudents, result);
 
-                // Step 6: Final save
-                 LoggerService.LogInformation("\n💾 Saving final results...");
+                // ── Step 6: Save primaries ────────────────────────────────────
+                LoggerService.LogInformation("\n💾 Saving primary results...");
                 _csvRepo.SaveAll(allStudents);
 
-                // Step 7: Display summary
+                // ── Step 6b: Copy ClientIds to duplicate rows ─────────────────
+                // Primaries now have their ClientId — propagate to every duplicate
+                // that shares the same FirstName + LastName + DOB.
+                int assignedAfter = _csvRepo.AssignClientIdsFromDuplicates();
+                if (assignedAfter > 0)
+                {
+                    LoggerService.LogInformation($"   ♻️  Copied ClientId to {assignedAfter} duplicate row(s)");
+                    allStudents = _csvRepo.ReadAll();
+                    _currentStudentList = allStudents;
+                    result.DuplicatesAssigned = assignedAfter;
+                }
+
+                // ── Step 7: Summary ───────────────────────────────────────────
                 DisplaySummary(result);
 
                 return result;
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"\n❌ ERROR: {ex.Message}");
-                 LoggerService.LogInformation($"Stack trace: {ex.StackTrace}");
+                LoggerService.LogInformation($"\n❌ ERROR: {ex.Message}");
+                LoggerService.LogInformation($"Stack trace: {ex.StackTrace}");
                 result.HasErrors = true;
                 return result;
             }
         }
+
 
         #endregion Public API
 
@@ -673,31 +714,32 @@ namespace Orchestrator.Phase1
         /// </summary>
         private void DisplaySummary(Phase1Result result)
         {
-             LoggerService.LogInformation("\n" + new string('═', 60));
-             LoggerService.LogInformation("📊 PHASE 1 COMPLETE - Final Summary");
-             LoggerService.LogInformation(new string('═', 60));
-             LoggerService.LogInformation($"Total students: {result.TotalStudents}");
-             LoggerService.LogInformation($"To process: {result.ToProcessCount}");
-             LoggerService.LogInformation($"✅ Client IDs found: {result.FoundCount}");
-             LoggerService.LogInformation($"⚠️  Needs manual review: {result.ManualReviewCount}");
-             LoggerService.LogInformation($"❌ Errors: {result.ErrorCount}");
-             LoggerService.LogInformation($"📝 Total processed: {result.TotalProcessed}");
-             LoggerService.LogInformation(new string('═', 60));
+            LoggerService.LogInformation("\n" + new string('═', 60));
+            LoggerService.LogInformation("📊 PHASE 1 COMPLETE - Final Summary");
+            LoggerService.LogInformation(new string('═', 60));
+            LoggerService.LogInformation($"Total students: {result.TotalStudents}");
+            LoggerService.LogInformation($"To process: {result.ToProcessCount}");
+            LoggerService.LogInformation($"✅ Client IDs found: {result.FoundCount}");
+            LoggerService.LogInformation($"♻️  Duplicates auto-assigned: {result.DuplicatesAssigned}");
+            LoggerService.LogInformation($"⚠️  Needs manual review: {result.ManualReviewCount}");
+            LoggerService.LogInformation($"❌ Errors: {result.ErrorCount}");
+            LoggerService.LogInformation($"📝 Total processed: {result.TotalProcessed}");
+            LoggerService.LogInformation(new string('═', 60));
 
             if (result.ManualReviewCount > 0)
             {
-                 LoggerService.LogInformation($"\n⚠️  ACTION REQUIRED:");
-                 LoggerService.LogInformation($"   {result.ManualReviewCount} students need manual Client ID assignment");
-                 LoggerService.LogInformation($"   Review the CSV and fill in missing Client IDs");
-                 LoggerService.LogInformation($"   Then proceed to Phase 2");
+                LoggerService.LogInformation($"\n⚠️  ACTION REQUIRED:");
+                LoggerService.LogInformation($"   {result.ManualReviewCount} students need manual Client ID assignment");
+                LoggerService.LogInformation($"   Review the CSV and fill in missing Client IDs");
+                LoggerService.LogInformation($"   Then proceed to Phase 2");
             }
             else
             {
-                 LoggerService.LogInformation($"\n✅ All Client IDs found! Ready for Phase 2");
+                LoggerService.LogInformation($"\n✅ All Client IDs found! Ready for Phase 2");
             }
 
             // Display updated statistics
-             LoggerService.LogInformation("========Display updated statistics==========");
+            LoggerService.LogInformation("========Display updated statistics==========");
             _csvRepo.DisplayStatistics();
         }
 

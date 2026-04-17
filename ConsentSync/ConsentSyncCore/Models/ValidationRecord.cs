@@ -39,6 +39,9 @@ namespace ConsentSyncCore.Models
         // ✅ Additional helpful fields
         public double MatchScore { get; set; } = 0.0;
         public string ValidationNotes { get; set; } = string.Empty;
+
+        // ✅ Set by DuplicateMergeService after resolving duplicates
+        public string MergedFromDuplicate { get; set; } = string.Empty;
     }
 
 
@@ -73,6 +76,7 @@ namespace ConsentSyncCore.Models
             Map(m => m.IsPdfSave).Name("IsPdfSave");
             Map(m => m.MatchScore).Name("MatchScore");
             Map(m => m.ValidationNotes).Name("ValidationNotes");
+            Map(m => m.MergedFromDuplicate).Name("MergedFromDuplicate");
         }
     }
 

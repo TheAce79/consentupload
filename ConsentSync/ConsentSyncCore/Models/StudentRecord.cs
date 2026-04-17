@@ -34,6 +34,24 @@ namespace ConsentSyncCore.Models
         public string ClientId { get; set; } = string.Empty;
         public bool IsFileRoseDefault { get; set; }
 
+
+        /// <summary>
+        /// True when another row with the same normalised FirstName + LastName + DOB
+        /// was already seen earlier in the file.
+        /// Phase 1 robot will skip PHIS search and copy ClientId from the first occurrence.
+        /// </summary>
+        public bool IsDuplicate { get; set; } = false;
+
+
+        /// <summary>
+        /// Set to true by the user after reviewing the PDFs in 5_Duplicate\{LastName}_{FirstName}\.
+        /// When true, the merge service will merge all PDFs in that subfolder into a single
+        /// PDF and move it to 3_Output_Ready before Pre-Phase 3 runs.
+        /// </summary>
+        public bool DuplicateResolved { get; set; } = false;
+
+
+
         /// <summary>
         /// Status of Client ID search (0=NotProcessed, 1=Found, 2=NeedsManualReview)
         /// </summary>

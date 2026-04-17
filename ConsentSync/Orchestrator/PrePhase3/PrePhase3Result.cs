@@ -15,6 +15,12 @@ namespace Orchestrator.PrePhase3
         public int UploadRecordsCreated { get; set; }
         public int SkippedNotValidated { get; set; }
         public int SkippedMissingPdf { get; set; }
+
+
+        /// <summary>Number of duplicate groups whose PDFs were merged into 3_Output_Ready.</summary>
+        public int DuplicatesMerged { get; set; }
+
+
         public bool HasErrors { get; set; }
         public List<string> ErrorMessages { get; set; } = new();
     }

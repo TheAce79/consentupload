@@ -1,17 +1,19 @@
 ﻿using ConsentSyncCore.Models;
 using ConsentSyncCore.Services;
+using ConsentSyncCore.Services.Configuration;
+using ConsentSyncCore.Services.ConfigurationPoco;
+using ConsentSyncCore.Services.Pdf;
 using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Orchestrator.Services;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using ConsentSyncCore.Services.ConfigurationPoco;
-using ConsentSyncCore.Services.Configuration;
 
 namespace Orchestrator.PrePhase3
 {
@@ -47,8 +49,21 @@ namespace Orchestrator.PrePhase3
 
             try
             {
+
+                // ── Step 0: Merge resolved duplicate PDFs into 3_Output_Ready ─
+                // Must run BEFORE loading Validation_Results.csv so the merged
+                // PDF is visible to FindPdfForRecord() in Step 3.
+                LoggerService.LogInformation("📋 Step 0: Processing resolved duplicate PDFs...");
+                var mergeService = new DuplicateMergeService(_config);
+                int merged = mergeService.MergeResolvedDuplicates();
+                result.DuplicatesMerged = merged;
+                LoggerService.LogInformation(merged > 0
+                    ? $"   ✅ {merged} duplicate group(s) merged and moved to 3_Output_Ready"
+                    : "   ℹ️  No resolved duplicates to merge");
+
+
                 // Step 1: Load Validation CSV
-                 LoggerService.LogInformation("📋 Step 1: Loading Validation_Results.csv...");
+                LoggerService.LogInformation("📋 Step 1: Loading Validation_Results.csv...");
                 var validationRecords = LoadValidationCsv();
                 result.TotalRecords = validationRecords.Count;
 
@@ -346,8 +361,9 @@ namespace Orchestrator.PrePhase3
              LoggerService.LogInformation("📊 PRE-PHASE 3 COMPLETE - Final Summary");
              LoggerService.LogInformation(new string('═', 60));
              LoggerService.LogInformation($"Total validation records: {result.TotalRecords}");
-             LoggerService.LogInformation($"✅ Validated records: {result.ValidatedRecords}");
-             LoggerService.LogInformation($"⏭️  Skipped (not validated): {result.SkippedNotValidated}");
+            LoggerService.LogInformation($"🔀 Duplicate groups merged: {result.DuplicatesMerged}");
+            LoggerService.LogInformation($"✅ Validated records: {result.ValidatedRecords}");
+            LoggerService.LogInformation($"⏭️  Skipped (not validated): {result.SkippedNotValidated}");
              LoggerService.LogInformation($"📄 PDFs processed: {result.PdfsProcessed}");
              LoggerService.LogInformation($"📄 Files generated: {result.FilesGenerated}");
              LoggerService.LogInformation($"📋 Upload records created: {result.UploadRecordsCreated}");

@@ -34,18 +34,25 @@ namespace Orchestrator
 
             try
             {
-                // Register encoding provider for legacy encodings (required for CSV processing)
                 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-
                 PrintHeader();
 
                 LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
                 LoggerService.LogInformation("║             ConsentSync - Automated System            ║");
                 LoggerService.LogInformation("╚════════════════════════════════════════════════════════╝");
 
-
                 // ✅ Load configuration
                 var config = ConfigurationService.GetConfiguration();
+
+                // ══════════════════════════════════════════════════════════
+                // 🧪 TEST COMMAND: --download-chrome
+                // Usage:  dotnet run --download-chrome
+                //         dotnet run --download-chrome --channel Beta
+                // ══════════════════════════════════════════════════════════
+                if (args.Contains("--download-chrome"))
+                {
+                    return await RunDownloadChromeTestAsync(args);
+                }
 
                 // ✅ Create ALL csv + pdf + phis folders in one shot
                 WorkspaceInitializer.EnsureAllFoldersExist();
@@ -64,8 +71,6 @@ namespace Orchestrator
                 {
                     return await BulkPdfExtractionCommand.ExecuteAsync(args);
                 }
-
-
 
                 if (bulkConfig.Enabled)
                 {
@@ -114,10 +119,8 @@ namespace Orchestrator
                 var prePhase3Config = ConfigurationService.GetPrePhase3Config();
                 var phase3Config = ConfigurationService.GetPhase3Config();
 
-                // Display configuration summary
                 DisplayConfigurationSummary(csvConfig, phase1Config, phase2Config, phase3Config);
 
-                // Confirm before proceeding
                 if (!ConfirmStart())
                 {
                     LoggerService.LogInformation("\n👋 Cancelled by user");
@@ -148,7 +151,7 @@ namespace Orchestrator
                 csvRepo.DisplayStatistics();
 
                 // ═══════════════════════════════════════════════════════
-                // PHASE 1: Search PHIS for Client IDs
+                // PHASE 1
                 // ═══════════════════════════════════════════════════════
                 if (phase1Config.Enabled)
                 {
@@ -193,7 +196,7 @@ namespace Orchestrator
                 }
 
                 // ═══════════════════════════════════════════════════════
-                // PHASE 2: Download Consent PDFs from Vitalite
+                // PHASE 2
                 // ═══════════════════════════════════════════════════════
                 if (phase2Config.Enabled)
                 {
@@ -202,13 +205,9 @@ namespace Orchestrator
                     LoggerService.LogInformation(new string('═', 70));
 
                     if (!ConfirmPhase("Phase 2"))
-                    {
                         LoggerService.LogInformation("⏭️  Phase 2 skipped");
-                    }
                     else
-                    {
                         await RunPhase2Async(config);
-                    }
                 }
                 else
                 {
@@ -216,7 +215,7 @@ namespace Orchestrator
                 }
 
                 // ═══════════════════════════════════════════════════════
-                // PRE-PHASE 3: Validate and Prepare for Upload
+                // PRE-PHASE 3
                 // ═══════════════════════════════════════════════════════
                 if (prePhase3Config.Enabled)
                 {
@@ -225,22 +224,18 @@ namespace Orchestrator
                     LoggerService.LogInformation(new string('═', 70));
 
                     if (!ConfirmPhase("Pre-Phase 3"))
-                    {
                         LoggerService.LogInformation("⏭️  Pre-Phase 3 skipped");
-                    }
                     else
-                    {
                         await RunPrePhase3Async(config);
-                    }
                 }
                 else
                 {
                     LoggerService.LogInformation("\n⏭️  Pre-Phase 3 disabled in configuration");
                 }
 
-                // ═══════════════════════════════════════════════════════════
-                // PHASE 3: Upload to PHIS
-                // ═══════════════════════════════════════════════════════════
+                // ═══════════════════════════════════════════════════════
+                // PHASE 3
+                // ═══════════════════════════════════════════════════════
                 if (phase3Config.Enabled)
                 {
                     LoggerService.LogInformation("\n\n");
@@ -256,7 +251,6 @@ namespace Orchestrator
                     {
                         try
                         {
-                            // ✅ FIX: Initialize PHIS session if not already done
                             if (driver == null || phisSearchService == null || sessionManager == null)
                             {
                                 LoggerService.LogWarning("⚠️  PHIS components not initialized. Initializing now...");
@@ -269,7 +263,6 @@ namespace Orchestrator
                                 sessionManager = new PhisSessionManager(driver, config);
                                 phisSearchService = new PhisSearchService(driver, config, resultExtractor, sessionManager);
 
-                                // ✅ CRITICAL FIX: Perform login to establish session
                                 LoggerService.LogInformation("\n🔐 Establishing PHIS session...");
                                 bool loginSuccess = sessionManager.Login();
 
@@ -287,22 +280,13 @@ namespace Orchestrator
                                 LoggerService.LogInformation("✅ Reusing PHIS session from Phase 1");
                             }
 
-                            var phase3Orchestrator = new Phase3Orchestrator(
-                                config,
-                                driver,
-                                phisSearchService,
-                                sessionManager);
-
+                            var phase3Orchestrator = new Phase3Orchestrator(config, driver, phisSearchService, sessionManager);
                             var phase3Result = await phase3Orchestrator.RunAsync();
 
                             if (phase3Result.IsSuccessful)
-                            {
                                 LoggerService.LogInformation("\n✅ Phase 3 test completed successfully!");
-                            }
                             else
-                            {
                                 LoggerService.LogWarning("\n⚠️  Phase 3 test completed with errors");
-                            }
                         }
                         catch (Exception ex)
                         {
@@ -315,11 +299,7 @@ namespace Orchestrator
                     LoggerService.LogInformation("\n⏭️  Phase 3 disabled in configuration");
                 }
 
-                // ═══════════════════════════════════════════════════════
-                // COMPLETION
-                // ═══════════════════════════════════════════════════════
                 PrintCompletionSummary();
-
                 return 0;
             }
             catch (Exception ex)
@@ -329,7 +309,6 @@ namespace Orchestrator
             }
             finally
             {
-                // Clean up driver if it was created
                 if (driver != null)
                 {
                     try
@@ -344,16 +323,80 @@ namespace Orchestrator
                     }
                 }
 
-                // ✅ Dispose logger resources
                 LoggerService.Dispose();
-
                 Console.WriteLine("\n\nPress any key to exit...");
                 Console.ReadKey();
             }
         }
 
+        // ══════════════════════════════════════════════════════════════
+        // 🧪 TEST: Portable Chrome download
+        // Usage:
+        //   dotnet run --download-chrome
+        //   dotnet run --download-chrome --channel Beta
+        // ══════════════════════════════════════════════════════════════
+        static async Task<int> RunDownloadChromeTestAsync(string[] args)
+        {
+            Console.WriteLine("\n╔════════════════════════════════════════════════════════╗");
+            Console.WriteLine("║        🧪 TEST: Download Portable Chrome               ║");
+            Console.WriteLine("╚════════════════════════════════════════════════════════╝\n");
+
+            var chromeConfig = ConfigurationService.GetChromeDriverConfig();
+
+            // Allow --channel override from command line: --channel Beta
+            var channelOverride = GetArg(args, "--channel");
+            if (!string.IsNullOrWhiteSpace(channelOverride))
+            {
+                chromeConfig.PortableChromeChannel = channelOverride;
+                Console.WriteLine($"   ℹ️  Channel overridden via args: {channelOverride}");
+            }
+
+            Console.WriteLine($"   Channel        : {chromeConfig.PortableChromeChannel}");
+            Console.WriteLine($"   Chrome  → {chromeConfig.PortableChromeExtractTo}");
+            Console.WriteLine($"   Driver  → {chromeConfig.ChromeDriverExtractTo}");
+            Console.WriteLine($"   Versions URL   : {chromeConfig.PortableChromeVersionsJsonUrl}");
+            Console.WriteLine();
+
+            var factory = new ChromeDriverFactory();
+
+            var cts = new CancellationTokenSource();
+
+            // Allow Ctrl+C to cancel the download
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                Console.WriteLine("\n⚠️  Cancelling download...");
+                cts.Cancel();
+            };
+
+            bool success = await factory.DownloadPortableChromeAsync(
+                progress: msg => Console.WriteLine(msg),
+                cancellationToken: cts.Token);
+
+            if (success)
+            {
+                Console.WriteLine("\n╔════════════════════════════════════════════════════════╗");
+                Console.WriteLine("║  ✅ Download succeeded!  Next steps:                   ║");
+                Console.WriteLine("╠════════════════════════════════════════════════════════╣");
+                Console.WriteLine($"║  1. Open appsettings.json                              ║");
+                Console.WriteLine($"║  2. Set  \"UsePortableChrome\": true                     ║");
+                Console.WriteLine($"║  3. Verify PortableChromePath points to chrome.exe     ║");
+                Console.WriteLine($"║     (logged above as '✅ Portable Chrome ready')       ║");
+                Console.WriteLine("╚════════════════════════════════════════════════════════╝");
+            }
+            else
+            {
+                Console.WriteLine("\n❌ Download failed or was cancelled. See messages above.");
+            }
+
+            Console.WriteLine("\nPress any key to exit...");
+            Console.ReadKey();
+            return success ? 0 : 1;
+        }
+
         static string? GetArg(string[] args, string key)
         {
+           
             var index = Array.IndexOf(args, key);
             return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
         }
@@ -389,17 +432,11 @@ namespace Orchestrator
                 var result = await orchestrator.RunAsync();
 
                 if (result.HasErrors)
-                {
                     LoggerService.LogError("\n❌ Phase 2 completed with errors");
-                }
                 else if (result.FailedToMatch > 0)
-                {
                     LoggerService.LogWarning($"\n⚠️  Phase 2 completed - {result.FailedToMatch} files need manual review");
-                }
                 else
-                {
                     LoggerService.LogInformation("\n✅ Phase 2 completed successfully!");
-                }
             }
             catch (Exception ex)
             {
@@ -415,17 +452,11 @@ namespace Orchestrator
                 var result = await orchestrator.RunAsync();
 
                 if (result.HasErrors)
-                {
                     LoggerService.LogError("\n❌ Pre-Phase 3 completed with errors");
-                }
                 else if (result.SkippedMissingPdf > 0)
-                {
                     LoggerService.LogWarning($"\n⚠️  Pre-Phase 3 completed - {result.SkippedMissingPdf} PDFs missing");
-                }
                 else
-                {
                     LoggerService.LogInformation("\n✅ Pre-Phase 3 completed successfully!");
-                }
             }
             catch (Exception ex)
             {
@@ -441,14 +472,8 @@ namespace Orchestrator
         {
             if (!Console.IsOutputRedirected && !Console.IsErrorRedirected)
             {
-                try
-                {
-                    Console.Clear();
-                }
-                catch (IOException)
-                {
-                    Console.WriteLine("\n\n\n");
-                }
+                try { Console.Clear(); }
+                catch (IOException) { Console.WriteLine("\n\n\n"); }
             }
             else
             {
@@ -494,9 +519,7 @@ namespace Orchestrator
             var key = Console.ReadKey(true);
 
             if (key.Key == ConsoleKey.Q)
-            {
                 Environment.Exit(0);
-            }
 
             return key.Key == ConsoleKey.Y;
         }

@@ -24,6 +24,17 @@ namespace CsvProcessing
             Map(m => m.ClientId).Name("ClientId");
             Map(m => m.IsFileRoseDefault).Name("IsFileRoseDefault")
                 .TypeConverter<SafeBooleanConverter>(); // Use custom converter
+
+            // ✅ Optional so existing CSVs without this column load without error
+            Map(m => m.IsDuplicate).Name("IsDuplicate")
+                .TypeConverter<SafeBooleanConverter>()
+                .Optional();
+
+            // User sets this to true in the CSV after reviewing 5_Duplicate PDFs
+            Map(m => m.DuplicateResolved).Name("DuplicateResolved")
+                .TypeConverter<SafeBooleanConverter>()
+                .Optional();
+
             Map(m => m.ClientIdStatus).Name("ClientIdStatus")
                 .TypeConverter<ClientIdStatusConverter>();
             Map(m => m.BestMatch).Name("BestMatch").Optional(); // Optional for backward compatibility

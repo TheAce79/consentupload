@@ -105,7 +105,6 @@ namespace ConsentSyncCore.Services.Pdf
 
 
 
-
         /// <summary>
         /// Process a single PDF file with error handling and archival
         /// </summary>
@@ -125,10 +124,16 @@ namespace ConsentSyncCore.Services.Pdf
                 var outputPath = _bulkConfig.GetOutputReadyPath();
                 result = SmartExtractFromPdf(pdfPath, outputPath);
 
-                // Handle success/failure
-                if (result.Success && result.TotalExtracted > 0)
+                // ── Archival decision ──────────────────────────────────────
+                // Archive : pages were extracted AND no hard failures AND no unknown names
+                //           Duplicates (5_Duplicate) do NOT block archival.
+                // Error   : zero pages extracted, OR failures, OR unknown names.
+                bool shouldArchive = result.TotalExtracted > 0
+                                     && result.FailedExtractions == 0
+                                     && result.UnknownNameCount == 0;
+
+                if (shouldArchive)
                 {
-                    // Move source to 5_Archive if enabled
                     if (_bulkConfig.MoveToArchiveAfterProcessing)
                     {
                         MoveToArchive(pdfPath, sourceType);
@@ -136,7 +141,6 @@ namespace ConsentSyncCore.Services.Pdf
                 }
                 else
                 {
-                    // Move to 4_Error if enabled
                     if (_bulkConfig.MoveErrorPdfsToErrorFolder)
                     {
                         MoveToErrorFolder(pdfPath, result.ErrorMessage ?? "Unknown error");
@@ -152,7 +156,6 @@ namespace ConsentSyncCore.Services.Pdf
 
                 Console.WriteLine($"❌ {result.ErrorMessage}");
 
-                // Move to 4_Error
                 if (_bulkConfig.MoveErrorPdfsToErrorFolder)
                 {
                     try
@@ -168,8 +171,6 @@ namespace ConsentSyncCore.Services.Pdf
                 return result;
             }
         }
-
-
 
 
         /// <summary>
@@ -418,50 +419,103 @@ namespace ConsentSyncCore.Services.Pdf
                         firstName = CleanAndCapitalizeName(firstName);
                         lastName = CleanAndCapitalizeName(lastName);
 
-                        // ✅ Check for duplicates
+
+
+                        // ✅ Duplicate key — NormalizedLastName_NormalizedFirstName (accent-safe)
                         string nameKey = $"{NormalizeName(lastName)}_{NormalizeName(firstName)}";
 
                         if (seenNames.ContainsKey(nameKey))
                         {
                             seenNames[nameKey]++;
-                            int duplicateCount = seenNames[nameKey];
+                            int occurrence = seenNames[nameKey] + 1; // 1-based
 
-                            Console.WriteLine($"   ⚠️  DUPLICATE: {firstName} {lastName} (occurrence #{duplicateCount + 1}) - moving to 4_Error");
+                            Console.WriteLine($"   ⚠️  DUPLICATE #{occurrence}: {lastName}_{firstName} → 5_Duplicate\\");
 
-                            // Move duplicate to error folder
-                            string errorFileName = $"DUPLICATE_{pageIndex}_{lastName}_{firstName}_{duplicateCount + 1}.pdf";
-                            string errorPath = Path.Combine(_bulkConfig.GetErrorPath(), errorFileName);
-                            File.Move(tempFilePath, errorPath, overwrite: true);
+                            // ── Create / reuse per-student subfolder ──────────────────────
+                            string duplicateSubFolder = GetOrCreateDuplicateSubFolder(lastName, firstName);
+                            string duplicateFileName = MakeSafeFileName($"{pageIndex}_{lastName}_{firstName}_{occurrence}_consent.pdf");
+                            string duplicatePath = Path.Combine(duplicateSubFolder, duplicateFileName);
 
-                            // Create error log
-                            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                            string errorLogPath = Path.Combine(_bulkConfig.GetErrorPath(),
-                                $"DUPLICATE_{pageIndex}_{lastName}_{firstName}_{duplicateCount + 1}_ERROR_{timestamp}.txt");
+                            File.Move(tempFilePath, duplicatePath, overwrite: true);
+                            Console.WriteLine($"   📄 Moved duplicate → {duplicateFileName}");
 
-                            File.WriteAllText(errorLogPath,
-                                $"Error Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n" +
-                                $"Source: {Path.GetFileName(bulkPdfPath)}, Page {currentPage}\n" +
-                                $"Student: {firstName} {lastName}\n" +
-                                $"Reason: Duplicate name detected (occurrence #{duplicateCount + 1})\n" +
-                                $"Action Required: \n" +
-                                $"  1. Verify if this is the same student (form submitted twice)\n" +
-                                $"  2. If duplicate, delete this file\n" +
-                                $"  3. If different student with same name, add middle initial or identifier\n" +
-                                $"     Example: {pageIndex}_{lastName}_{firstName}_2_consent.pdf\n" +
-                                $"  4. Move corrected file to 3_Output_Ready");
+                            // ── On the SECOND occurrence: pull the FIRST copy out of 3_Output_Ready ──
+                            if (seenNames[nameKey] == 1)
+                            {
+                                // NormalizeName() strips ALL Unicode accents (é è ê à â ù û î ô ç ë ï ü œ æ …)
+                                string normLast = NormalizeName(lastName);
+                                string normFirst = NormalizeName(firstName);
+                                string normKey2 = $"_{normLast}_{normFirst}_consent".ToLowerInvariant();
+
+                                // Fast path: search the in-memory list
+                                var firstCopyPath = result.ExtractedFiles.FirstOrDefault(f =>
+                                    NormalizeName(Path.GetFileNameWithoutExtension(f))
+                                        .ToLowerInvariant()
+                                        .Contains(normKey2));
+
+                                // Fallback: scan 3_Output_Ready on disk
+                                if (firstCopyPath == null || !File.Exists(firstCopyPath))
+                                {
+                                    firstCopyPath = Directory
+                                        .GetFiles(_bulkConfig.GetOutputReadyPath(), "*.pdf")
+                                        .FirstOrDefault(f =>
+                                            NormalizeName(Path.GetFileNameWithoutExtension(f))
+                                                .ToLowerInvariant()
+                                                .Contains(normKey2));
+                                }
+
+                                if (firstCopyPath != null && File.Exists(firstCopyPath))
+                                {
+                                    string origNoExt = Path.GetFileNameWithoutExtension(firstCopyPath);
+                                    string firstDestName = MakeSafeFileName($"{origNoExt}_1_consent.pdf");
+                                    string firstDestPath = Path.Combine(duplicateSubFolder, firstDestName);
+
+                                    File.Move(firstCopyPath, firstDestPath, overwrite: true);
+                                    result.ExtractedFiles.Remove(firstCopyPath);
+                                    result.TotalExtracted--;
+
+                                    Console.WriteLine($"   ♻️  Moved original copy → {firstDestName}");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"   ⚠️  Could not locate original copy in 3_Output_Ready.");
+                                }
+
+                                // ── HOW_TO_MERGE.txt (written once when the folder is first created) ──
+                                string mergeReadme = Path.Combine(duplicateSubFolder, "HOW_TO_MERGE.txt");
+                                if (!File.Exists(mergeReadme))
+                                {
+                                    File.WriteAllText(mergeReadme,
+                                        $"DUPLICATE CONSENTS — {lastName}, {firstName}\n" +
+                                        $"==============================================\n\n" +
+                                        $"This folder groups ALL consent PDFs found for this student.\n\n" +
+                                        $"What to do:\n" +
+                                        $"  1. Review each file — keep the best-quality copy.\n" +
+                                        $"  2. If same student submitted twice → delete extras, keep one.\n" +
+                                        $"  3. If TWO DIFFERENT students share this name:\n" +
+                                        $"     → Confirm with the school.\n" +
+                                        $"     → Rename to distinguish, e.g.:\n" +
+                                        $"          {{ID}}_{lastName}_{firstName}_consent.pdf\n" +
+                                        $"          {{ID}}_{lastName}_{firstName}_2_consent.pdf\n" +
+                                        $"  4. Move the final file(s) to 3_Output_Ready\\\n\n" +
+                                        $"Files here will NOT be uploaded to PHIS automatically.\n");
+                                }
+                            }
 
                             result.DuplicatesFound++;
-                            result.ErrorMessages.Add($"{errorFileName}: Duplicate name");
+                            result.ErrorMessages.Add(
+                                $"DUPLICATE #{occurrence}: {lastName}_{firstName} → {Path.GetFileName(duplicateSubFolder)}\\{duplicateFileName}");
 
-                            Console.WriteLine($"   ⚠️  Moved to 4_Error: {errorFileName}");
                             pageIndex++;
                             currentPage += pagesPerConsent;
-                            continue; // Skip to next PDF
+                            continue;
                         }
                         else
                         {
                             seenNames[nameKey] = 0;
                         }
+
+
 
                         // ✅ Names detected and no duplicate - save to 3_Output_Ready
                         string outputFileName = FormatFileName(pageIndex, lastName, firstName);
@@ -486,7 +540,8 @@ namespace ConsentSyncCore.Services.Pdf
                     currentPage += pagesPerConsent;
                 }
 
-                result.Success = result.FailedExtractions == 0 && result.UnknownNameCount == 0 && result.DuplicatesFound == 0;
+                // DuplicatesFound is NOT a failure — they are safely stored in 5_Duplicate.
+                result.Success = result.FailedExtractions == 0 && result.UnknownNameCount == 0;
 
                 Console.WriteLine($"\n   Summary: {result.TotalExtracted} extracted, {result.UnknownNameCount} unknown names, {result.DuplicatesFound} duplicates, {result.FailedExtractions} failed");
 
@@ -601,6 +656,23 @@ namespace ConsentSyncCore.Services.Pdf
         }
 
 
+
+
+
+        /// <summary>
+        /// Returns (or creates) the duplicate subfolder for a given student.
+        /// Path: 5_Duplicate\{LastName}_{FirstName}\
+        /// All occurrences for the same student land in the same folder,
+        /// making it trivial to merge them later into a single upload PDF.
+        /// </summary>
+        private string GetOrCreateDuplicateSubFolder(string lastName, string firstName)
+        {
+            // Sanitize so it is always a valid folder name
+            string folderName = MakeSafeFileName($"{lastName}_{firstName}");
+            string path = Path.Combine(_bulkConfig.GetDuplicateClientPath(), folderName);
+            Directory.CreateDirectory(path);
+            return path;
+        }
 
 
         #region File Management

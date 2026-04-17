@@ -94,6 +94,63 @@ namespace CsvProcessing
 
             var processor = new StudentCsvProcessor(_config);
             processor.PreviewCsv(maxRows);
+
+        }
+
+
+
+
+        /// <summary>
+        /// Before Phase 1 PHIS search, copies ClientId from the first occurrence of each
+        /// duplicate group so the robot never searches PHIS for the same person twice.
+        /// Call this once after <see cref="ProcessRawCsv"/> and before Phase 1 starts.
+        /// </summary>
+        public int AssignClientIdsFromDuplicates()
+        {
+            var students = ReadAll();
+            int assigned = 0;
+
+            // Build a lookup: normalised key → ClientId of the primary (non-duplicate) record
+            var primaryClientIds = students
+                .Where(s => !s.IsDuplicate && !string.IsNullOrWhiteSpace(s.ClientId))
+                .GroupBy(s => BuildDuplicateKey(s))
+                .ToDictionary(g => g.Key, g => g.First().ClientId);
+
+            foreach (var student in students.Where(s => s.IsDuplicate && string.IsNullOrWhiteSpace(s.ClientId)))
+            {
+                string key = BuildDuplicateKey(student);
+                if (primaryClientIds.TryGetValue(key, out var clientId))
+                {
+                    student.ClientId = clientId;
+                    student.ClientIdStatus = ClientIdStatus.Found;
+                    assigned++;
+                    LoggerService.LogInformation($"   ♻️  Duplicate auto-assigned ClientId {clientId} → {student.FirstName} {student.LastName}");
+                }
+            }
+
+            if (assigned > 0)
+            {
+                SaveAll(students);
+                LoggerService.LogInformation($"✅ Auto-assigned ClientId to {assigned} duplicate row(s)");
+            }
+
+            return assigned;
+        }
+
+        private static string BuildDuplicateKey(StudentRecord s)
+        {
+            static string Norm(string v)
+            {
+                if (string.IsNullOrWhiteSpace(v)) return string.Empty;
+                var sb = new System.Text.StringBuilder();
+                foreach (var c in v.Normalize(NormalizationForm.FormD))
+                    if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) !=
+                        System.Globalization.UnicodeCategory.NonSpacingMark)
+                        sb.Append(c);
+                return sb.ToString().Normalize(NormalizationForm.FormC)
+                         .ToUpperInvariant().Replace(" ", "").Replace("-", "").Replace("'", "");
+            }
+            return $"{Norm(s.LastName)}_{Norm(s.FirstName)}_{s.DateOfBirth.Trim()}";
         }
 
 

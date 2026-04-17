@@ -22,7 +22,11 @@ namespace CsvProcessing
         private readonly string _outputCsvPath;
         private readonly string _dateOfBirthColumn;
         private readonly string _dateFormat;
+
+        // add alongside _lastNameColumn
+        private readonly string _firstNameColumn;
         private readonly string _lastNameColumn;
+
         private readonly Dictionary<string, object?> _additionalColumns;
         private readonly List<EncodingConfiguration> _encodingConfigs;
         private readonly ILogger<StudentCsvProcessor> _logger;
@@ -61,6 +65,8 @@ namespace CsvProcessing
             _dateOfBirthColumn = csvConfig.DateOfBirthColumn;
             _dateFormat = csvConfig.DateFormat;
             _inputDateFormats = csvConfig.InputDateFormats;
+
+            _firstNameColumn = csvConfig.FirstNameColumn;
             _lastNameColumn = csvConfig.LastNameColumn;
 
              LoggerService.LogInformation($"📅 Configured to parse input dates using {_inputDateFormats.Length} format(s): {string.Join(", ", _inputDateFormats)}");
@@ -158,6 +164,7 @@ namespace CsvProcessing
             }
         }
 
+
         /// <summary>
         /// Processes the CSV: reads, transforms dates, sorts, adds columns, and writes output
         /// Uses CsvHelper for robust CSV parsing
@@ -166,13 +173,13 @@ namespace CsvProcessing
         {
             if (!File.Exists(_inputCsvPath))
             {
-                 LoggerService.LogInformation($"❌ CSV file not found: {_inputCsvPath}");
+                LoggerService.LogInformation($"❌ CSV file not found: {_inputCsvPath}");
                 return;
             }
 
-             LoggerService.LogInformation($"\n📄 Processing CSV file...");
-             LoggerService.LogInformation($"   Input:  {_inputCsvPath}");
-             LoggerService.LogInformation($"   Output: {_outputCsvPath}");
+            LoggerService.LogInformation($"\n📄 Processing CSV file...");
+            LoggerService.LogInformation($"   Input:  {_inputCsvPath}");
+            LoggerService.LogInformation($"   Output: {_outputCsvPath}");
 
             // Reset diagnostics
             _processingErrors.Clear();
@@ -188,24 +195,62 @@ namespace CsvProcessing
 
                 if (records.Count == 0)
                 {
-                     LoggerService.LogInformation("❌ No valid records found in CSV");
+                    LoggerService.LogInformation("❌ No valid records found in CSV");
                     PrintProcessingDiagnostics();
                     return;
                 }
 
-                 LoggerService.LogInformation($"\n✅ Successfully parsed {records.Count} records");
+                LoggerService.LogInformation($"\n✅ Successfully parsed {records.Count} records");
+
+                // ── Get final header FIRST (needed by duplicate detection) ─────
+                var finalHeader = GetFinalHeader(records.FirstOrDefault());
+
+                // ── Ensure IsDuplicate column exists in header ────────────────
+                if (!finalHeader.Contains("IsDuplicate"))
+                {
+                    int insertAt = finalHeader.IndexOf("ClientIdStatus");
+                    if (insertAt < 0) insertAt = finalHeader.Count;
+                    finalHeader.Insert(insertAt, "IsDuplicate");
+                    LoggerService.LogInformation("   ➕ Adding column: IsDuplicate");
+                }
+
+                // ── Detect duplicates: same normalised FirstName + LastName + DOB ──
+                LoggerService.LogInformation("\n🔍 Detecting duplicates (FirstName + LastName + DOB)...");
+
+                var seenKeys = new Dictionary<string, int>();
+                int duplicateCount = 0;
+
+                for (int i = 0; i < records.Count; i++)
+                {
+                    var r = records[i];
+                    string fn = NormalizeDuplicateKey(r.Properties.GetValueOrDefault(_firstNameColumn, string.Empty));
+                    string ln = NormalizeDuplicateKey(r.Properties.GetValueOrDefault(_lastNameColumn, string.Empty));
+                    string dob = r.Properties.GetValueOrDefault(_dateOfBirthColumn, string.Empty).Trim();
+                    string key = $"{ln}_{fn}_{dob}";
+
+                    if (seenKeys.TryGetValue(key, out _))
+                    {
+                        r["IsDuplicate"] = "true";
+                        duplicateCount++;
+                        LoggerService.LogInformation($"   ⚠️  Duplicate found: {r.Properties.GetValueOrDefault(_lastNameColumn)} {r.Properties.GetValueOrDefault(_firstNameColumn)} ({dob})");
+                    }
+                    else
+                    {
+                        r["IsDuplicate"] = "false";
+                        seenKeys[key] = i;
+                    }
+                }
+
+                LoggerService.LogInformation($"   ✅ {duplicateCount} duplicate row(s) flagged");
 
                 // Transform Date of Birth column
                 TransformDates(records);
 
                 // Sort by Last Name
-                 LoggerService.LogInformation($"\n🔤 Sorting by: {_lastNameColumn}");
+                LoggerService.LogInformation($"\n🔤 Sorting by: {_lastNameColumn}");
                 var sortedRecords = records
                     .OrderBy(r => r[_lastNameColumn], StringComparer.OrdinalIgnoreCase)
                     .ToList();
-
-                // Get final header (original + additional columns)
-                var finalHeader = GetFinalHeader(records.FirstOrDefault());
 
                 // Write output CSV
                 WriteCsv(sortedRecords, finalHeader);
@@ -213,16 +258,16 @@ namespace CsvProcessing
                 // Print comprehensive diagnostics
                 PrintProcessingDiagnostics();
 
-                 LoggerService.LogInformation($"\n✅ CSV processing complete!");
-                 LoggerService.LogInformation($"   Output file: {_outputCsvPath}");
-                 LoggerService.LogInformation($"   Total records: {sortedRecords.Count}");
-                 LoggerService.LogInformation($"   Ready for Client ID search automation");
+                LoggerService.LogInformation($"\n✅ CSV processing complete!");
+                LoggerService.LogInformation($"   Output file: {_outputCsvPath}");
+                LoggerService.LogInformation($"   Total records: {sortedRecords.Count}");
+                LoggerService.LogInformation($"   Ready for Client ID search automation");
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"\n❌ FATAL ERROR during CSV processing:");
-                 LoggerService.LogInformation($"   {ex.Message}");
-                 LoggerService.LogInformation($"   Stack trace: {ex.StackTrace}");
+                LoggerService.LogInformation($"\n❌ FATAL ERROR during CSV processing:");
+                LoggerService.LogInformation($"   {ex.Message}");
+                LoggerService.LogInformation($"   Stack trace: {ex.StackTrace}");
                 PrintProcessingDiagnostics();
                 throw;
             }
@@ -629,6 +674,30 @@ namespace CsvProcessing
             }
 
              LoggerService.LogInformation(new string('═', 100));
+        }
+
+
+
+        /// <summary>
+        /// Strips accents, uppercases, removes spaces/hyphens — accent-safe normalisation
+        /// identical to the logic used in BulkPdfExtractor so comparisons are consistent.
+        /// </summary>
+        private static string NormalizeDuplicateKey(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+            var sb = new StringBuilder();
+            foreach (var c in value.Normalize(NormalizationForm.FormD))
+            {
+                if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) !=
+                    System.Globalization.UnicodeCategory.NonSpacingMark)
+                    sb.Append(c);
+            }
+            return sb.ToString()
+                     .Normalize(NormalizationForm.FormC)
+                     .ToUpperInvariant()
+                     .Replace(" ", "")
+                     .Replace("-", "")
+                     .Replace("'", "");
         }
     }
 
