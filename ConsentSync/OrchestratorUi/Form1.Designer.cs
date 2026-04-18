@@ -29,6 +29,11 @@
             btn_PortableChrome = new Button();
             rtxt_Log = new RichTextBox();
             folderBrowserDialog1 = new FolderBrowserDialog();
+
+            gb_Normalise = new GroupBox();
+            btn_ExtractBulk = new Button();
+            btn_ProcessCsv = new Button();
+
             grpConfig.SuspendLayout();
             SuspendLayout();
             // 
@@ -169,12 +174,49 @@
             rtxt_Log.Size = new Size(763, 185);
             rtxt_Log.TabIndex = 1;
             rtxt_Log.Text = "";
+
+            // ── gb_Normalise ──────────────────────────────────────────────
+            gb_Normalise.Controls.Add(btn_ExtractBulk);
+            gb_Normalise.Controls.Add(btn_ProcessCsv);
+            gb_Normalise.Location = new Point(500, 17);
+            gb_Normalise.Name = "gb_Normalise";
+            gb_Normalise.Size = new Size(280, 120);
+            gb_Normalise.TabIndex = 2;
+            gb_Normalise.TabStop = false;
+            gb_Normalise.Text = "Phase 0 — Pre-Processing";
+
+            // ── btn_ExtractBulk ───────────────────────────────────────────
+            btn_ExtractBulk.BackColor = Color.DarkOrange;
+            btn_ExtractBulk.FlatStyle = FlatStyle.Flat;
+            btn_ExtractBulk.ForeColor = Color.White;
+            btn_ExtractBulk.Location = new Point(12, 28);
+            btn_ExtractBulk.Name = "btn_ExtractBulk";
+            btn_ExtractBulk.Size = new Size(254, 34);
+            btn_ExtractBulk.TabIndex = 0;
+            btn_ExtractBulk.Text = "📄 Extract Bulk PDF";
+            btn_ExtractBulk.UseVisualStyleBackColor = false;
+            btn_ExtractBulk.Click += btn_ExtractBulk_Click;
+
+            // ── btn_ProcessCsv ────────────────────────────────────────────
+            btn_ProcessCsv.BackColor = Color.Teal;
+            btn_ProcessCsv.FlatStyle = FlatStyle.Flat;
+            btn_ProcessCsv.ForeColor = Color.White;
+            btn_ProcessCsv.Location = new Point(12, 70);
+            btn_ProcessCsv.Name = "btn_ProcessCsv";
+            btn_ProcessCsv.Size = new Size(254, 34);
+            btn_ProcessCsv.TabIndex = 1;
+            btn_ProcessCsv.Text = "📋 Process CSV";
+            btn_ProcessCsv.UseVisualStyleBackColor = false;
+            btn_ProcessCsv.Click += btn_ProcessCsv_Click;
+
+
             // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(803, 537);
+            Controls.Add(gb_Normalise);
             Controls.Add(grpConfig);
             Controls.Add(rtxt_Log);
             Name = "Form1";
@@ -200,5 +242,9 @@
         private Button btn_PortableChrome;
         private RichTextBox rtxt_Log;
         private FolderBrowserDialog folderBrowserDialog1;
+        private GroupBox gb_Normalise;
+
+        private Button btn_ExtractBulk;
+        private Button btn_ProcessCsv;
     }
 }
