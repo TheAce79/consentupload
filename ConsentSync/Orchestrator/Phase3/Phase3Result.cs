@@ -9,19 +9,20 @@ namespace Orchestrator.Phase3
     public class Phase3Result
     {
 
+
         public int TotalRecords { get; set; }
-        public int UploadReadyRecords { get; set; }
-        public int SkippedNotReady { get; set; }
         public int SuccessfulUploads { get; set; }
-        public int FailedUploads { get; set; }
-        public int PdfsUploaded { get; set; }
         public bool HasErrors { get; set; }
+        public bool IsSuccessful => !HasErrors;
+
+        /// <summary>
+        /// True when the run was stopped because BatchSize was reached.
+        /// Records with VerifStatus = NotProcessed will be picked up
+        /// automatically on the next run.
+        /// </summary>
+        public bool BatchLimitReached { get; set; }
+
         public List<string> ErrorMessages { get; set; } = new();
-
-        public bool IsSuccessful => !HasErrors && FailedUploads == 0;
-
-        public string Summary => $"Total: {TotalRecords}, Clients: {UploadReadyRecords}, " +
-                                $"Success: {SuccessfulUploads}, Failed: {FailedUploads}";
 
     }
 }

@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Orchestrator.Phase1
+﻿namespace Orchestrator.Phase1
 {
     public class Phase1Result
     {
@@ -13,15 +7,16 @@ namespace Orchestrator.Phase1
         public int FoundCount { get; set; }
         public int ManualReviewCount { get; set; }
         public int ErrorCount { get; set; }
+        public int DuplicatesAssigned { get; set; }
         public bool HasErrors { get; set; }
 
         /// <summary>
-        /// Number of duplicate rows that had ClientId auto-copied from their primary after the search loop.
+        /// True when the run was stopped because BatchSize was reached.
+        /// Remaining records (ClientIdStatus = NotProcessed) will be picked up
+        /// on the next run automatically.
         /// </summary>
-        public int DuplicatesAssigned { get; set; }
-
+        public bool BatchLimitReached { get; set; }
 
         public int TotalProcessed => FoundCount + ManualReviewCount + ErrorCount;
-        public double SuccessRate => ToProcessCount > 0 ? (FoundCount / (double)ToProcessCount) * 100 : 0;
     }
 }

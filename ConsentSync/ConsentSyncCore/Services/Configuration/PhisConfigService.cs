@@ -1,19 +1,11 @@
 ﻿using ConsentSyncCore.Services.ConfigurationPoco;
 using Microsoft.Extensions.Configuration;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace ConsentSyncCore.Services.Configuration
 {
     public partial class ConfigurationService
     {
-
-        /// <summary>
-        /// Get PHIS Automation configuration
-        /// </summary>
+        /// <summary>Get PHIS Automation configuration.</summary>
         public static PhisConfig GetPhisConfig()
         {
             var config = GetConfiguration();
@@ -34,13 +26,15 @@ namespace ConsentSyncCore.Services.Configuration
                 WebDriverWaitSeconds = config.GetValue<int>("PhisAutomation:Timing:WebDriverWaitSeconds", 10),
                 DelayBetweenSearchesMs = config.GetValue<int>("PhisAutomation:Timing:DelayBetweenSearchesMs", 1000),
                 PageLoadDelayMs = config.GetValue<int>("PhisAutomation:Timing:PageLoadDelayMs", 2000),
-                AjaxWaitMs = config.GetValue<int>("PhisAutomation:Timing:AjaxWaitMs", 1000)
+                AjaxWaitMs = config.GetValue<int>("PhisAutomation:Timing:AjaxWaitMs", 1000),
+
+                // ✅ How many records to process per run before stopping for user review.
+                // Set to 0 to process everything in one run.
+                BatchSize = config.GetValue<int>("PhisAutomation:BatchSize", 60)
             };
         }
 
-        /// <summary>
-        /// Get PHIS column headers configuration
-        /// </summary>
+        /// <summary>Get PHIS column headers configuration.</summary>
         public static PhisColumnHeaders GetPhisColumnHeaders()
         {
             var config = GetConfiguration();
@@ -54,9 +48,7 @@ namespace ConsentSyncCore.Services.Configuration
             };
         }
 
-        /// <summary>
-        /// Get Fuzzy Matching configuration
-        /// </summary>
+        /// <summary>Get Fuzzy Matching configuration.</summary>
         public static FuzzyMatchingConfig GetFuzzyMatchingConfig()
         {
             var config = GetConfiguration();
@@ -71,17 +63,12 @@ namespace ConsentSyncCore.Services.Configuration
                 IgnoreHyphensInComparison = config.GetValue<bool>("PhisAutomation:FuzzyMatching:IgnoreHyphensInComparison", true),
                 IgnoreSpacesInComparison = config.GetValue<bool>("PhisAutomation:FuzzyMatching:IgnoreSpacesInComparison", true),
                 TreatCompoundNamesAsPartialMatch = config.GetValue<bool>("PhisAutomation:FuzzyMatching:TreatCompoundNamesAsPartialMatch", true),
-
-                // ✅ ADD THESE TWO LINES - they're missing!
                 TreatSpaceSeparatedNamesAsCompound = config.GetValue<bool>("PhisAutomation:FuzzyMatching:TreatSpaceSeparatedNamesAsCompound", true),
                 CompoundNameMatchScore = config.GetValue<double>("PhisAutomation:FuzzyMatching:CompoundNameMatchScore", 95.0),
                 MinimumCompoundMatchRatio = config.GetValue<double>("PhisAutomation:FuzzyMatching:MinimumCompoundMatchRatio", 0.5),
-
                 UseMedicareNumberAsConfirmation = config.GetValue<bool>("PhisAutomation:FuzzyMatching:UseMedicareNumberAsConfirmation", true),
                 MedicareNumberBoostScore = config.GetValue<double>("PhisAutomation:FuzzyMatching:MedicareNumberBoostScore", 20.0)
             };
         }
-
-
     }
 }

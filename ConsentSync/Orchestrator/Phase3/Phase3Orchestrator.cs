@@ -62,16 +62,34 @@ namespace Orchestrator.Phase3
                     return result;
                 }
 
+
                 // Step 2: Filter records to process (skip already successful)
                 LoggerService.LogInformation("\n📋 Step 2: Filtering records to process...");
-                var recordsToProcess = uploadRecords
+
+                var pending = uploadRecords
                     .Where(r => !string.IsNullOrWhiteSpace(r.ClientID) &&
                                 r.VerifStatus != UploadVerificationStatus.Success)
                     .ToList();
 
-                int alreadyVerified = uploadRecords.Count - recordsToProcess.Count;
-                LoggerService.LogInformation($"   ✅ To process  : {recordsToProcess.Count}");
-                LoggerService.LogInformation($"   ⏭️  Already done: {alreadyVerified}");
+                int alreadyVerified = uploadRecords.Count - pending.Count;
+
+                // ── Batch limit ───────────────────────────────────────────────
+                var phisConfig = ConfigurationService.GetPhisConfig();
+                int batchSize = phisConfig.BatchSize > 0 ? phisConfig.BatchSize : int.MaxValue;
+                var recordsToProcess = pending.Take(batchSize).ToList();
+                bool batchTruncated = recordsToProcess.Count < pending.Count;
+
+                LoggerService.LogInformation($"   ✅ Pending         : {pending.Count}");
+                LoggerService.LogInformation($"   ⏭️  Already done    : {alreadyVerified}");
+
+                if (batchTruncated)
+                {
+                    LoggerService.LogInformation(
+                        $"   ⚙️  Batch mode      : processing {recordsToProcess.Count} of {pending.Count} " +
+                        $"(BatchSize = {phisConfig.BatchSize})");
+                    LoggerService.LogInformation(
+                        $"   ℹ️  Re-run Phase 3 to continue with the next batch.");
+                }
 
                 if (recordsToProcess.Count == 0)
                 {
@@ -165,6 +183,17 @@ namespace Orchestrator.Phase3
 
                     await Task.Delay(_phase3Config.Upload.DelayBetweenUploadsMs);
                 }
+
+                // Batch-complete notic
+                if (batchTruncated)
+                {
+                    LoggerService.LogInformation($"⏸️  Batch of {recordsToProcess.Count} done. {pending.Count - recordsToProcess.Count} remaining — re-run Phase 3 to continue.");
+                    result.BatchLimitReached = true;
+                }
+
+                // Step 5: Display summary
+                DisplaySummary(result, successCount, skipCount, failureCount,
+                    uploadRecords.Count, alreadyVerified);
 
                 DisplaySummary(result, successCount, skipCount, failureCount,
                     uploadRecords.Count, alreadyVerified);

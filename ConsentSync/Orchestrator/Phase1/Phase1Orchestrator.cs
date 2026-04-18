@@ -251,67 +251,79 @@ namespace Orchestrator.Phase1
         /// </summary>
         private async Task ProcessStudentsAsync(List<StudentRecord> students, Phase1Result result)
         {
-            // Estimate completion time
-            double estimatedMinutes = (students.Count * _phisConfig.DelayBetweenSearchesMs) / 60000.0;
-             LoggerService.LogInformation($"\n⏱️  Estimated processing time: {estimatedMinutes:F1} minutes");
+            // ── Batch limit ───────────────────────────────────────────────────
+            // Process at most BatchSize records per run so the user can verify
+            // results before continuing. 0 = unlimited (process all).
+            int batchSize = _phisConfig.BatchSize > 0 ? _phisConfig.BatchSize : int.MaxValue;
+            var batch = students.Take(batchSize).ToList();
+            bool isTruncated = batch.Count < students.Count;
+
+            if (isTruncated)
+            {
+                LoggerService.LogInformation(
+                    $"\n⚙️  Batch mode: processing {batch.Count} of {students.Count} " +
+                    $"remaining record(s) (BatchSize = {_phisConfig.BatchSize})");
+                LoggerService.LogInformation(
+                    $"   ℹ️  Re-run Phase 1 to continue with the next batch.");
+            }
+
+            // Estimate completion time for this batch
+            double estimatedMinutes = (batch.Count * _phisConfig.DelayBetweenSearchesMs) / 60_000.0;
+            LoggerService.LogInformation($"\n⏱️  Estimated time for this batch: {estimatedMinutes:F1} minute(s)");
 
             if (estimatedMinutes > _phisConfig.SessionTimeoutMinutes && !_phisConfig.SessionRefreshEnabled)
-            {
-                 LoggerService.LogInformation($"   ⚠️  WARNING: May exceed session timeout ({_phisConfig.SessionTimeoutMinutes} min)");
-                 LoggerService.LogInformation($"   💡 Consider enabling SessionRefreshEnabled in appsettings.json");
-            }
+                LoggerService.LogInformation($"   ⚠️  May exceed session timeout — consider enabling SessionRefreshEnabled");
             else if (_phisConfig.SessionRefreshEnabled && estimatedMinutes > _phisConfig.SessionTimeoutMinutes)
-            {
-                 LoggerService.LogInformation($"   ✅ Auto-refresh enabled - session will be kept alive");
-            }
+                LoggerService.LogInformation($"   ✅ Auto-refresh enabled — session will be kept alive");
 
-             LoggerService.LogInformation($"\n💡 TIP: Press Ctrl+C to save progress and exit gracefully\n");
+            LoggerService.LogInformation($"\n💡 TIP: Press Ctrl+C to save progress and exit gracefully\n");
 
-            for (int i = 0; i < students.Count; i++)
+            for (int i = 0; i < batch.Count; i++)
             {
                 if (_shutdownRequested)
                 {
-                     LoggerService.LogInformation("\n⚠️  Shutdown requested - saving progress...");
+                    LoggerService.LogInformation("\n⚠️  Shutdown requested — saving progress...");
                     break;
                 }
 
-                var student = students[i];
+                var student = batch[i];
 
-                // Display session status every 10 records
+                // Session status every 10 records
                 if (i > 0 && i % 10 == 0)
-                {
                     DisplaySessionStatus();
-                }
 
-                 LoggerService.LogInformation($"\n[{i + 1}/{students.Count}] Processing: {student.FirstName} {student.LastName}");
+                LoggerService.LogInformation(
+                    $"\n[{i + 1}/{batch.Count}] Processing: {student.FirstName} {student.LastName}");
 
                 try
                 {
-                    // Search for client
                     await ProcessSingleStudentAsync(student, result);
 
-                    // Save progress periodically
+                    // Periodic save
                     if ((i + 1) % _phase1Config.SaveProgressEveryNRecords == 0)
                     {
-                         LoggerService.LogInformation($"\n💾 Saving progress ({i + 1}/{students.Count} processed)...");
+                        LoggerService.LogInformation($"\n💾 Saving progress ({i + 1}/{batch.Count} processed)...");
                         _csvRepo.SaveAll(_currentStudentList!);
                     }
 
-                    // Delay between searches
-                    if (i < students.Count - 1)
-                    {
+                    if (i < batch.Count - 1)
                         await Task.Delay(_phisConfig.DelayBetweenSearchesMs);
-                    }
                 }
                 catch (Exception ex)
                 {
-                     LoggerService.LogInformation($"   ❌ Error: {ex.Message}");
+                    LoggerService.LogInformation($"   ❌ Error: {ex.Message}");
                     student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
                     result.ErrorCount++;
                 }
             }
-        }
 
+            // ── Batch completion message ──────────────────────────────────────
+            if (isTruncated)
+            {
+                LoggerService.LogInformation($"⏸️  Batch of {batch.Count} done. {students.Count - batch.Count} remaining — re-run Phase 1 to continue.");
+                result.BatchLimitReached = true;
+            }
+        }
 
 
 

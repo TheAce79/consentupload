@@ -28,6 +28,15 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         public int DelayBetweenSearchesMs { get; set; }
         public int PageLoadDelayMs { get; set; }
         public int AjaxWaitMs { get; set; }
+
+
+        /// <summary>
+        /// Maximum number of records to process per run (Phase 1 search + Phase 3 upload).
+        /// Once the batch is exhausted the run stops cleanly so the user can verify
+        /// results before continuing. Set to 0 to disable batching (process all).
+        /// Default: 60.
+        /// </summary>
+        public int BatchSize { get; set; } = 60;
     }
 
 
