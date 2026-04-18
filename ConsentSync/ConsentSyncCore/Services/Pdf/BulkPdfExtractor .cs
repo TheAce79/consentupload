@@ -445,7 +445,9 @@ namespace ConsentSyncCore.Services.Pdf
                                 // NormalizeName() strips ALL Unicode accents (é è ê à â ù û î ô ç ë ï ü œ æ …)
                                 string normLast = NormalizeName(lastName);
                                 string normFirst = NormalizeName(firstName);
-                                string normKey2 = $"_{normLast}_{normFirst}_consent".ToLowerInvariant();
+                                
+                                // ✅ Use ConsentSuffix from config instead of hardcoded "_consent"
+                                string normKey2 = $"_{normLast}_{normFirst}_{_bulkConfig.ConsentSuffix}".ToLowerInvariant();
 
                                 // Fast path: search the in-memory list
                                 var firstCopyPath = result.ExtractedFiles.FirstOrDefault(f =>
@@ -848,12 +850,12 @@ namespace ConsentSyncCore.Services.Pdf
         /// </summary>
         private string FormatFileName(int id, string lastName, string firstName, int? duplicateSuffix = null)
         {
-            string baseName = $"{id}_{lastName}_{firstName}_consent";
+            // ✅ Use ConsentSuffix from config instead of hardcoded "consent"
+            string suffix = _bulkConfig.ConsentSuffix;
 
-            if (duplicateSuffix.HasValue)
-            {
-                baseName = $"{id}_{lastName}_{firstName}_{duplicateSuffix}_consent";
-            }
+            string baseName = duplicateSuffix.HasValue
+                ? $"{id}_{lastName}_{firstName}_{duplicateSuffix}_{suffix}"
+                : $"{id}_{lastName}_{firstName}_{suffix}";
 
             return MakeSafeFileName(baseName + ".pdf");
         }

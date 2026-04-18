@@ -14,7 +14,8 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
     ///   3_Output_Ready
     ///   4 FileRose Extraction/
     ///     ├── 1 Scan File Rose/
-    ///     └── 2_Output_Ready_FileRose/
+    ///     ├── 2_Output_Ready_FileRose/
+    ///     └── 3_Error_FileRose_Extraction/
     ///   5_Duplicate
     ///   6_Error
     ///   7_Archive/
@@ -43,14 +44,24 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         public string FileRoseScanSubFolder { get; set; } = "1 Scan File Rose";
         public string FileRoseOutputReadySubFolder { get; set; } = "2_Output_Ready_FileRose";
 
+        /// <summary>
+        /// Folder for FileRose files that could not be matched (wrong/invalid ClientId filename).
+        /// User manually corrects files here then re-runs.
+        /// </summary>
+        public string FileRoseErrorSubFolder { get; set; } = "3_Error_FileRose_Extraction";
+
+        // File naming suffixes
+        /// <summary>Suffix for FileRose renamed output: {ClientId}_{RoseSuffix}_{SchoolYear}.pdf</summary>
+        public string RoseSuffix { get; set; } = "suiviscolaire";
+
+        /// <summary>Suffix for consent renamed output: {ClientId}_{ConsentSuffix}{VaccineType}_{SchoolYear}.pdf</summary>
+        public string ConsentSuffix { get; set; } = "consent";
+
         // Processing settings
         public int PagesPerConsent { get; set; } = 1;
         public int StartPage { get; set; } = 1;
         public bool AutoDetectNames { get; set; } = true;
-
-        // Naming format: {ID}_{LastName}_{FirstName}_consent.pdf
         public string NamingFormat { get; set; } = "{ID}_{LastName}_{FirstName}_consent";
-
         public bool OverwriteExisting { get; set; } = false;
         public bool MoveToArchiveAfterProcessing { get; set; } = true;
         public bool MoveErrorPdfsToErrorFolder { get; set; } = true;
@@ -60,10 +71,11 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         public string GetInputScannedPath() => Path.Combine(BasePdfPath, InputScannedFolder);
         public string GetOutputReadyPath() => Path.Combine(BasePdfPath, OutputReadyFolder);
 
-        // FileRose parent + its two subfolders
+        // FileRose parent + its three subfolders
         public string GetFileRosePath() => Path.Combine(BasePdfPath, FileRoseFolder);
         public string GetFileRoseScanPath() => Path.Combine(GetFileRosePath(), FileRoseScanSubFolder);
         public string GetFileRoseOutputReadyPath() => Path.Combine(GetFileRosePath(), FileRoseOutputReadySubFolder);
+        public string GetFileRoseErrorPath() => Path.Combine(GetFileRosePath(), FileRoseErrorSubFolder);
 
         public string GetDuplicateClientPath() => Path.Combine(BasePdfPath, DuplicateClientFolder);
         public string GetErrorPath() => Path.Combine(BasePdfPath, ErrorFolder);
@@ -72,5 +84,4 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         public string GetArchiveScannedPath() => Path.Combine(GetArchivePath(), "Scanned");
         public string GetArchiveFileRosePath() => Path.Combine(GetArchivePath(), "FileRose");
     }
-
 }

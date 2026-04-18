@@ -11,9 +11,13 @@ namespace ConsentSyncCore.Models
     /// Validation record for Pre-Phase 3 manual review
     /// Contains all student data + PDF validation flags
     /// </summary>
+    /// <summary>
+    /// Validation record for Pre-Phase 3 manual review.
+    /// Contains all student data + PDF validation flags.
+    /// </summary>
     public class ValidationRecord
     {
-        // ✅ All columns from StudentRecord (input CSV)
+        // ── Student fields (from input CSV) ───────────────────────────────────
         public string LastName { get; set; } = string.Empty;
         public string FirstName { get; set; } = string.Empty;
         public string School { get; set; } = string.Empty;
@@ -24,25 +28,36 @@ namespace ConsentSyncCore.Models
         public string Tdap { get; set; } = string.Empty;
         public string HPV { get; set; } = string.Empty;
         public string ClientId { get; set; } = string.Empty;
-        public bool IsFileRoseDefault { get; set; }
         public int ClientIdStatus { get; set; }
         public string BestMatch { get; set; } = string.Empty;
 
-        // ✅ NEW: Validation fields for Pre-Phase 3
+        // ── FileRose flags ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// True when a {ClientId}.pdf was found in <c>1 Scan File Rose</c>
+        /// (set by <c>--check-filerose</c> / <see cref="FileRoseVerificationService"/>).
+        /// </summary>
+        public bool IsFileRoseDefault { get; set; }
+
+        /// <summary>
+        /// True when the FileRose PDF has been successfully renamed and copied
+        /// to <c>2_Output_Ready_FileRose</c>
+        /// (set by <c>--extract-filerose</c> / <see cref="FileRoseExtractionService"/>).
+        /// </summary>
+        public bool IsFileRoseExtracted { get; set; }
+
+        // ── Consent PDF validation fields (Phase 2) ───────────────────────────
         public bool FileFound { get; set; } = false;
         public bool IsMatch { get; set; } = false;
         public string ExtractedName { get; set; } = string.Empty;
         public string NormalizedPDF { get; set; } = string.Empty;
         public string NormalizedCSV { get; set; } = string.Empty;
         public bool IsPdfSave { get; set; } = false;
-
-        // ✅ Additional helpful fields
         public double MatchScore { get; set; } = 0.0;
         public string ValidationNotes { get; set; } = string.Empty;
-
-        // ✅ Set by DuplicateMergeService after resolving duplicates
         public string MergedFromDuplicate { get; set; } = string.Empty;
     }
+
 
 
     /// <summary>
@@ -52,7 +67,7 @@ namespace ConsentSyncCore.Models
     {
         public ValidationRecordMap()
         {
-            // Original student fields
+            // Student fields
             Map(m => m.LastName).Name("Last Name");
             Map(m => m.FirstName).Name("First Name");
             Map(m => m.School).Name("School");
@@ -63,11 +78,14 @@ namespace ConsentSyncCore.Models
             Map(m => m.Tdap).Name("Tdap");
             Map(m => m.HPV).Name("HPV");
             Map(m => m.ClientId).Name("ClientId");
-            Map(m => m.IsFileRoseDefault).Name("IsFileRoseDefault");
             Map(m => m.ClientIdStatus).Name("ClientIdStatus");
             Map(m => m.BestMatch).Name("BestMatch");
 
-            // Validation fields
+            // FileRose flags
+            Map(m => m.IsFileRoseDefault).Name("IsFileRoseDefault");
+            Map(m => m.IsFileRoseExtracted).Name("IsFileRoseExtracted");
+
+            // Consent validation fields
             Map(m => m.FileFound).Name("FileFound");
             Map(m => m.IsMatch).Name("IsMatch");
             Map(m => m.ExtractedName).Name("ExtractedName");
@@ -78,6 +96,7 @@ namespace ConsentSyncCore.Models
             Map(m => m.ValidationNotes).Name("ValidationNotes");
             Map(m => m.MergedFromDuplicate).Name("MergedFromDuplicate");
         }
+
     }
 
 }

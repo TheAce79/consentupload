@@ -10,7 +10,6 @@ namespace ConsentSyncCore.Services.Configuration
 {
     public partial class ConfigurationService
     {
-
         /// <summary>
         /// Get Bulk PDF Extraction configuration with folder structure
         /// </summary>
@@ -33,6 +32,13 @@ namespace ConsentSyncCore.Services.Configuration
                 ErrorFolder = section.GetValue<string>("ErrorFolder") ?? "6_Error",
                 ArchiveFolder = section.GetValue<string>("ArchiveFolder") ?? "7_Archive",
 
+                FileRoseScanSubFolder = section.GetValue<string>("FileRoseScanSubFolder") ?? "1 Scan File Rose",
+                FileRoseOutputReadySubFolder = section.GetValue<string>("FileRoseOutputReadySubFolder") ?? "2_Output_Ready_FileRose",
+                FileRoseErrorSubFolder = section.GetValue<string>("FileRoseErrorSubFolder") ?? "3_Error_FileRose_Extraction",
+
+                RoseSuffix = section.GetValue<string>("FileNaming:RoseSuffix") ?? "suiviscolaire",
+                ConsentSuffix = section.GetValue<string>("FileNaming:ConsentSuffix") ?? "consent",
+
                 PagesPerConsent = section.GetValue<int>("PagesPerConsent", 1),
                 StartPage = section.GetValue<int>("StartPage", 1),
                 AutoDetectNames = section.GetValue<bool>("AutoDetectNames", true),
@@ -46,9 +52,5 @@ namespace ConsentSyncCore.Services.Configuration
 
             return bulkConfig;
         }
-
-
     }
-
-
 }
