@@ -2,6 +2,8 @@
 
 namespace ConsentSyncCore.Services
 {
+
+
     /// <summary>
     /// Creates ALL required folders on startup based on BaseDirectory + SchoolContext.
     /// Call once at the very beginning of Main() — before any phase runs.
@@ -45,21 +47,16 @@ namespace ConsentSyncCore.Services
             try
             {
                 var csv = ConfigurationService.GetCsvWorkspaceConfig();
-
                 CreateFolder(csv.GetConsentCsvPath(), "Csv › 1_Input Csv › 1 Consent Csv", errors);
                 CreateFolder(csv.GetProcessedCsvPath(), "Csv › 2_Output Csv › 1 Processed Csv", errors);
                 CreateFolder(csv.GetUploadCsvPath(), "Csv › 2_Output Csv › 2 Upload Csv", errors);
             }
-            catch (Exception ex)
-            {
-                errors.Add($"CsvWorkspace: {ex.Message}");
-            }
+            catch (Exception ex) { errors.Add($"CsvWorkspace: {ex.Message}"); }
 
-            // ── PDF workspace (BulkPdfExtraction) ─────────────────────────────
+            // ── PDF workspace ──────────────────────────────────────────────────
             try
             {
                 var pdf = ConfigurationService.GetBulkPdfExtractionConfig();
-
                 CreateFolder(pdf.GetInputBulkPath(), "Pdf › 1_Input_Bulk", errors);
                 CreateFolder(pdf.GetInputScannedPath(), "Pdf › 2_Input_Scanned", errors);
                 CreateFolder(pdf.GetOutputReadyPath(), "Pdf › 3_Output_Ready", errors);
@@ -71,35 +68,73 @@ namespace ConsentSyncCore.Services
                 CreateFolder(pdf.GetArchiveScannedPath(), "Pdf › 7_Archive › Scanned", errors);
                 CreateFolder(pdf.GetArchiveFileRosePath(), "Pdf › 7_Archive › FileRose", errors);
             }
-            catch (Exception ex)
-            {
-                errors.Add($"PdfWorkspace: {ex.Message}");
-            }
+            catch (Exception ex) { errors.Add($"PdfWorkspace: {ex.Message}"); }
 
             // ── Phis workspace ─────────────────────────────────────────────────
             try
             {
                 var phis = ConfigurationService.GetPhisWorkspaceConfig();
-
                 CreateFolder(phis.GetConsentUploadPath(), "Phis › 1_To_Upload › 1 Consent Upload", errors);
                 CreateFolder(phis.GetFileRoseUploadPath(), "Phis › 1_To_Upload › 2 File Rose Upload", errors);
                 CreateFolder(phis.GetErrorPath(), "Phis › 2_Error", errors);
             }
-            catch (Exception ex)
-            {
-                errors.Add($"PhisWorkspace: {ex.Message}");
-            }
+            catch (Exception ex) { errors.Add($"PhisWorkspace: {ex.Message}"); }
 
             // ── Summary ────────────────────────────────────────────────────────
             if (errors.Count == 0)
-            {
                 LoggerService.LogInformation("   ✅ All workspace folders ready\n");
-            }
             else
             {
                 LoggerService.LogWarning($"   ⚠️  {errors.Count} folder(s) could not be created:");
                 foreach (var e in errors)
                     LoggerService.LogWarning($"      - {e}");
+            }
+        }
+
+        /// <summary>
+        /// Validates that a base directory exists (creating it if needed)
+        /// and that the app has write permission to it.
+        /// Returns null on success, or an error message string on failure.
+        /// </summary>
+        public static string? ValidateBaseDirectory(string path)
+        {
+            // 1. Try to create the directory if it doesn't exist yet
+            try
+            {
+                if (!Directory.Exists(path))
+                    Directory.CreateDirectory(path);
+            }
+            catch (Exception ex)
+            {
+                return $"Cannot create directory:\n{ex.Message}";
+            }
+
+            // 2. Check write permission by creating + deleting a temp file
+            if (!HasWritePermission(path))
+                return $"No write permission to:\n{path}\n\nPlease choose a different folder or run as administrator.";
+
+            return null; // ✅ all good
+        }
+
+        /// <summary>
+        /// Checks write access by creating and immediately deleting a temp file.
+        /// Returns true if the app can write to the directory.
+        /// </summary>
+        private static bool HasWritePermission(string path)
+        {
+            var testFile = Path.Combine(path, $".write_test_{Guid.NewGuid():N}.tmp");
+            try
+            {
+                // Create a temp file — proves write access
+                File.WriteAllText(testFile, "write_test");
+                File.Delete(testFile);
+                return true;
+            }
+            catch
+            {
+                // Clean up silently if the file was partially created
+                try { if (File.Exists(testFile)) File.Delete(testFile); } catch { }
+                return false;
             }
         }
 

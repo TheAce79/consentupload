@@ -1,0 +1,33 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net9.0-windows</TargetFramework>
+		<Nullable>enable</Nullable>
+		<UseWindowsForms>true</UseWindowsForms>
+		<ImplicitUsings>enable</ImplicitUsings>
+
+		<!-- ✅ Self-contained single exe — bundles .NET runtime -->
+		<SelfContained>true</SelfContained>
+		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
+		<PublishSingleFile>true</PublishSingleFile>
+		<PublishTrimmed>false</PublishTrimmed>
+	</PropertyGroup>
+
+	<!-- ✅ Copy appsettings.json from ConsentSyncCore next to the exe
+       ExcludeFromSingleFile = true  →  NOT embedded, stays editable on disk -->
+	<ItemGroup>
+		<None Include="..\ConsentSyncCore\appsettings.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+			<Link>appsettings.json</Link>
+		</None>
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\ConsentSyncCore\ConsentSyncCore.csproj" />
+		<ProjectReference Include="..\CsvProcessing\CsvProcessing.csproj" />
+		<ProjectReference Include="..\Orchestrator\Orchestrator.csproj" />
+	</ItemGroup>
+
+</Project>
