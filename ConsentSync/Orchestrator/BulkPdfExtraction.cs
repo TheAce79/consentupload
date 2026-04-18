@@ -87,10 +87,22 @@ namespace Orchestrator
                      LoggerService.LogInformation("   ✅ Folder structure created/verified");
                      LoggerService.LogInformation($"   📂 Base path: {_bulkConfig.BasePdfPath}");
 
-                     LoggerService.LogInformation("\n📋 Step 4: Processing PDFs...");
+
+
+                    LoggerService.LogInformation("\n📋 Step 4: Processing PDFs...");
                     result = extractor.ProcessAllPdfs();
 
+                    // ✅ Log accurate summary immediately after extraction
+                    int totalIncludingDupes = result.TotalExtracted + result.DuplicatesFound;
+                    LoggerService.LogInformation($"\n📊 Extraction Summary:");
+                    LoggerService.LogInformation($"   Total files extracted    : {totalIncludingDupes}");
+                    LoggerService.LogInformation($"   ├── Unique files         : {result.TotalExtracted}");
+                    LoggerService.LogInformation($"   └── Duplicate copies     : {result.DuplicatesFound}");
+                    if (result.FailedExtractions > 0)
+                        LoggerService.LogInformation($"   ❌ Failed               : {result.FailedExtractions}");
+
                     return result;
+
                 }
                 catch (Exception ex)
                 {
@@ -168,45 +180,40 @@ namespace Orchestrator
             /// <summary>
             /// Display extraction summary
             /// </summary>
+            /// <summary>
+            /// Display extraction summary
+            /// </summary>
             private void DisplaySummary(BulkExtractionResult result)
             {
-                 LoggerService.LogInformation("\n" + new string('═', 60));
-                 LoggerService.LogInformation("📊 BULK PDF EXTRACTION COMPLETE - Final Summary");
-                 LoggerService.LogInformation(new string('═', 60));
-                 LoggerService.LogInformation($"Total PDFs extracted: {result.TotalExtracted}");
-                 LoggerService.LogInformation($"Failed extractions: {result.FailedExtractions}");
+                int totalIncludingDuplicates = result.TotalExtracted + result.DuplicatesFound;
 
-                if (result.DuplicatesFound > 0)
-                {
-                     LoggerService.LogInformation($"⚠️  Duplicates detected: {result.DuplicatesFound}");
-                }
-
-                 LoggerService.LogInformation($"Status: {(result.Success ? "✅ Success" : "⚠️  Completed with errors")}");
-                 LoggerService.LogInformation(new string('═', 60));
+                LoggerService.LogInformation("\n" + new string('═', 60));
+                LoggerService.LogInformation("📊 BULK PDF EXTRACTION COMPLETE - Final Summary");
+                LoggerService.LogInformation(new string('═', 60));
+                LoggerService.LogInformation($"   Total files extracted    : {totalIncludingDuplicates}");
+                LoggerService.LogInformation($"   ├── Unique files         : {result.TotalExtracted}");
+                LoggerService.LogInformation($"   └── Duplicate copies     : {result.DuplicatesFound}");
+                LoggerService.LogInformation($"   Failed extractions       : {result.FailedExtractions}");
+                if (result.UnknownNameCount > 0)
+                    LoggerService.LogInformation($"   ⚠️  Unknown names        : {result.UnknownNameCount}");
+                LoggerService.LogInformation($"   Status: {(result.Success ? "✅ Success" : "⚠️  Completed with errors")}");
+                LoggerService.LogInformation(new string('═', 60));
 
                 if (result.ErrorMessages.Count > 0)
                 {
-                     LoggerService.LogInformation($"\n⚠️  Errors ({result.ErrorMessages.Count}):");
+                    LoggerService.LogInformation($"\n⚠️  Errors ({result.ErrorMessages.Count}):");
                     foreach (var error in result.ErrorMessages.Take(10))
-                    {
-                         LoggerService.LogInformation($"   - {error}");
-                    }
+                        LoggerService.LogInformation($"   - {error}");
                     if (result.ErrorMessages.Count > 10)
-                    {
-                         LoggerService.LogInformation($"   ... and {result.ErrorMessages.Count - 10} more");
-                    }
+                        LoggerService.LogInformation($"   ... and {result.ErrorMessages.Count - 10} more");
                 }
 
-                 LoggerService.LogInformation($"\n📁 Output location:");
-                 LoggerService.LogInformation($"   {_bulkConfig.GetOutputReadyPath()}");
+                LoggerService.LogInformation($"\n📁 Output location:");
+                LoggerService.LogInformation($"   {_bulkConfig.GetOutputReadyPath()}");
 
                 if (result.Success)
-                {
-                     LoggerService.LogInformation($"\n✅ Ready to proceed with Phase 2 processing!");
-                }
+                    LoggerService.LogInformation($"\n✅ Ready to proceed with Phase 2 processing!");
             }
-
-
 
             private void DisplayFolderStructure()
             {

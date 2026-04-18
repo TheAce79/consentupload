@@ -439,14 +439,12 @@ namespace ConsentSyncCore.Services.Pdf
                             File.Move(tempFilePath, duplicatePath, overwrite: true);
                             Console.WriteLine($"   📄 Moved duplicate → {duplicateFileName}");
 
+
                             // ── On the SECOND occurrence: pull the FIRST copy out of 3_Output_Ready ──
                             if (seenNames[nameKey] == 1)
                             {
-                                // NormalizeName() strips ALL Unicode accents (é è ê à â ù û î ô ç ë ï ü œ æ …)
                                 string normLast = NormalizeName(lastName);
                                 string normFirst = NormalizeName(firstName);
-                                
-                                // ✅ Use ConsentSuffix from config instead of hardcoded "_consent"
                                 string normKey2 = $"_{normLast}_{normFirst}_{_bulkConfig.ConsentSuffix}".ToLowerInvariant();
 
                                 // Fast path: search the in-memory list
@@ -476,6 +474,9 @@ namespace ConsentSyncCore.Services.Pdf
                                     result.ExtractedFiles.Remove(firstCopyPath);
                                     result.TotalExtracted--;
 
+                                    // ✅ FIX: The first copy is now also in 5_Duplicate — count it
+                                    result.DuplicatesFound++;
+
                                     Console.WriteLine($"   ♻️  Moved original copy → {firstDestName}");
                                 }
                                 else
@@ -483,7 +484,7 @@ namespace ConsentSyncCore.Services.Pdf
                                     Console.WriteLine($"   ⚠️  Could not locate original copy in 3_Output_Ready.");
                                 }
 
-                                // ── HOW_TO_MERGE.txt (written once when the folder is first created) ──
+                                // HOW_TO_MERGE.txt (written once when the folder is first created)
                                 string mergeReadme = Path.Combine(duplicateSubFolder, "HOW_TO_MERGE.txt");
                                 if (!File.Exists(mergeReadme))
                                 {
@@ -503,6 +504,9 @@ namespace ConsentSyncCore.Services.Pdf
                                         $"Files here will NOT be uploaded to PHIS automatically.\n");
                                 }
                             }
+
+
+
 
                             result.DuplicatesFound++;
                             result.ErrorMessages.Add(
@@ -531,6 +535,8 @@ namespace ConsentSyncCore.Services.Pdf
                         Console.WriteLine($"   ✅ [{pageIndex}] {outputFileName}");
 
                         pageIndex++;
+
+
                     }
                     catch (Exception ex)
                     {
@@ -776,66 +782,46 @@ namespace ConsentSyncCore.Services.Pdf
         }
 
 
+
         private void DisplayProcessingSummary(BulkExtractionResult result)
         {
+            // ✅ Grand total = unique (3_Output_Ready) + all duplicates (5_Duplicate)
+            int grandTotal = result.TotalExtracted + result.DuplicatesFound;
+
             Console.WriteLine("\n" + new string('═', 60));
             Console.WriteLine("📊 PROCESSING SUMMARY");
             Console.WriteLine(new string('═', 60));
-            Console.WriteLine($"Total PDFs Processed:    {result.TotalExtracted}");
-            Console.WriteLine($"Unknown Names:           {result.UnknownNameCount} ⚠️");
-            Console.WriteLine($"Duplicates Detected:     {result.DuplicatesFound} ⚠️");
-            Console.WriteLine($"Failed:                  {result.FailedExtractions}");
-            Console.WriteLine($"Status:                  {(result.Success ? "✅ Success" : "⚠️ Needs Review")}");
+            Console.WriteLine($"   Total pages processed    : {grandTotal}");
+            Console.WriteLine($"   ├── 3_Output_Ready       : {result.TotalExtracted}  (unique, ready to upload)");
+            Console.WriteLine($"   └── 5_Duplicate          : {result.DuplicatesFound}  (all copies, needs review)");
+            if (result.UnknownNameCount > 0)
+                Console.WriteLine($"   4_Error (unknown names)  : {result.UnknownNameCount}  ⚠️  manual review required");
+            if (result.FailedExtractions > 0)
+                Console.WriteLine($"   Failed                   : {result.FailedExtractions}  ❌");
+            Console.WriteLine($"   Status                   : {(result.Success ? "✅ Success" : "⚠️  Needs Review")}");
             Console.WriteLine(new string('═', 60));
 
             Console.WriteLine($"\n📁 Output Locations:");
-            Console.WriteLine($"   3_Output_Ready: {_bulkConfig.GetOutputReadyPath()}");
-            Console.WriteLine($"   4_Error:        {_bulkConfig.GetErrorPath()}");
+            Console.WriteLine($"   3_Output_Ready : {_bulkConfig.GetOutputReadyPath()}");
+            Console.WriteLine($"   5_Duplicate    : {_bulkConfig.GetDuplicateClientPath()}");
+            Console.WriteLine($"   4_Error        : {_bulkConfig.GetErrorPath()}");
 
             if (result.UnknownNameCount > 0 || result.DuplicatesFound > 0)
             {
                 Console.WriteLine($"\n⚠️  MANUAL REVIEW REQUIRED:");
 
                 if (result.UnknownNameCount > 0)
-                {
-                    Console.WriteLine($"   • {result.UnknownNameCount} file(s) with unknown names in 4_Error");
-                    Console.WriteLine($"     → Identify students and rename manually");
-                }
+                    Console.WriteLine($"   • {result.UnknownNameCount} file(s) with unknown names in 4_Error → identify and rename");
 
                 if (result.DuplicatesFound > 0)
-                {
-                    Console.WriteLine($"   • {result.DuplicatesFound} duplicate name(s) in 4_Error");
-                    Console.WriteLine($"     → Verify if same student or add identifier");
-                }
-
-                Console.WriteLine($"\n   📋 Check error log files (*_ERROR_*.txt) for details");
-                Console.WriteLine($"   ✅ After fixing, move corrected files to 3_Output_Ready");
-            }
-
-            if (result.ErrorMessages.Count > 0)
-            {
-                Console.WriteLine($"\n⚠️  Errors ({result.ErrorMessages.Count}):");
-                foreach (var error in result.ErrorMessages.Take(10))
-                {
-                    Console.WriteLine($"   - {error}");
-                }
-                if (result.ErrorMessages.Count > 10)
-                {
-                    Console.WriteLine($"   ... and {result.ErrorMessages.Count - 10} more");
-                }
+                    Console.WriteLine($"   • {result.DuplicatesFound} file(s) in 5_Duplicate → review HOW_TO_MERGE.txt in each subfolder");
             }
 
             if (result.Success)
-            {
-                Console.WriteLine($"\n✅ All PDFs successfully processed!");
-                Console.WriteLine($"   Ready for Phase 3! Use files from 3_Output_Ready");
-            }
+                Console.WriteLine($"\n✅ All pages processed — ready for Phase 3!");
             else
-            {
-                Console.WriteLine($"\n⚠️  Review required before proceeding to Phase 3");
-            }
+                Console.WriteLine($"\n⚠️  Review required before proceeding to Phase 3.");
         }
-
 
 
         #endregion  File Management

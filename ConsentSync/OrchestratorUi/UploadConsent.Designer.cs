@@ -1,6 +1,6 @@
 ﻿namespace OrchestratorUi
 {
-    partial class Form1
+    partial class UploadConsent
     {
         private System.ComponentModel.IContainer components = null;
 
@@ -29,12 +29,14 @@
             btn_PortableChrome = new Button();
             rtxt_Log = new RichTextBox();
             folderBrowserDialog1 = new FolderBrowserDialog();
-
             gb_Normalise = new GroupBox();
             btn_ExtractBulk = new Button();
             btn_ProcessCsv = new Button();
-
+            gb_Phase1 = new GroupBox();
+            bt_SearchClientId = new Button();
             grpConfig.SuspendLayout();
+            gb_Normalise.SuspendLayout();
+            gb_Phase1.SuspendLayout();
             SuspendLayout();
             // 
             // grpConfig
@@ -52,7 +54,7 @@
             grpConfig.Controls.Add(btn_PortableChrome);
             grpConfig.Location = new Point(12, 12);
             grpConfig.Name = "grpConfig";
-            grpConfig.Size = new Size(459, 242);
+            grpConfig.Size = new Size(440, 242);
             grpConfig.TabIndex = 0;
             grpConfig.TabStop = false;
             grpConfig.Text = "Configuration";
@@ -167,25 +169,27 @@
             rtxt_Log.BackColor = Color.Black;
             rtxt_Log.Font = new Font("Consolas", 9F);
             rtxt_Log.ForeColor = Color.LimeGreen;
-            rtxt_Log.Location = new Point(12, 330);
+            rtxt_Log.Location = new Point(12, 305);
             rtxt_Log.Name = "rtxt_Log";
             rtxt_Log.ReadOnly = true;
             rtxt_Log.ScrollBars = RichTextBoxScrollBars.Vertical;
-            rtxt_Log.Size = new Size(763, 185);
+            rtxt_Log.Size = new Size(1007, 272);
             rtxt_Log.TabIndex = 1;
             rtxt_Log.Text = "";
-
-            // ── gb_Normalise ──────────────────────────────────────────────
+            // 
+            // gb_Normalise
+            // 
             gb_Normalise.Controls.Add(btn_ExtractBulk);
             gb_Normalise.Controls.Add(btn_ProcessCsv);
-            gb_Normalise.Location = new Point(500, 17);
+            gb_Normalise.Location = new Point(468, 26);
             gb_Normalise.Name = "gb_Normalise";
             gb_Normalise.Size = new Size(280, 120);
             gb_Normalise.TabIndex = 2;
             gb_Normalise.TabStop = false;
             gb_Normalise.Text = "Phase 0 — Pre-Processing";
-
-            // ── btn_ExtractBulk ───────────────────────────────────────────
+            // 
+            // btn_ExtractBulk
+            // 
             btn_ExtractBulk.BackColor = Color.DarkOrange;
             btn_ExtractBulk.FlatStyle = FlatStyle.Flat;
             btn_ExtractBulk.ForeColor = Color.White;
@@ -196,8 +200,9 @@
             btn_ExtractBulk.Text = "📄 Extract Bulk PDF";
             btn_ExtractBulk.UseVisualStyleBackColor = false;
             btn_ExtractBulk.Click += btn_ExtractBulk_Click;
-
-            // ── btn_ProcessCsv ────────────────────────────────────────────
+            // 
+            // btn_ProcessCsv
+            // 
             btn_ProcessCsv.BackColor = Color.Teal;
             btn_ProcessCsv.FlatStyle = FlatStyle.Flat;
             btn_ProcessCsv.ForeColor = Color.White;
@@ -208,21 +213,47 @@
             btn_ProcessCsv.Text = "📋 Process CSV";
             btn_ProcessCsv.UseVisualStyleBackColor = false;
             btn_ProcessCsv.Click += btn_ProcessCsv_Click;
-
-
             // 
-            // Form1
+            // gb_Phase1
+            // 
+            gb_Phase1.Controls.Add(bt_SearchClientId);
+            gb_Phase1.Location = new Point(765, 26);
+            gb_Phase1.Name = "gb_Phase1";
+            gb_Phase1.Size = new Size(254, 120);
+            gb_Phase1.TabIndex = 3;
+            gb_Phase1.TabStop = false;
+            gb_Phase1.Text = "Phase 1 — PHIS Client ID Search";
+            // 
+            // bt_SearchClientId
+            // 
+            bt_SearchClientId.BackColor = Color.FromArgb(0, 90, 160);
+            bt_SearchClientId.FlatAppearance.BorderColor = Color.FromArgb(0, 60, 120);
+            bt_SearchClientId.FlatStyle = FlatStyle.Flat;
+            bt_SearchClientId.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            bt_SearchClientId.ForeColor = Color.White;
+            bt_SearchClientId.Location = new Point(12, 30);
+            bt_SearchClientId.Name = "bt_SearchClientId";
+            bt_SearchClientId.Size = new Size(228, 38);
+            bt_SearchClientId.TabIndex = 0;
+            bt_SearchClientId.Text = "🔍 Search Client IDs on PHIS";
+            bt_SearchClientId.UseVisualStyleBackColor = false;
+            bt_SearchClientId.Click += bt_SearchClientId_Click;
+            // 
+            // UploadConsent
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(803, 537);
+            ClientSize = new Size(1065, 589);
+            Controls.Add(gb_Phase1);
             Controls.Add(gb_Normalise);
             Controls.Add(grpConfig);
             Controls.Add(rtxt_Log);
-            Name = "Form1";
+            Name = "UploadConsent";
             Text = "ConsentSync";
             grpConfig.ResumeLayout(false);
             grpConfig.PerformLayout();
+            gb_Normalise.ResumeLayout(false);
+            gb_Phase1.ResumeLayout(false);
             ResumeLayout(false);
         }
 
@@ -246,5 +277,7 @@
 
         private Button btn_ExtractBulk;
         private Button btn_ProcessCsv;
+        private GroupBox gb_Phase1;
+        private Button bt_SearchClientId;
     }
 }
