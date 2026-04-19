@@ -758,8 +758,6 @@ namespace OrchestratorUi
         }
 
 
-
-        // ── Phase 2: Validate PDFs against student records ────────────
         // ── Phase 2: Validate PDFs against student records ────────────
         private async void bt_ValidatePdf_Click(object sender, EventArgs e)
         {
@@ -773,10 +771,6 @@ namespace OrchestratorUi
                     return;
 
                 var config = ConfigurationService.GetConfiguration();
-
-                // ✅ Use the SAME error path Phase 2 actually writes to (Phis\2_Error)
-                var phase2Config = ConfigurationService.GetPhase2Config();
-                var errorFolder = phase2Config.ErrorOutputDir;
 
                 LoggerService.LogInformation("\n" + new string('═', 60));
                 LoggerService.LogInformation("🔍 PHASE 2 — PDF Validation");
@@ -797,6 +791,11 @@ namespace OrchestratorUi
                         "Validation Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
+
+                // ✅ Use the exact session subfolder the orchestrator created (e.g. 6_Error\Error_20250419_143512)
+                // Falls back to the base 6_Error path if no errors occurred (sessionErrorDir is null)
+                var bulkPdfConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+                var errorFolder = phase2Result.SessionErrorDir ?? bulkPdfConfig.GetErrorPath();
 
                 LoggerService.LogInformation("\n" + new string('═', 60));
                 LoggerService.LogInformation("📊 VALIDATION SUMMARY");
@@ -844,9 +843,6 @@ namespace OrchestratorUi
                 bt_ValidatePdf.Text = "🔍 Validate PDFs Against Student Records";
             }
         }
-
-
-
 
 
 
