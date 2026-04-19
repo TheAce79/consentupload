@@ -60,19 +60,19 @@ namespace ConsentSyncCore.Services.Pdf
             // Skip "Scanned_" files
             if (fileName.StartsWith("Scanned_", StringComparison.OrdinalIgnoreCase))
             {
-                Console.WriteLine($"Skipping {fileName} (already scanned)");
+                 LoggerService.LogInformation($"Skipping {fileName} (already scanned)");
                 return ("Unknown", "Unknown", 0);
             }
 
             try
             {
-                Console.WriteLine($"\n--- Processing: {fileName} ---");
+                 LoggerService.LogInformation($"\n--- Processing: {fileName} ---");
 
                 using var document = PdfDocument.Open(pdfFilePath);
 
                 if (document.NumberOfPages < 1)
                 {
-                    Console.WriteLine("  No pages found in PDF");
+                     LoggerService.LogInformation("  No pages found in PDF");
                     return ("Unknown", "Unknown", 0);
                 }
 
@@ -80,7 +80,7 @@ namespace ConsentSyncCore.Services.Pdf
                 var words = page.GetWords().ToList();
                 int pageCount = document.NumberOfPages;
 
-                Console.WriteLine($"  Total words found via PdfPig: {words.Count}");
+                 LoggerService.LogInformation($"  Total words found via PdfPig: {words.Count}");
 
                 string? firstName = null;
                 string? lastName = null;
@@ -88,40 +88,40 @@ namespace ConsentSyncCore.Services.Pdf
                 // Try text extraction first (faster)
                 if (words.Count == 0)
                 {
-                    Console.WriteLine("  PDF is scanned - using OCR extraction...");
+                     LoggerService.LogInformation("  PDF is scanned - using OCR extraction...");
                     var ocrText = ExtractTextWithOCR(pdfFilePath, 1, fileName, debugOcr, debugFolder, config);
 
                     if (!string.IsNullOrEmpty(ocrText))
                     {
-                        Console.WriteLine($"  OCR extracted {ocrText.Length} characters");
+                         LoggerService.LogInformation($"  OCR extracted {ocrText.Length} characters");
 
                         if (debugOcr)
                         {
                             var debugPath = Path.Combine(debugFolder, $"OCR_DEBUG_{fileName}.txt");
                             File.WriteAllText(debugPath, ocrText);
-                            Console.WriteLine($"  OCR text saved to: {debugPath}");
+                             LoggerService.LogInformation($"  OCR text saved to: {debugPath}");
                         }
 
                         (firstName, lastName) = ExtractNamesFromOCRText(ocrText, config);
                     }
                     else
                     {
-                        Console.WriteLine("  OCR extraction failed or returned empty text");
+                         LoggerService.LogInformation("  OCR extraction failed or returned empty text");
                     }
                 }
                 else
                 {
-                    Console.WriteLine("  PDF has extractable text - using direct extraction");
+                     LoggerService.LogInformation("  PDF has extractable text - using direct extraction");
                     (firstName, lastName) = ExtractNamesFromWords(words, config);
                 }
 
-                Console.WriteLine($"  Final Result: {firstName ?? "Unknown"} {lastName ?? "Unknown"} | Pages: {pageCount}");
+                 LoggerService.LogInformation($"  Final Result: {firstName ?? "Unknown"} {lastName ?? "Unknown"} | Pages: {pageCount}");
 
                 return (firstName ?? "Unknown", lastName ?? "Unknown", pageCount);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"  ERROR processing {fileName}: {ex.Message}");
+                 LoggerService.LogInformation($"  ERROR processing {fileName}: {ex.Message}");
                 return ("Error", "Error", 0);
             }
         }
@@ -139,12 +139,12 @@ namespace ConsentSyncCore.Services.Pdf
 
             if (string.IsNullOrEmpty(sourceDir) || !Directory.Exists(sourceDir))
             {
-                Console.WriteLine("Source directory is invalid or doesn't exist.");
+                 LoggerService.LogInformation("Source directory is invalid or doesn't exist.");
                 return results;
             }
 
             var files = Directory.GetFiles(sourceDir, "*.pdf");
-            Console.WriteLine($"Found {files.Length} PDF files to process.\n");
+             LoggerService.LogInformation($"Found {files.Length} PDF files to process.\n");
 
             foreach (var filePath in files)
             {
@@ -158,7 +158,7 @@ namespace ConsentSyncCore.Services.Pdf
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"  ERROR processing {fileName}: {ex.Message}");
+                     LoggerService.LogInformation($"  ERROR processing {fileName}: {ex.Message}");
                     results.Add(fileName, $"Error Error|0");
                 }
             }
@@ -184,7 +184,7 @@ namespace ConsentSyncCore.Services.Pdf
 
             try
             {
-                Console.WriteLine($"  Starting word-based extraction with {words.Count} words");
+                 LoggerService.LogInformation($"  Starting word-based extraction with {words.Count} words");
 
                 // ✅ Use patterns directly from config (no need for LoadNamePatterns)
                 var lastNamePatterns = config.LastNamePatterns;
@@ -201,7 +201,7 @@ namespace ConsentSyncCore.Services.Pdf
                         {
                             if (MatchesPattern(words, i, pattern.Words))
                             {
-                                Console.WriteLine($"  Found last name pattern ({pattern.Language}) at index {i}");
+                                 LoggerService.LogInformation($"  Found last name pattern ({pattern.Language}) at index {i}");
                                 int startIndex = i + pattern.Words.Length;
 
                                 for (int j = startIndex; j < words.Count && j < startIndex + config.SearchRange; j++)
@@ -212,7 +212,7 @@ namespace ConsentSyncCore.Services.Pdf
                                     {
                                         lastName = candidateWord;
                                         lastNameEndIndex = j;
-                                        Console.WriteLine($"  ✅ Last Name: {lastName} at index {j}");
+                                         LoggerService.LogInformation($"  ✅ Last Name: {lastName} at index {j}");
                                         break;
                                     }
                                 }
@@ -233,14 +233,14 @@ namespace ConsentSyncCore.Services.Pdf
                             {
                                 if (MatchesPattern(words, i, pattern.Words))
                                 {
-                                    Console.WriteLine($"  Found first name pattern ({pattern.Language}) at index {i}");
+                                     LoggerService.LogInformation($"  Found first name pattern ({pattern.Language}) at index {i}");
                                     int startIndex = i + pattern.Words.Length;
 
                                     for (int j = startIndex; j < words.Count && j < startIndex + config.SearchRange; j++)
                                     {
                                         if (j == lastNameEndIndex)
                                         {
-                                            Console.WriteLine($"    Skipping index {j} - already used as last name");
+                                             LoggerService.LogInformation($"    Skipping index {j} - already used as last name");
                                             continue;
                                         }
 
@@ -250,7 +250,7 @@ namespace ConsentSyncCore.Services.Pdf
                                         {
                                             firstName = candidateWord;
                                             firstNameEndIndex = j;
-                                            Console.WriteLine($"  ✅ First Name: {firstName} at index {j}");
+                                             LoggerService.LogInformation($"  ✅ First Name: {firstName} at index {j}");
                                             break;
                                         }
                                     }
@@ -263,7 +263,7 @@ namespace ConsentSyncCore.Services.Pdf
 
                     if (lastName != null && firstName != null)
                     {
-                        Console.WriteLine($"  Both names found - stopping search");
+                         LoggerService.LogInformation($"  Both names found - stopping search");
                         break;
                     }
                 }
@@ -274,7 +274,7 @@ namespace ConsentSyncCore.Services.Pdf
                 // STRATEGY 2: Fallback keyword matching
                 if (lastName == null || firstName == null)
                 {
-                    Console.WriteLine($"  Pattern matching incomplete, trying keyword fallback...");
+                     LoggerService.LogInformation($"  Pattern matching incomplete, trying keyword fallback...");
 
                     for (int i = 0; i < words.Count - 1; i++)
                     {
@@ -289,7 +289,7 @@ namespace ConsentSyncCore.Services.Pdf
                                 {
                                     lastName = candidateWord;
                                     lastNameEndIndex = j;
-                                    Console.WriteLine($"  -> Last Name: {lastName} at index {j}");
+                                     LoggerService.LogInformation($"  -> Last Name: {lastName} at index {j}");
                                     break;
                                 }
                             }
@@ -310,7 +310,7 @@ namespace ConsentSyncCore.Services.Pdf
                                 if (IsValidNameCandidate(candidateWord, config))
                                 {
                                     firstName = candidateWord;
-                                    Console.WriteLine($"  -> First Name: {firstName} at index {j}");
+                                     LoggerService.LogInformation($"  -> First Name: {firstName} at index {j}");
                                     break;
                                 }
                             }
@@ -320,11 +320,11 @@ namespace ConsentSyncCore.Services.Pdf
                     }
                 }
 
-                Console.WriteLine($"  Extraction complete: FirstName={firstName ?? "NULL"}, LastName={lastName ?? "NULL"}");
+                 LoggerService.LogInformation($"  Extraction complete: FirstName={firstName ?? "NULL"}, LastName={lastName ?? "NULL"}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"  ❌ ERROR: {ex.Message}");
+                 LoggerService.LogInformation($"  ❌ ERROR: {ex.Message}");
             }
 
             return (firstName, lastName);
@@ -353,20 +353,20 @@ namespace ConsentSyncCore.Services.Pdf
 
                 if (!Directory.Exists(tessDataPath))
                 {
-                    Console.WriteLine($"    ERROR: tessdata not found at: {tessDataPath}");
+                     LoggerService.LogInformation($"    ERROR: tessdata not found at: {tessDataPath}");
                     return string.Empty;
                 }
 
-                Console.WriteLine($"    Converting PDF page {pageNumber} to image...");
+                 LoggerService.LogInformation($"    Converting PDF page {pageNumber} to image...");
                 tempImagePath = ConvertPdfPageToImage(pdfPath, pageNumber, fileName, saveDebugImage, true, debugOutputDir);
 
                 if (string.IsNullOrEmpty(tempImagePath) || !File.Exists(tempImagePath))
                 {
-                    Console.WriteLine("    Failed to convert PDF to image");
+                     LoggerService.LogInformation("    Failed to convert PDF to image");
                     return string.Empty;
                 }
 
-                Console.WriteLine($"    Running OCR...");
+                 LoggerService.LogInformation($"    Running OCR...");
 
                 using var engine = new TesseractEngine(tessDataPath, "fra+eng", EngineMode.Default);
                 using var img = Pix.LoadFromFile(tempImagePath);
@@ -375,13 +375,13 @@ namespace ConsentSyncCore.Services.Pdf
                 var text = result.GetText();
                 var confidence = result.GetMeanConfidence();
 
-                Console.WriteLine($"    OCR Confidence: {confidence:P}");
+                 LoggerService.LogInformation($"    OCR Confidence: {confidence:P}");
 
                 return text;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"    OCR Error: {ex.Message}");
+                 LoggerService.LogInformation($"    OCR Error: {ex.Message}");
                 return string.Empty;
             }
             finally
@@ -425,7 +425,7 @@ namespace ConsentSyncCore.Services.Pdf
                     int rotationNeeded = DetectOrientation(image);
                     if (rotationNeeded > 0)
                     {
-                        Console.WriteLine($"    Rotating {rotationNeeded}°");
+                         LoggerService.LogInformation($"    Rotating {rotationNeeded}°");
                         image.Mutate(x => x.Rotate(rotationNeeded));
                     }
                 }
@@ -435,7 +435,7 @@ namespace ConsentSyncCore.Services.Pdf
                 {
                     var outputDir = debugOutputDir ?? Path.GetDirectoryName(pdfPath)!;
                     tempPath = Path.Combine(outputDir, $"DEBUG_IMAGE_{fileName}.png");
-                    Console.WriteLine($"    Debug image: {tempPath}");
+                     LoggerService.LogInformation($"    Debug image: {tempPath}");
                 }
                 else
                 {
@@ -447,7 +447,7 @@ namespace ConsentSyncCore.Services.Pdf
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"    Error converting PDF: {ex.Message}");
+                 LoggerService.LogInformation($"    Error converting PDF: {ex.Message}");
                 return string.Empty;
             }
         }
@@ -513,7 +513,7 @@ namespace ConsentSyncCore.Services.Pdf
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"    Orientation detection failed: {ex.Message}");
+                 LoggerService.LogInformation($"    Orientation detection failed: {ex.Message}");
                 return 180; // Default fallback
             }
         }
@@ -529,7 +529,7 @@ namespace ConsentSyncCore.Services.Pdf
             string? lastName = null;
 
             var lines = ocrText.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-            Console.WriteLine($"    Parsing {lines.Length} lines from OCR...");
+             LoggerService.LogInformation($"    Parsing {lines.Length} lines from OCR...");
 
             string[] skipWords = config.FieldLabelWords
                 .Concat(new[] { "STUDENT", "STUDENTS", "ÉLÈVE", "ELEVE", "SIGNATURE" })
@@ -549,7 +549,7 @@ namespace ConsentSyncCore.Services.Pdf
                 if ((hasFrenchPattern || hasEnglishPattern) &&
                     !line.Contains("PRÉFÉRÉ", StringComparison.OrdinalIgnoreCase))
                 {
-                    Console.WriteLine($"    Found student name header in line {i}");
+                     LoggerService.LogInformation($"    Found student name header in line {i}");
 
                     string cleanedLine = System.Text.RegularExpressions.Regex.Replace(
                         line, @"NOM\s+DE\s+L.?[ÉE]L[ÈE]VE|STUDENT.?S?\s+NAME", "",
@@ -564,7 +564,7 @@ namespace ConsentSyncCore.Services.Pdf
                     {
                         firstName = validNames[0];
                         lastName = validNames[1];
-                        Console.WriteLine($"      ✅ Found: {firstName} {lastName}");
+                         LoggerService.LogInformation($"      ✅ Found: {firstName} {lastName}");
                         return (firstName, lastName);
                     }
                 }

@@ -18,7 +18,7 @@
        ExcludeFromSingleFile = true  →  NOT embedded, stays editable on disk -->
 	<ItemGroup>
 		<None Include="..\ConsentSyncCore\appsettings.json">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 			<ExcludeFromSingleFile>true</ExcludeFromSingleFile>
 			<Link>appsettings.json</Link>
 		</None>

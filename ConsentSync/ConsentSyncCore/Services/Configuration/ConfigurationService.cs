@@ -1,9 +1,5 @@
 ﻿using Microsoft.Extensions.Configuration;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using Microsoft.Extensions.Primitives;
 
 namespace ConsentSyncCore.Services.Configuration
 {
@@ -12,121 +8,130 @@ namespace ConsentSyncCore.Services.Configuration
         private static IConfiguration? _config;
         private static readonly object _lock = new object();
         private static string? _baseDirectory;
+        private static string? _resolvedConfigDir;
+        private static IDisposable? _changeToken;
 
-
-
-        /// <summary>
-        /// Get the configuration instance (singleton)
-        /// </summary>
         public static IConfiguration GetConfiguration()
         {
-            if (_config == null)
+            if (_config != null) return _config;
+            lock (_lock)
             {
-                lock (_lock)
-                {
-                    if (_config == null)
-                    {
-                        var environment = Environment.GetEnvironmentVariable("CONSENTSYNC_ENVIRONMENT") ?? "Production";
-
-                        _config = new ConfigurationBuilder()
-                            .SetBasePath(AppContext.BaseDirectory)
-                            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-                            .AddJsonFile($"appsettings.{environment}.json", optional: true, reloadOnChange: true)
-                            .AddEnvironmentVariables(prefix: "CONSENTSYNC_")
-                            .Build();
-
-                        // Load BaseDirectory
-                        _baseDirectory = _config["BaseDirectory"] ?? "C:\\PHIS";
-
-                        Console.WriteLine($"✅ Configuration loaded (Environment: {environment})");
-                        Console.WriteLine($"📁 Base Directory: {_baseDirectory}");
-                    }
-                }
+                if (_config != null) return _config;
+                LoadConfiguration();
             }
-            return _config;
+            return _config!;
         }
 
-
-        /// <summary>
-        /// Reload configuration from disk
-        /// </summary>
         public static void ReloadConfiguration()
         {
             lock (_lock)
             {
+                _changeToken?.Dispose();
+                _changeToken = null;
                 _config = null;
                 _baseDirectory = null;
-                GetConfiguration();
+                LoadConfiguration();
             }
+
+            LoggerService.LogInformation("🔄 Configuration reloaded from disk.");
+            LoggerService.LogInformation($"   📁 Base Directory : {_baseDirectory}");
+            LoggerService.LogInformation($"   📄 Config file    : {Path.Combine(_resolvedConfigDir!, "appsettings.json")}");
         }
 
-
-
-        /// <summary>
-        /// Get the base directory
-        /// </summary>
         public static string GetBaseDirectory()
         {
-            if (_config == null)
-            {
-                GetConfiguration();
-            }
+            if (_config == null) GetConfiguration();
             return _baseDirectory ?? "C:\\PHIS";
         }
 
+        // ── Internal loading ──────────────────────────────────────────
 
-        /// <summary>
-        /// Resolve path with placeholders
-        /// Supported placeholders:
-        ///   {BaseDirectory} - Base directory for all operations
-        ///   {SchoolName} - Current school name
-        ///   {Grade} - Current grade
-        ///   {SchoolYear} - Current school year
-        /// </summary>
-        private static string ResolvePath(string path)
+        private static void LoadConfiguration()
         {
-            if (string.IsNullOrWhiteSpace(path))
-                return path;
+            var environment = Environment.GetEnvironmentVariable("CONSENTSYNC_ENVIRONMENT") ?? "Production";
 
-            // Ensure configuration is loaded
-            if (_config == null)
+            _resolvedConfigDir ??= FindAppSettingsDirectory();
+
+            var configPath = Path.Combine(_resolvedConfigDir, "appsettings.json");
+
+            Console.WriteLine($"📄 Loading appsettings.json from: {configPath}");
+
+            if (!File.Exists(configPath))
+                throw new FileNotFoundException(
+                    $"appsettings.json not found.\nSearched in: {_resolvedConfigDir}\n" +
+                    "Ensure the file is set to 'Copy if newer' in its project properties.",
+                    configPath);
+
+            _config = new ConfigurationBuilder()
+                .SetBasePath(_resolvedConfigDir)
+                // ✅ reloadOnChange: FALSE — eliminates System.IO.IOException flood
+                //    caused by MSBuild touching the file during Debug builds.
+                //    Use ReloadConfiguration() explicitly after saving from the UI.
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
+                .AddJsonFile($"appsettings.{environment}.json", optional: true, reloadOnChange: false)
+                .AddEnvironmentVariables(prefix: "CONSENTSYNC_")
+                .Build();
+
+            _baseDirectory = _config["BaseDirectory"] ?? "C:\\PHIS";
+
+            // ✅ No file watcher needed — dispose any lingering token from previous loads
+            _changeToken?.Dispose();
+            _changeToken = null;
+
+            Console.WriteLine($"✅ Configuration loaded  (Environment: {environment})");
+            Console.WriteLine($"📁 Base Directory        : {_baseDirectory}");
+        }
+
+        // ── Directory discovery ───────────────────────────────────────
+
+        private static string FindAppSettingsDirectory()
+        {
+            var candidates = new List<string>
             {
-                GetConfiguration();
+                AppContext.BaseDirectory,
+                AppDomain.CurrentDomain.BaseDirectory,
+                Directory.GetCurrentDirectory()
+            };
+
+            var dir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            for (int i = 0; i < 8; i++)
+            {
+                candidates.Add(dir);
+                var parent = Directory.GetParent(dir)?.FullName;
+                if (parent == null || parent == dir) break;
+                dir = parent;
             }
 
-            var schoolContext = GetSchoolContextConfig();
-            var baseDir = GetBaseDirectory();
+            foreach (var candidate in candidates.Distinct())
+            {
+                if (!string.IsNullOrWhiteSpace(candidate) &&
+                    File.Exists(Path.Combine(candidate, "appsettings.json")))
+                {
+                    Console.WriteLine($"   ✅ Found appsettings.json at: {candidate}");
+                    return candidate;
+                }
+            }
 
-            // ✅ DEBUG: Show resolution
-            Console.WriteLine($"      ResolvePath Input: '{path}'");
-            Console.WriteLine($"      BaseDirectory: '{baseDir}'");
-            Console.WriteLine($"      SchoolName: '{schoolContext.SchoolName}'");
-            Console.WriteLine($"      Grade: '{schoolContext.Grade}'");
-            Console.WriteLine($"      SchoolYear: '{schoolContext.SchoolYear}'");
-
-            var resolved = path
-                .Replace("{BaseDirectory}", baseDir)
-                .Replace("{SchoolName}", schoolContext.SchoolName)
-                .Replace("{Grade}", schoolContext.Grade)
-                .Replace("{SchoolYear}", schoolContext.SchoolYear);
-
-            Console.WriteLine($"      ResolvePath Output: '{resolved}'");
-
-            return resolved;
+            Console.WriteLine($"   ⚠️  appsettings.json not found — defaulting to: {AppContext.BaseDirectory}");
+            return AppContext.BaseDirectory;
         }
 
+        // ── Path resolver ─────────────────────────────────────────────
 
-
-        /// <summary>
-        /// Resolve multiple paths with placeholders
-        /// </summary>
-        private static string[] ResolvePaths(string[] paths)
+        private static string ResolvePath(string path)
         {
-            return paths?.Select(ResolvePath).ToArray() ?? Array.Empty<string>();
+            if (string.IsNullOrWhiteSpace(path)) return path;
+            if (_config == null) GetConfiguration();
+
+            var sc = GetSchoolContextConfig();
+            return path
+                .Replace("{BaseDirectory}", GetBaseDirectory())
+                .Replace("{SchoolName}", sc.SchoolName)
+                .Replace("{Grade}", sc.Grade)
+                .Replace("{SchoolYear}", sc.SchoolYear);
         }
 
-
-
-
+        private static string[] ResolvePaths(string[] paths) =>
+            paths?.Select(ResolvePath).ToArray() ?? Array.Empty<string>();
     }
 }

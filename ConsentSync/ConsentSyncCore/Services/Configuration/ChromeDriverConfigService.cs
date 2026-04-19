@@ -15,17 +15,17 @@ namespace ConsentSyncCore.Services.Configuration
             var chromeExtractTo = ResolvePath(config["ChromeDriver:Download:PortableChromeExtractTo"] ?? "");
             var driverExtractTo = ResolvePath(config["ChromeDriver:Download:ChromeDriverExtractTo"] ?? "");
 
-            Console.WriteLine($"\n🌐 ChromeDriver paths (resolved):");
-            Console.WriteLine($"   PortableChromePath  : {(string.IsNullOrWhiteSpace(portableChromePath) ? "(empty)" : portableChromePath)}");
-            Console.WriteLine($"   ChromeDriverPath    : {(string.IsNullOrWhiteSpace(chromeDriverPath) ? "(empty — auto-detect or AppBaseDir)" : chromeDriverPath)}");
-            Console.WriteLine($"   DownloadDirectory   : {(string.IsNullOrWhiteSpace(downloadDir) ? "(empty)" : downloadDir)}");
+             LoggerService.LogInformation($"\n🌐 ChromeDriver paths (resolved):");
+             LoggerService.LogInformation($"   PortableChromePath  : {(string.IsNullOrWhiteSpace(portableChromePath) ? "(empty)" : portableChromePath)}");
+             LoggerService.LogInformation($"   ChromeDriverPath    : {(string.IsNullOrWhiteSpace(chromeDriverPath) ? "(empty — auto-detect or AppBaseDir)" : chromeDriverPath)}");
+             LoggerService.LogInformation($"   DownloadDirectory   : {(string.IsNullOrWhiteSpace(downloadDir) ? "(empty)" : downloadDir)}");
 
             bool usePortable = config.GetValue<bool>("ChromeDriver:UsePortableChrome", false);
 
             if (usePortable && !string.IsNullOrWhiteSpace(portableChromePath) && !File.Exists(portableChromePath))
             {
-                Console.WriteLine($"   ⚠️  PortableChromePath does not exist: {portableChromePath}");
-                Console.WriteLine($"      Use the UI download button, or set UsePortableChrome=false.");
+                 LoggerService.LogInformation($"   ⚠️  PortableChromePath does not exist: {portableChromePath}");
+                 LoggerService.LogInformation($"      Use the UI download button, or set UsePortableChrome=false.");
             }
 
             return new ChromeDriverConfig

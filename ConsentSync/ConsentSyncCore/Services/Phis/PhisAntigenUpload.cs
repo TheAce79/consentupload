@@ -92,7 +92,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"      🔍 Searching for existing document: '{documentTitle}'");
+                 LoggerService.LogInformation($"      🔍 Searching for existing document: '{documentTitle}'");
 
                 // Give page time to load
                 await Task.Delay(1000);
@@ -105,11 +105,11 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (documentLinks.Count == 0)
                 {
-                    Console.WriteLine($"      ℹ️  No documents found in the list");
+                     LoggerService.LogInformation($"      ℹ️  No documents found in the list");
                     return false;
                 }
 
-                Console.WriteLine($"      📊 Found {documentLinks.Count} document(s) in the list");
+                 LoggerService.LogInformation($"      📊 Found {documentLinks.Count} document(s) in the list");
 
                 // Normalize search title for comparison
                 var normalizedSearchTitle = documentTitle
@@ -129,27 +129,27 @@ namespace ConsentSyncCore.Services.Phis
                             .Replace("_", "")
                             .ToLowerInvariant();
 
-                        Console.WriteLine($"         Comparing: '{docText}' vs '{documentTitle}'");
+                         LoggerService.LogInformation($"         Comparing: '{docText}' vs '{documentTitle}'");
 
                         // ✅ Exact match after normalization
                         if (normalizedDocText.Equals(normalizedSearchTitle, StringComparison.OrdinalIgnoreCase))
                         {
-                            Console.WriteLine($"      ✅ EXACT MATCH FOUND: '{docText}'");
+                             LoggerService.LogInformation($"      ✅ EXACT MATCH FOUND: '{docText}'");
                             return true;
                         }
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"         ⚠️  Error reading document link: {ex.Message}");
+                         LoggerService.LogInformation($"         ⚠️  Error reading document link: {ex.Message}");
                     }
                 }
 
-                Console.WriteLine($"      ❌ Document not found: '{documentTitle}'");
+                 LoggerService.LogInformation($"      ❌ Document not found: '{documentTitle}'");
                 return false;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"      ❌ Error checking for document: {ex.Message}");
+                 LoggerService.LogInformation($"      ❌ Error checking for document: {ex.Message}");
                 return false;
             }
         }
@@ -262,7 +262,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"   📤 Clicking 'Add New' button to open upload form...");
+                 LoggerService.LogInformation($"   📤 Clicking 'Add New' button to open upload form...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
@@ -280,11 +280,11 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (!string.IsNullOrEmpty(isDisabled) || (classes != null && classes.Contains("buttonDisabled")))
                 {
-                    Console.WriteLine($"   ⚠️  'Add New' button is disabled");
+                     LoggerService.LogInformation($"   ⚠️  'Add New' button is disabled");
                     return false;
                 }
 
-                Console.WriteLine($"   ✅ 'Add New' button found and enabled");
+                 LoggerService.LogInformation($"   ✅ 'Add New' button found and enabled");
 
                 // Execute the onclick JavaScript first (folder validation)
                 try
@@ -294,18 +294,18 @@ namespace ConsentSyncCore.Services.Phis
 
                     if (onClickResult is bool boolResult && !boolResult)
                     {
-                        Console.WriteLine($"   ⚠️  Folder validation failed - cannot add document");
+                         LoggerService.LogInformation($"   ⚠️  Folder validation failed - cannot add document");
                         return false;
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"   ℹ️  Folder validation skipped: {ex.Message}");
+                     LoggerService.LogInformation($"   ℹ️  Folder validation skipped: {ex.Message}");
                 }
 
                 js.ExecuteScript("arguments[0].click();", addNewButton);
 
-                Console.WriteLine($"   ✅ 'Add New' button clicked");
+                 LoggerService.LogInformation($"   ✅ 'Add New' button clicked");
 
                 await Task.Delay(_phisConfig.PageLoadDelayMs);
 
@@ -321,18 +321,18 @@ namespace ConsentSyncCore.Services.Phis
                         return sectionHeaders.Count > 0;
                     });
 
-                    Console.WriteLine($"   ✅ Document Management page loaded");
+                     LoggerService.LogInformation($"   ✅ Document Management page loaded");
                     _sessionManager.UpdateActivity();
                     return true;
                 }
                 catch (WebDriverTimeoutException)
                 {
-                    Console.WriteLine($"   ⚠️  Page verification timed out");
+                     LoggerService.LogInformation($"   ⚠️  Page verification timed out");
 
                     var fileInputs = _driver.FindElements(By.Id("addNewDocumentForm:sectionAddNewDocumentDefault:fileuploadInput"));
                     if (fileInputs.Count > 0)
                     {
-                        Console.WriteLine($"   ✅ Upload form found - assuming navigation successful");
+                         LoggerService.LogInformation($"   ✅ Upload form found - assuming navigation successful");
                         _sessionManager.UpdateActivity();
                         return true;
                     }
@@ -342,7 +342,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Error clicking 'Add New' button: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Error clicking 'Add New' button: {ex.Message}");
                 return false;
             }
         }

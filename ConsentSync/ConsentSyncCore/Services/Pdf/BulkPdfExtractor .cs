@@ -43,9 +43,9 @@ namespace ConsentSyncCore.Services.Pdf
         {
             var aggregateResult = new BulkExtractionResult();
 
-            Console.WriteLine("╔════════════════════════════════════════════════════════╗");
-            Console.WriteLine("║      PDF Processing - Automatic Detection             ║");
-            Console.WriteLine("╚════════════════════════════════════════════════════════╝\n");
+             LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
+             LoggerService.LogInformation("║      PDF Processing - Automatic Detection             ║");
+             LoggerService.LogInformation("╚════════════════════════════════════════════════════════╝\n");
 
             try
             {
@@ -58,7 +58,7 @@ namespace ConsentSyncCore.Services.Pdf
 
                 if (bulkPdfs.Length > 0)
                 {
-                    Console.WriteLine($"\n📂 Found {bulkPdfs.Length} PDF(s) in 1_Input_Bulk");
+                     LoggerService.LogInformation($"\n📂 Found {bulkPdfs.Length} PDF(s) in 1_Input_Bulk");
                     foreach (var pdfPath in bulkPdfs)
                     {
                         var result = ProcessSingleFile(pdfPath, PdfSourceType.Bulk);
@@ -72,7 +72,7 @@ namespace ConsentSyncCore.Services.Pdf
 
                 if (scannedPdfs.Length > 0)
                 {
-                    Console.WriteLine($"\n📂 Found {scannedPdfs.Length} PDF(s) in 2_Input_Scanned");
+                     LoggerService.LogInformation($"\n📂 Found {scannedPdfs.Length} PDF(s) in 2_Input_Scanned");
                     foreach (var pdfPath in scannedPdfs)
                     {
                         var result = ProcessSingleFile(pdfPath, PdfSourceType.Scanned);
@@ -82,10 +82,10 @@ namespace ConsentSyncCore.Services.Pdf
 
                 if (bulkPdfs.Length == 0 && scannedPdfs.Length == 0)
                 {
-                    Console.WriteLine("⚠️  No PDFs found to process");
-                    Console.WriteLine($"\n💡 Place PDFs in:");
-                    Console.WriteLine($"   - Bulk downloads: {inputBulkPath}");
-                    Console.WriteLine($"   - Scanned files:  {inputScannedPath}");
+                     LoggerService.LogInformation("⚠️  No PDFs found to process");
+                     LoggerService.LogInformation($"\n💡 Place PDFs in:");
+                     LoggerService.LogInformation($"   - Bulk downloads: {inputBulkPath}");
+                     LoggerService.LogInformation($"   - Scanned files:  {inputScannedPath}");
                 }
 
                 aggregateResult.Success = aggregateResult.FailedExtractions == 0;
@@ -98,7 +98,7 @@ namespace ConsentSyncCore.Services.Pdf
             catch (Exception ex)
             {
                 aggregateResult.ErrorMessage = $"Processing failed: {ex.Message}";
-                Console.WriteLine($"❌ {aggregateResult.ErrorMessage}");
+                 LoggerService.LogInformation($"❌ {aggregateResult.ErrorMessage}");
                 return aggregateResult;
             }
         }
@@ -115,10 +115,10 @@ namespace ConsentSyncCore.Services.Pdf
 
             try
             {
-                Console.WriteLine($"\n{'=',-60}");
-                Console.WriteLine($"Processing: {fileName}");
-                Console.WriteLine($"Source: {sourceType}");
-                Console.WriteLine($"{'=',-60}");
+                 LoggerService.LogInformation($"\n{'=',-60}");
+                 LoggerService.LogInformation($"Processing: {fileName}");
+                 LoggerService.LogInformation($"Source: {sourceType}");
+                 LoggerService.LogInformation($"{'=',-60}");
 
                 // Smart extraction to 3_Output_Ready
                 var outputPath = _bulkConfig.GetOutputReadyPath();
@@ -154,7 +154,7 @@ namespace ConsentSyncCore.Services.Pdf
                 result.ErrorMessage = $"Failed to process {fileName}: {ex.Message}";
                 result.FailedExtractions++;
 
-                Console.WriteLine($"❌ {result.ErrorMessage}");
+                 LoggerService.LogInformation($"❌ {result.ErrorMessage}");
 
                 if (_bulkConfig.MoveErrorPdfsToErrorFolder)
                 {
@@ -164,7 +164,7 @@ namespace ConsentSyncCore.Services.Pdf
                     }
                     catch (Exception moveEx)
                     {
-                        Console.WriteLine($"⚠️  Could not move to error folder: {moveEx.Message}");
+                         LoggerService.LogInformation($"⚠️  Could not move to error folder: {moveEx.Message}");
                     }
                 }
 
@@ -186,7 +186,7 @@ namespace ConsentSyncCore.Services.Pdf
                 if (!File.Exists(pdfPath))
                 {
                     result.ErrorMessage = $"PDF not found: {pdfPath}";
-                    Console.WriteLine($"   ❌ {result.ErrorMessage}");
+                     LoggerService.LogInformation($"   ❌ {result.ErrorMessage}");
                     return result;
                 }
 
@@ -195,25 +195,25 @@ namespace ConsentSyncCore.Services.Pdf
                 int totalPages = pdfDoc.NumberOfPages;
                 int pagesPerConsent = _bulkConfig.PagesPerConsent;
 
-                Console.WriteLine($"\n📄 Smart PDF Processing...");
-                Console.WriteLine($"   Source: {Path.GetFileName(pdfPath)}");
-                Console.WriteLine($"   Total pages: {totalPages}");
-                Console.WriteLine($"   Expected pages per consent: {pagesPerConsent}");
+                 LoggerService.LogInformation($"\n📄 Smart PDF Processing...");
+                 LoggerService.LogInformation($"   Source: {Path.GetFileName(pdfPath)}");
+                 LoggerService.LogInformation($"   Total pages: {totalPages}");
+                 LoggerService.LogInformation($"   Expected pages per consent: {pagesPerConsent}");
 
                 // Decision logic
                 if (totalPages == 1)
                 {
-                    Console.WriteLine($"   🔍 Detected: Single-page PDF (scanned consent)");
+                     LoggerService.LogInformation($"   🔍 Detected: Single-page PDF (scanned consent)");
                     result = ProcessSinglePagePdf(pdfPath, outputDirectory, pageId: 1);
                 }
                 else if (totalPages <= pagesPerConsent)
                 {
-                    Console.WriteLine($"   🔍 Detected: Single consent PDF ({totalPages} page(s))");
+                     LoggerService.LogInformation($"   🔍 Detected: Single consent PDF ({totalPages} page(s))");
                     result = ProcessSinglePagePdf(pdfPath, outputDirectory, pageId: 1);
                 }
                 else
                 {
-                    Console.WriteLine($"   🔍 Detected: Bulk PDF ({totalPages} pages / {pagesPerConsent} per consent = ~{totalPages / pagesPerConsent} consents)");
+                     LoggerService.LogInformation($"   🔍 Detected: Bulk PDF ({totalPages} pages / {pagesPerConsent} per consent = ~{totalPages / pagesPerConsent} consents)");
                     result = ExtractFromBulkPdfWithNames(pdfPath, outputDirectory);
                 }
 
@@ -222,7 +222,7 @@ namespace ConsentSyncCore.Services.Pdf
             catch (Exception ex)
             {
                 result.ErrorMessage = $"Smart extraction failed: {ex.Message}";
-                Console.WriteLine($"   ❌ {result.ErrorMessage}");
+                 LoggerService.LogInformation($"   ❌ {result.ErrorMessage}");
                 return result;
             }
         }
@@ -243,7 +243,7 @@ namespace ConsentSyncCore.Services.Pdf
 
             try
             {
-                Console.WriteLine($"\n   📄 Processing single-page consent...");
+                 LoggerService.LogInformation($"\n   📄 Processing single-page consent...");
                 Directory.CreateDirectory(outputDirectory);
 
                 // Extract names
@@ -257,7 +257,7 @@ namespace ConsentSyncCore.Services.Pdf
                     firstName == "Unknown" || lastName == "Unknown" ||
                     firstName == "Error" || lastName == "Error")
                 {
-                    Console.WriteLine($"   ⚠️  Could not extract names - moving to 4_Error for manual review");
+                     LoggerService.LogInformation($"   ⚠️  Could not extract names - moving to 4_Error for manual review");
 
                     // ✅ Move to error folder instead of processing
                     string errorMessage = "Unable to extract student names from PDF. Manual identification required.";
@@ -284,7 +284,7 @@ namespace ConsentSyncCore.Services.Pdf
                     result.ErrorMessages.Add($"{errorFileName}: {errorMessage}");
                     result.Success = false; // Mark as unsuccessful since it needs manual review
 
-                    Console.WriteLine($"   ⚠️  Moved to 4_Error: {errorFileName}");
+                     LoggerService.LogInformation($"   ⚠️  Moved to 4_Error: {errorFileName}");
                     return result;
                 }
 
@@ -299,7 +299,7 @@ namespace ConsentSyncCore.Services.Pdf
                 int duplicateCounter = 2;
                 while (File.Exists(outputPath))
                 {
-                    Console.WriteLine($"   ⚠️  File exists, adding suffix: _{duplicateCounter}");
+                     LoggerService.LogInformation($"   ⚠️  File exists, adding suffix: _{duplicateCounter}");
                     outputFileName = FormatFileName(pageId, lastName, firstName, duplicateCounter);
                     outputPath = Path.Combine(outputDirectory, outputFileName);
                     duplicateCounter++;
@@ -312,7 +312,7 @@ namespace ConsentSyncCore.Services.Pdf
                 result.TotalExtracted = 1;
                 result.Success = true;
 
-                Console.WriteLine($"   ✅ Saved to 3_Output_Ready: {outputFileName}");
+                 LoggerService.LogInformation($"   ✅ Saved to 3_Output_Ready: {outputFileName}");
 
                 return result;
             }
@@ -320,7 +320,7 @@ namespace ConsentSyncCore.Services.Pdf
             {
                 result.ErrorMessage = $"Single-page processing failed: {ex.Message}";
                 result.FailedExtractions = 1;
-                Console.WriteLine($"   ❌ {result.ErrorMessage}");
+                 LoggerService.LogInformation($"   ❌ {result.ErrorMessage}");
                 return result;
             }
         }
@@ -339,7 +339,7 @@ namespace ConsentSyncCore.Services.Pdf
 
             try
             {
-                Console.WriteLine($"\n📄 Extracting from bulk PDF...");
+                 LoggerService.LogInformation($"\n📄 Extracting from bulk PDF...");
 
                 Directory.CreateDirectory(outputDirectory);
                 Directory.CreateDirectory(tempExtractionDir);
@@ -350,9 +350,9 @@ namespace ConsentSyncCore.Services.Pdf
                 int pagesPerConsent = _bulkConfig.PagesPerConsent;
                 int startPage = _bulkConfig.StartPage;
 
-                Console.WriteLine($"   Total pages: {totalPages}");
-                Console.WriteLine($"   Pages per consent: {pagesPerConsent}");
-                Console.WriteLine($"   Starting from page: {startPage}");
+                 LoggerService.LogInformation($"   Total pages: {totalPages}");
+                 LoggerService.LogInformation($"   Pages per consent: {pagesPerConsent}");
+                 LoggerService.LogInformation($"   Starting from page: {startPage}");
 
                 int currentPage = startPage;
                 int pageIndex = 1;
@@ -388,7 +388,7 @@ namespace ConsentSyncCore.Services.Pdf
                             firstName == "Unknown" || lastName == "Unknown" ||
                             firstName == "Error" || lastName == "Error")
                         {
-                            Console.WriteLine($"   ⚠️  Page {currentPage}: Names not detected - moving to 4_Error");
+                             LoggerService.LogInformation($"   ⚠️  Page {currentPage}: Names not detected - moving to 4_Error");
 
                             // Move to error folder
                             string errorFileName = $"UNKNOWN_{pageIndex}_Page{currentPage}.pdf";
@@ -410,7 +410,7 @@ namespace ConsentSyncCore.Services.Pdf
                             result.UnknownNameCount++;
                             result.ErrorMessages.Add($"{errorFileName}: Names not detected");
 
-                            Console.WriteLine($"   ⚠️  Moved to 4_Error: {errorFileName}");
+                             LoggerService.LogInformation($"   ⚠️  Moved to 4_Error: {errorFileName}");
                             pageIndex++;
                             currentPage += pagesPerConsent;
                             continue; // Skip to next PDF
@@ -429,7 +429,7 @@ namespace ConsentSyncCore.Services.Pdf
                             seenNames[nameKey]++;
                             int occurrence = seenNames[nameKey] + 1; // 1-based
 
-                            Console.WriteLine($"   ⚠️  DUPLICATE #{occurrence}: {lastName}_{firstName} → 5_Duplicate\\");
+                             LoggerService.LogInformation($"   ⚠️  DUPLICATE #{occurrence}: {lastName}_{firstName} → 5_Duplicate\\");
 
                             // ── Create / reuse per-student subfolder ──────────────────────
                             string duplicateSubFolder = GetOrCreateDuplicateSubFolder(lastName, firstName);
@@ -437,7 +437,7 @@ namespace ConsentSyncCore.Services.Pdf
                             string duplicatePath = Path.Combine(duplicateSubFolder, duplicateFileName);
 
                             File.Move(tempFilePath, duplicatePath, overwrite: true);
-                            Console.WriteLine($"   📄 Moved duplicate → {duplicateFileName}");
+                             LoggerService.LogInformation($"   📄 Moved duplicate → {duplicateFileName}");
 
 
                             // ── On the SECOND occurrence: pull the FIRST copy out of 3_Output_Ready ──
@@ -477,11 +477,11 @@ namespace ConsentSyncCore.Services.Pdf
                                     // ✅ FIX: The first copy is now also in 5_Duplicate — count it
                                     result.DuplicatesFound++;
 
-                                    Console.WriteLine($"   ♻️  Moved original copy → {firstDestName}");
+                                     LoggerService.LogInformation($"   ♻️  Moved original copy → {firstDestName}");
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"   ⚠️  Could not locate original copy in 3_Output_Ready.");
+                                     LoggerService.LogInformation($"   ⚠️  Could not locate original copy in 3_Output_Ready.");
                                 }
 
                                 // HOW_TO_MERGE.txt (written once when the folder is first created)
@@ -532,7 +532,7 @@ namespace ConsentSyncCore.Services.Pdf
                         result.ExtractedFiles.Add(finalOutputPath);
                         result.TotalExtracted++;
 
-                        Console.WriteLine($"   ✅ [{pageIndex}] {outputFileName}");
+                         LoggerService.LogInformation($"   ✅ [{pageIndex}] {outputFileName}");
 
                         pageIndex++;
 
@@ -542,7 +542,7 @@ namespace ConsentSyncCore.Services.Pdf
                     {
                         result.FailedExtractions++;
                         result.ErrorMessages.Add($"Page {currentPage}: {ex.Message}");
-                        Console.WriteLine($"   ❌ Failed page {currentPage}: {ex.Message}");
+                         LoggerService.LogInformation($"   ❌ Failed page {currentPage}: {ex.Message}");
                     }
 
                     currentPage += pagesPerConsent;
@@ -551,14 +551,14 @@ namespace ConsentSyncCore.Services.Pdf
                 // DuplicatesFound is NOT a failure — they are safely stored in 5_Duplicate.
                 result.Success = result.FailedExtractions == 0 && result.UnknownNameCount == 0;
 
-                Console.WriteLine($"\n   Summary: {result.TotalExtracted} extracted, {result.UnknownNameCount} unknown names, {result.DuplicatesFound} duplicates, {result.FailedExtractions} failed");
+                 LoggerService.LogInformation($"\n   Summary: {result.TotalExtracted} extracted, {result.UnknownNameCount} unknown names, {result.DuplicatesFound} duplicates, {result.FailedExtractions} failed");
 
                 return result;
             }
             catch (Exception ex)
             {
                 result.ErrorMessage = $"Bulk extraction failed: {ex.Message}";
-                Console.WriteLine($"   ❌ {result.ErrorMessage}");
+                 LoggerService.LogInformation($"   ❌ {result.ErrorMessage}");
                 return result;
             }
             finally
@@ -585,14 +585,14 @@ namespace ConsentSyncCore.Services.Pdf
 
             try
             {
-                Console.WriteLine($"\n📄 Extracting PDFs from bulk file (simple numbering)...");
-                Console.WriteLine($"   Source: {Path.GetFileName(bulkPdfPath)}");
-                Console.WriteLine($"   Output: {outputDirectory}");
+                 LoggerService.LogInformation($"\n📄 Extracting PDFs from bulk file (simple numbering)...");
+                 LoggerService.LogInformation($"   Source: {Path.GetFileName(bulkPdfPath)}");
+                 LoggerService.LogInformation($"   Output: {outputDirectory}");
 
                 if (!File.Exists(bulkPdfPath))
                 {
                     result.ErrorMessage = $"Bulk PDF not found: {bulkPdfPath}";
-                    Console.WriteLine($"   ❌ {result.ErrorMessage}");
+                     LoggerService.LogInformation($"   ❌ {result.ErrorMessage}");
                     return result;
                 }
 
@@ -604,8 +604,8 @@ namespace ConsentSyncCore.Services.Pdf
                 int pagesPerConsent = _bulkConfig.PagesPerConsent;
                 int startPage = _bulkConfig.StartPage;
 
-                Console.WriteLine($"   Total pages: {totalPages}");
-                Console.WriteLine($"   Pages per consent: {pagesPerConsent}");
+                 LoggerService.LogInformation($"   Total pages: {totalPages}");
+                 LoggerService.LogInformation($"   Pages per consent: {pagesPerConsent}");
 
                 int currentPage = startPage;
                 int extractedCount = 0;
@@ -633,14 +633,14 @@ namespace ConsentSyncCore.Services.Pdf
 
                         if (extractedCount % 10 == 0)
                         {
-                            Console.WriteLine($"   📄 Extracted {extractedCount} PDFs...");
+                             LoggerService.LogInformation($"   📄 Extracted {extractedCount} PDFs...");
                         }
                     }
                     catch (Exception ex)
                     {
                         result.FailedExtractions++;
                         result.ErrorMessages.Add($"Pages {currentPage}-{endPage}: {ex.Message}");
-                        Console.WriteLine($"   ⚠️  Failed to extract pages {currentPage}-{endPage}: {ex.Message}");
+                         LoggerService.LogInformation($"   ⚠️  Failed to extract pages {currentPage}-{endPage}: {ex.Message}");
                     }
 
                     currentPage += pagesPerConsent;
@@ -649,16 +649,16 @@ namespace ConsentSyncCore.Services.Pdf
                 result.TotalExtracted = extractedCount;
                 result.Success = result.FailedExtractions == 0;
 
-                Console.WriteLine($"\n   ✅ Extraction complete:");
-                Console.WriteLine($"      Successfully extracted: {result.TotalExtracted}");
-                Console.WriteLine($"      Failed: {result.FailedExtractions}");
+                 LoggerService.LogInformation($"\n   ✅ Extraction complete:");
+                 LoggerService.LogInformation($"      Successfully extracted: {result.TotalExtracted}");
+                 LoggerService.LogInformation($"      Failed: {result.FailedExtractions}");
 
                 return result;
             }
             catch (Exception ex)
             {
                 result.ErrorMessage = $"Bulk extraction failed: {ex.Message}";
-                Console.WriteLine($"   ❌ {result.ErrorMessage}");
+                 LoggerService.LogInformation($"   ❌ {result.ErrorMessage}");
                 return result;
             }
         }
@@ -719,7 +719,7 @@ namespace ConsentSyncCore.Services.Pdf
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"⚠️  Warning: Could not create folder structure: {ex.Message}");
+                 LoggerService.LogInformation($"⚠️  Warning: Could not create folder structure: {ex.Message}");
             }
         }
 
@@ -744,11 +744,11 @@ namespace ConsentSyncCore.Services.Pdf
                 string destinationPath = Path.Combine(archivePath, archivedFileName);
 
                 File.Move(sourcePath, destinationPath, overwrite: true);
-                Console.WriteLine($"   📦 Archived to 5_Archive/{sourceType}: {archivedFileName}");
+                 LoggerService.LogInformation($"   📦 Archived to 5_Archive/{sourceType}: {archivedFileName}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ⚠️  Could not archive file: {ex.Message}");
+                 LoggerService.LogInformation($"   ⚠️  Could not archive file: {ex.Message}");
             }
         }
 
@@ -773,11 +773,11 @@ namespace ConsentSyncCore.Services.Pdf
                 File.WriteAllText(errorLogPath, $"Error Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\nFile: {fileName}\nError: {errorMessage}");
 
                 File.Move(sourcePath, destinationPath, overwrite: true);
-                Console.WriteLine($"   ⚠️  Moved to 4_Error: {fileName}");
+                 LoggerService.LogInformation($"   ⚠️  Moved to 4_Error: {fileName}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Could not move to error folder: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Could not move to error folder: {ex.Message}");
             }
         }
 
@@ -788,39 +788,39 @@ namespace ConsentSyncCore.Services.Pdf
             // ✅ Grand total = unique (3_Output_Ready) + all duplicates (5_Duplicate)
             int grandTotal = result.TotalExtracted + result.DuplicatesFound;
 
-            Console.WriteLine("\n" + new string('═', 60));
-            Console.WriteLine("📊 PROCESSING SUMMARY");
-            Console.WriteLine(new string('═', 60));
-            Console.WriteLine($"   Total pages processed    : {grandTotal}");
-            Console.WriteLine($"   ├── 3_Output_Ready       : {result.TotalExtracted}  (unique, ready to upload)");
-            Console.WriteLine($"   └── 5_Duplicate          : {result.DuplicatesFound}  (all copies, needs review)");
+             LoggerService.LogInformation("\n" + new string('═', 60));
+             LoggerService.LogInformation("📊 PROCESSING SUMMARY");
+             LoggerService.LogInformation(new string('═', 60));
+             LoggerService.LogInformation($"   Total pages processed    : {grandTotal}");
+             LoggerService.LogInformation($"   ├── 3_Output_Ready       : {result.TotalExtracted}  (unique, ready to upload)");
+             LoggerService.LogInformation($"   └── 5_Duplicate          : {result.DuplicatesFound}  (all copies, needs review)");
             if (result.UnknownNameCount > 0)
-                Console.WriteLine($"   4_Error (unknown names)  : {result.UnknownNameCount}  ⚠️  manual review required");
+                 LoggerService.LogInformation($"   4_Error (unknown names)  : {result.UnknownNameCount}  ⚠️  manual review required");
             if (result.FailedExtractions > 0)
-                Console.WriteLine($"   Failed                   : {result.FailedExtractions}  ❌");
-            Console.WriteLine($"   Status                   : {(result.Success ? "✅ Success" : "⚠️  Needs Review")}");
-            Console.WriteLine(new string('═', 60));
+                 LoggerService.LogInformation($"   Failed                   : {result.FailedExtractions}  ❌");
+             LoggerService.LogInformation($"   Status                   : {(result.Success ? "✅ Success" : "⚠️  Needs Review")}");
+             LoggerService.LogInformation(new string('═', 60));
 
-            Console.WriteLine($"\n📁 Output Locations:");
-            Console.WriteLine($"   3_Output_Ready : {_bulkConfig.GetOutputReadyPath()}");
-            Console.WriteLine($"   5_Duplicate    : {_bulkConfig.GetDuplicateClientPath()}");
-            Console.WriteLine($"   4_Error        : {_bulkConfig.GetErrorPath()}");
+             LoggerService.LogInformation($"\n📁 Output Locations:");
+             LoggerService.LogInformation($"   3_Output_Ready : {_bulkConfig.GetOutputReadyPath()}");
+             LoggerService.LogInformation($"   5_Duplicate    : {_bulkConfig.GetDuplicateClientPath()}");
+             LoggerService.LogInformation($"   4_Error        : {_bulkConfig.GetErrorPath()}");
 
             if (result.UnknownNameCount > 0 || result.DuplicatesFound > 0)
             {
-                Console.WriteLine($"\n⚠️  MANUAL REVIEW REQUIRED:");
+                 LoggerService.LogInformation($"\n⚠️  MANUAL REVIEW REQUIRED:");
 
                 if (result.UnknownNameCount > 0)
-                    Console.WriteLine($"   • {result.UnknownNameCount} file(s) with unknown names in 4_Error → identify and rename");
+                     LoggerService.LogInformation($"   • {result.UnknownNameCount} file(s) with unknown names in 4_Error → identify and rename");
 
                 if (result.DuplicatesFound > 0)
-                    Console.WriteLine($"   • {result.DuplicatesFound} file(s) in 5_Duplicate → review HOW_TO_MERGE.txt in each subfolder");
+                     LoggerService.LogInformation($"   • {result.DuplicatesFound} file(s) in 5_Duplicate → review HOW_TO_MERGE.txt in each subfolder");
             }
 
             if (result.Success)
-                Console.WriteLine($"\n✅ All pages processed — ready for Phase 3!");
+                 LoggerService.LogInformation($"\n✅ All pages processed — ready for Phase 3!");
             else
-                Console.WriteLine($"\n⚠️  Review required before proceeding to Phase 3.");
+                 LoggerService.LogInformation($"\n⚠️  Review required before proceeding to Phase 3.");
         }
 
 
@@ -1096,7 +1096,7 @@ Recommended: Keep for at least one school year.
             catch (Exception ex)
             {
                 // Silently fail — README files are nice-to-have, not critical
-                Console.WriteLine($"⚠️  Could not create README files: {ex.Message}");
+                 LoggerService.LogInformation($"⚠️  Could not create README files: {ex.Message}");
             }
         }
 

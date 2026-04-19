@@ -66,7 +66,7 @@ namespace ConsentSyncCore.Services.Phis
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"   ⚠️  Could not extract row: {ex.Message}");
+                         LoggerService.LogInformation($"   ⚠️  Could not extract row: {ex.Message}");
                     }
                 }
 
@@ -74,7 +74,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Error extracting results: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Error extracting results: {ex.Message}");
                 throw;
             }
         }
@@ -139,16 +139,16 @@ namespace ConsentSyncCore.Services.Phis
                 }
                 catch
                 {
-                    Console.WriteLine("   ⚠️  Medicare column not found");
+                     LoggerService.LogInformation("   ⚠️  Medicare column not found");
                     _medicareIdx = null;
                 }
 
                 _columnIndicesInitialized = true;
-                Console.WriteLine($"   ✅ Columns: ClientID={_clientIdIdx}, FirstName={_firstNameIdx}, LastName={_lastNameIdx}, Medicare={_medicareIdx?.ToString() ?? "N/A"}");
+                 LoggerService.LogInformation($"   ✅ Columns: ClientID={_clientIdIdx}, FirstName={_firstNameIdx}, LastName={_lastNameIdx}, Medicare={_medicareIdx?.ToString() ?? "N/A"}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Failed to initialize columns: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Failed to initialize columns: {ex.Message}");
                 throw;
             }
         }

@@ -157,7 +157,8 @@ namespace Orchestrator.Phase1
                 LoggerService.LogInformation("\n📋 Step 2: Initializing browser and services...");
                 if (!InitializeServices())
                 {
-                    LoggerService.LogInformation("❌ Service initialization failed");
+                    LoggerService.LogError("❌ Service initialization failed — Chrome could not start.");
+                    result.HasErrors = true;   // ✅ was missing — caused false "success" report
                     return result;
                 }
 

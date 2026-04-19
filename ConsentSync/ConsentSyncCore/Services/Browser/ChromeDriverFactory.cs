@@ -3,6 +3,7 @@ using ConsentSyncCore.Services.ConfigurationPoco;
 using Microsoft.Extensions.Configuration;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Text.Json;
 
@@ -11,7 +12,7 @@ namespace ConsentSyncCore.Services.Browser
     public class ChromeDriverFactory
     {
         private readonly IConfiguration _config;
-        private ChromeDriverConfig _chromeConfig;   // mutable — path may be auto-filled
+        private ChromeDriverConfig _chromeConfig;
 
         public ChromeDriverFactory(IConfiguration? config = null)
         {
@@ -21,77 +22,35 @@ namespace ConsentSyncCore.Services.Browser
 
         #region Public API
 
-        /// <summary>
-        /// Create a new Chrome WebDriver with configured options.
-        /// Auto-detects ChromeDriver location when UsePortableChrome is true
-        /// and ChromeDriverPath is not explicitly set.
-        /// </summary>
         public IWebDriver CreateDriver()
         {
             try
             {
-                Console.WriteLine("\n🌐 Initializing Chrome WebDriver...");
-
-                // ── Auto-detect: if portable Chrome is used, look for chromedriver.exe
-                //    in the same folder as chrome.exe (matches "Chrome for Testing" zip layout)
-                if (_chromeConfig.UsePortableChrome &&
-                    string.IsNullOrWhiteSpace(_chromeConfig.ChromeDriverPath))
-                {
-                    var portableDir = Path.GetDirectoryName(_chromeConfig.PortableChromePath);
-
-                    // Also check the configured ChromeDriver extract folder
-                    var candidates = new[]
-                    {
-                        portableDir,
-                        _chromeConfig.ChromeDriverExtractTo,
-                        Path.Combine(_chromeConfig.ChromeDriverExtractTo, "chromedriver-win64")
-                    };
-
-                    foreach (var candidate in candidates)
-                    {
-                        if (!string.IsNullOrWhiteSpace(candidate) &&
-                            File.Exists(Path.Combine(candidate, "chromedriver.exe")))
-                        {
-                            _chromeConfig.ChromeDriverPath = candidate;
-                            Console.WriteLine($"   🔍 Auto-detected ChromeDriver: {candidate}");
-                            break;
-                        }
-                    }
-                }
+                LoggerService.LogInformation("\n🌐 Initializing Chrome WebDriver...");
 
                 var chromeOptions = BuildChromeOptions();
 
-                // ── Resolve driver path ───────────────────────────────────────────
                 string driverPath = !string.IsNullOrWhiteSpace(_chromeConfig.ChromeDriverPath) &&
                                     Directory.Exists(_chromeConfig.ChromeDriverPath)
                     ? _chromeConfig.ChromeDriverPath
                     : AppContext.BaseDirectory;
 
-                Console.WriteLine($"   ChromeDriver path: {driverPath}");
+                LoggerService.LogInformation($"   ChromeDriver path  : {driverPath}");
+                LoggerService.LogInformation($"   chrome.exe path    : {(_chromeConfig.UsePortableChrome ? _chromeConfig.PortableChromePath : FindSystemChrome() ?? "system Chrome")}");
 
-                var service = ChromeDriverService.CreateDefaultService(driverPath);
-                service.SuppressInitialDiagnosticInformation = true;
-                service.HideCommandPromptWindow = true;
+                var driver = new ChromeDriver(driverPath, chromeOptions);
 
-                var driver = new ChromeDriver(service, chromeOptions);
-
-                Console.WriteLine("✅ Chrome WebDriver initialized successfully\n");
+                LoggerService.LogInformation("✅ Chrome WebDriver initialized successfully\n");
                 return driver;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Failed to initialize ChromeDriver: {ex.Message}");
+                LoggerService.LogError($"❌ Failed to initialize ChromeDriver: {ex.Message}", ex);
                 DisplayTroubleshootingTips();
                 throw;
             }
         }
 
-        /// <summary>
-        /// Download the latest "Chrome for Testing" (portable chrome.exe + chromedriver.exe)
-        /// for the configured channel (Stable / Beta / Dev / Canary).
-        /// Call this from your UI's "Download Portable Chrome" button.
-        /// Progress is reported via the optional <paramref name="progress"/> callback.
-        /// </summary>
         public async Task<bool> DownloadPortableChromeAsync(
             Action<string>? progress = null,
             CancellationToken cancellationToken = default)
@@ -100,7 +59,6 @@ namespace ConsentSyncCore.Services.Browser
             {
                 progress?.Invoke("📡 Fetching Chrome for Testing version information...");
 
-                // ── Step 1: Fetch the versions JSON ──────────────────────────────
                 using var http = new System.Net.Http.HttpClient();
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("ConsentSync/1.0");
 
@@ -114,28 +72,18 @@ namespace ConsentSyncCore.Services.Browser
 
                 progress?.Invoke($"📦 Found {_chromeConfig.PortableChromeChannel} version: {version}");
 
-                // ── Step 2: Locate win64 download URLs ───────────────────────────
-                string? chromeUrl = null;
-                string? driverUrl = null;
-
                 var downloads = channel.GetProperty("downloads");
+                string? chromeUrl = null, driverUrl = null;
 
-                if (downloads.TryGetProperty("chrome", out var chromeArr))
-                    chromeUrl = GetWin64Url(chromeArr);
-
-                if (downloads.TryGetProperty("chromedriver", out var driverArr))
-                    driverUrl = GetWin64Url(driverArr);
+                if (downloads.TryGetProperty("chrome", out var ca)) chromeUrl = GetWin64Url(ca);
+                if (downloads.TryGetProperty("chromedriver", out var da)) driverUrl = GetWin64Url(da);
 
                 if (chromeUrl is null || driverUrl is null)
                 {
-                    progress?.Invoke("❌ Could not find win64 download URLs in the versions JSON.");
+                    progress?.Invoke("❌ Could not find win64 download URLs.");
                     return false;
                 }
 
-                progress?.Invoke($"⬇️  Downloading Chrome:       {chromeUrl}");
-                progress?.Invoke($"⬇️  Downloading ChromeDriver: {driverUrl}");
-
-                // ── Step 3: Download both ZIPs in parallel ───────────────────────
                 var chromeZip = Path.Combine(Path.GetTempPath(), $"chrome-win64-{version}.zip");
                 var driverZip = Path.Combine(Path.GetTempPath(), $"chromedriver-win64-{version}.zip");
 
@@ -143,43 +91,27 @@ namespace ConsentSyncCore.Services.Browser
                     DownloadFileAsync(http, chromeUrl, chromeZip, cancellationToken),
                     DownloadFileAsync(http, driverUrl, driverZip, cancellationToken));
 
-                // ── Step 4: Extract ──────────────────────────────────────────────
-                progress?.Invoke($"📂 Extracting Chrome to:       {_chromeConfig.PortableChromeExtractTo}");
+                progress?.Invoke($"📂 Extracting Chrome to: {_chromeConfig.PortableChromeExtractTo}");
                 ExtractZip(chromeZip, _chromeConfig.PortableChromeExtractTo, progress);
 
                 progress?.Invoke($"📂 Extracting ChromeDriver to: {_chromeConfig.ChromeDriverExtractTo}");
                 ExtractZip(driverZip, _chromeConfig.ChromeDriverExtractTo, progress);
 
-                // ── Step 5: Cleanup temp ZIPs ────────────────────────────────────
                 TryDelete(chromeZip);
                 TryDelete(driverZip);
 
-                // ── Step 6: Locate chrome.exe inside the extracted folder ────────
-                // "Chrome for Testing" zips extract as:  chrome-win64\chrome.exe
                 var detectedChrome = Directory
                     .GetFiles(_chromeConfig.PortableChromeExtractTo, "chrome.exe", SearchOption.AllDirectories)
                     .FirstOrDefault();
 
                 if (detectedChrome != null)
-                {
                     progress?.Invoke($"✅ Portable Chrome ready: {detectedChrome}");
-                    progress?.Invoke($"   Set PortableChromePath = \"{detectedChrome}\" in appsettings.json");
-                    progress?.Invoke($"   Set UsePortableChrome  = true");
-                }
 
                 progress?.Invoke($"\n✅ Download complete! Version: {version}");
                 return true;
             }
-            catch (OperationCanceledException)
-            {
-                progress?.Invoke("⚠️  Download cancelled.");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                progress?.Invoke($"❌ Download failed: {ex.Message}");
-                return false;
-            }
+            catch (OperationCanceledException) { progress?.Invoke("⚠️  Download cancelled."); return false; }
+            catch (Exception ex) { progress?.Invoke($"❌ Download failed: {ex.Message}"); return false; }
         }
 
         #endregion
@@ -189,7 +121,8 @@ namespace ConsentSyncCore.Services.Browser
         private ChromeOptions BuildChromeOptions()
         {
             var options = new ChromeOptions();
-            Console.WriteLine($"🔧 Chrome options:");
+            LoggerService.LogInformation("🔧 Building Chrome options:");
+
             ConfigurePortableChrome(options);
             ConfigureDebuggerMode(options);
             ConfigureStandardOptions(options);
@@ -208,23 +141,24 @@ namespace ConsentSyncCore.Services.Browser
 
         private void ConfigurePortableChrome(ChromeOptions options)
         {
-            Console.WriteLine($"   Use portable Chrome: {_chromeConfig.UsePortableChrome}");
+            LoggerService.LogInformation($"   UsePortableChrome  : {_chromeConfig.UsePortableChrome}");
+
             if (_chromeConfig.UsePortableChrome && !string.IsNullOrWhiteSpace(_chromeConfig.PortableChromePath))
             {
                 if (File.Exists(_chromeConfig.PortableChromePath))
                 {
                     options.BinaryLocation = _chromeConfig.PortableChromePath;
-                    Console.WriteLine($"   ✅ Portable Chrome: {_chromeConfig.PortableChromePath}");
+                    LoggerService.LogInformation($"   ✅ chrome.exe      : {_chromeConfig.PortableChromePath}");
                 }
                 else
                 {
-                    Console.WriteLine($"   ⚠️  Portable Chrome not found: {_chromeConfig.PortableChromePath}");
-                    Console.WriteLine($"   ℹ️  Falling back to system Chrome");
+                    LoggerService.LogWarning($"   ⚠️  chrome.exe not found: {_chromeConfig.PortableChromePath}");
+                    LoggerService.LogWarning("   ⚠️  Falling back to system Chrome");
                 }
             }
             else if (!_chromeConfig.UsePortableChrome)
             {
-                Console.WriteLine($"   Using system Chrome installation");
+                LoggerService.LogInformation("   🖥️  Using system Chrome (BinaryLocation not set)");
             }
         }
 
@@ -233,124 +167,127 @@ namespace ConsentSyncCore.Services.Browser
             if (_chromeConfig.UseDebuggerMode)
             {
                 options.DebuggerAddress = $"127.0.0.1:{_chromeConfig.DebuggerPort}";
-                Console.WriteLine($"   🔌 Debugger mode: Port {_chromeConfig.DebuggerPort}");
+                LoggerService.LogInformation($"   🔌 Debugger port   : {_chromeConfig.DebuggerPort}");
             }
         }
+
 
         private void ConfigureStandardOptions(ChromeOptions options)
         {
             if (_chromeConfig.StartMaximized) options.AddArgument("--start-maximized");
             if (_chromeConfig.DisableNotifications) options.AddArgument("--disable-notifications");
             if (_chromeConfig.DisablePopupBlocking) options.AddArgument("--disable-popup-blocking");
-            if (_chromeConfig.Headless)
-            {
-                options.AddArgument("--headless");
-                options.AddArgument("--disable-gpu");
-                Console.WriteLine($"   👻 Headless mode: Enabled");
-            }
+
             options.AddArgument("--no-sandbox");
             options.AddArgument("--disable-dev-shm-usage");
+
+            if (_chromeConfig.Headless)
+            {
+                options.AddArgument("--headless=new");
+                options.AddArgument("--disable-gpu");
+                LoggerService.LogInformation("   👻 Headless mode   : Enabled");
+            }
+
+            // ✅ Isolated temp profile
+            var tempProfile = Path.Combine(Path.GetTempPath(), $"ConsentSync_Chrome_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(tempProfile);
+            options.AddArgument($"--user-data-dir={tempProfile}");
+            LoggerService.LogInformation($"   📁 Chrome profile  : {tempProfile}");
         }
 
-        /// <summary>
-        /// ✅ FIX: path is already resolved by ConfigurationService — just create + use it.
-        /// </summary>
         private void ConfigureDownloadDirectory(ChromeOptions options)
         {
-            if (string.IsNullOrWhiteSpace(_chromeConfig.DefaultDownloadChromeDirectory))
-                return;
+            if (string.IsNullOrWhiteSpace(_chromeConfig.DefaultDownloadChromeDirectory)) return;
 
-            // Path arrives already resolved from GetChromeDriverConfig()
-            string resolvedPath = _chromeConfig.DefaultDownloadChromeDirectory;
-            Directory.CreateDirectory(resolvedPath);
+            Directory.CreateDirectory(_chromeConfig.DefaultDownloadChromeDirectory);
 
             var prefs = new Dictionary<string, object>
             {
-                { "download.default_directory", resolvedPath },
+                { "download.default_directory", _chromeConfig.DefaultDownloadChromeDirectory },
                 { "download.prompt_for_download", false },
                 { "download.directory_upgrade", true },
                 { "safebrowsing.enabled", false }
             };
 
             options.AddUserProfilePreference("download", prefs);
-            Console.WriteLine($"   📁 Download directory: {resolvedPath}");
-        }
-
-        #endregion
-
-        #region Download Helpers
-
-        private static string? GetWin64Url(JsonElement platformArray)
-        {
-            foreach (var item in platformArray.EnumerateArray())
-            {
-                if (item.TryGetProperty("platform", out var p) &&
-                    p.GetString() == "win64" &&
-                    item.TryGetProperty("url", out var u))
-                    return u.GetString();
-            }
-            return null;
-        }
-
-        private static async Task DownloadFileAsync(
-            System.Net.Http.HttpClient http,
-            string url,
-            string destination,
-            CancellationToken ct)
-        {
-            var bytes = await http.GetByteArrayAsync(url, ct);
-            await File.WriteAllBytesAsync(destination, bytes, ct);
-        }
-
-        private static void ExtractZip(string zipPath, string extractTo, Action<string>? progress)
-        {
-            Directory.CreateDirectory(extractTo);
-
-            using var archive = ZipFile.OpenRead(zipPath);
-            foreach (var entry in archive.Entries)
-            {
-                // Flatten one level: strip the top zip folder (e.g. "chrome-win64/")
-                var relativePath = string.Join('\\', entry.FullName.Split('/').Skip(1));
-                if (string.IsNullOrWhiteSpace(relativePath)) continue;
-
-                var destPath = Path.Combine(extractTo, relativePath);
-
-                if (entry.FullName.EndsWith('/'))        // directory entry
-                {
-                    Directory.CreateDirectory(destPath);
-                }
-                else
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
-                    entry.ExtractToFile(destPath, overwrite: true);
-                    progress?.Invoke($"   📄 {relativePath}");
-                }
-            }
-        }
-
-        private static void TryDelete(string path)
-        {
-            try { if (File.Exists(path)) File.Delete(path); } catch { }
+            LoggerService.LogInformation($"   📁 Download directory: {_chromeConfig.DefaultDownloadChromeDirectory}");
         }
 
         #endregion
 
         #region Diagnostics
 
-        public void DisplayConfiguration()
+        public ChromeVersionCheckResult VerifyVersionMatch()
         {
-            Console.WriteLine("\n🌐 Chrome Driver Configuration:");
-            Console.WriteLine($"   Portable Chrome     : {_chromeConfig.UsePortableChrome}");
+            var result = new ChromeVersionCheckResult();
+
             if (_chromeConfig.UsePortableChrome)
             {
-                Console.WriteLine($"   Chrome Path         : {_chromeConfig.PortableChromePath}");
-                Console.WriteLine($"   chrome.exe exists   : {File.Exists(_chromeConfig.PortableChromePath)}");
+                result.ChromePath = _chromeConfig.PortableChromePath;
+                if (!File.Exists(result.ChromePath))
+                {
+                    result.ChromeFound = false;
+                    result.ErrorMessage = $"chrome.exe not found: {result.ChromePath}";
+                    return result;
+                }
+                result.ChromeFound = true;
+                var cvi = FileVersionInfo.GetVersionInfo(result.ChromePath);
+                result.ChromeVersion = cvi.FileVersion ?? "unknown";
+                result.ChromeMajor = cvi.FileMajorPart;
             }
-            Console.WriteLine($"   Driver Path         : {(string.IsNullOrWhiteSpace(_chromeConfig.ChromeDriverPath) ? "auto-detect" : _chromeConfig.ChromeDriverPath)}");
-            Console.WriteLine($"   Channel             : {_chromeConfig.PortableChromeChannel}");
-            Console.WriteLine($"   Chrome extract to   : {_chromeConfig.PortableChromeExtractTo}");
-            Console.WriteLine($"   Driver extract to   : {_chromeConfig.ChromeDriverExtractTo}");
-            Console.WriteLine($"   Download directory  : {_chromeConfig.DefaultDownloadChromeDirectory}");
+            else
+            {
+                var systemPath = FindSystemChrome();
+                if (systemPath == null)
+                {
+                    result.ChromeFound = false;
+                    result.ChromePath = "Not found";
+                    result.ChromeVersion = "—";
+                    result.ErrorMessage = "System Chrome not found";
+                    return result;
+                }
+                result.ChromeFound = true;
+                result.ChromePath = systemPath;
+                var cvi = FileVersionInfo.GetVersionInfo(systemPath);
+                result.ChromeVersion = cvi.FileVersion ?? "unknown";
+                result.ChromeMajor = cvi.FileMajorPart;
+            }
+
+            var driverDir = !string.IsNullOrWhiteSpace(_chromeConfig.ChromeDriverPath)
+                ? _chromeConfig.ChromeDriverPath
+                : _chromeConfig.ChromeDriverExtractTo;
+            result.DriverPath = Path.Combine(driverDir, "chromedriver.exe");
+
+            if (!File.Exists(result.DriverPath))
+            {
+                result.DriverFound = false;
+                result.ErrorMessage = $"chromedriver.exe not found: {result.DriverPath}";
+                return result;
+            }
+
+            result.DriverFound = true;
+            var dvi = FileVersionInfo.GetVersionInfo(result.DriverPath);
+            result.DriverVersion = dvi.FileVersion ?? "unknown";
+            result.DriverMajor = dvi.FileMajorPart;
+
+            result.VersionsMatch = result.ChromeMajor == result.DriverMajor;
+            if (!result.VersionsMatch)
+                result.ErrorMessage =
+                    $"Major version mismatch: Chrome v{result.ChromeMajor} vs ChromeDriver v{result.DriverMajor}";
+
+            return result;
+        }
+
+        public void DisplayConfiguration()
+        {
+            LoggerService.LogInformation("\n🌐 Chrome Driver Configuration:");
+            LoggerService.LogInformation($"   Portable Chrome     : {_chromeConfig.UsePortableChrome}");
+            if (_chromeConfig.UsePortableChrome)
+            {
+                LoggerService.LogInformation($"   Chrome Path         : {_chromeConfig.PortableChromePath}");
+                LoggerService.LogInformation($"   chrome.exe exists   : {File.Exists(_chromeConfig.PortableChromePath)}");
+            }
+            LoggerService.LogInformation($"   Driver Path         : {(string.IsNullOrWhiteSpace(_chromeConfig.ChromeDriverPath) ? "auto-detect" : _chromeConfig.ChromeDriverPath)}");
         }
 
         public bool VerifyInstallation()
@@ -358,45 +295,236 @@ namespace ConsentSyncCore.Services.Browser
             var driverPath = !string.IsNullOrWhiteSpace(_chromeConfig.ChromeDriverPath)
                 ? _chromeConfig.ChromeDriverPath
                 : AppContext.BaseDirectory;
-
             var exe = Path.Combine(driverPath, "chromedriver.exe");
-            if (!File.Exists(exe)) { Console.WriteLine($"❌ ChromeDriver not found: {exe}"); return false; }
-            Console.WriteLine($"✅ ChromeDriver found: {exe}");
+            if (!File.Exists(exe)) { LoggerService.LogWarning($"❌ ChromeDriver not found: {exe}"); return false; }
+            LoggerService.LogInformation($"✅ ChromeDriver found: {exe}");
             return true;
         }
 
         private void DisplayTroubleshootingTips()
         {
-            Console.WriteLine("\n💡 TROUBLESHOOTING:");
-            Console.WriteLine("   1. Use the UI 'Download Portable Chrome' button — it downloads");
-            Console.WriteLine($"      chrome.exe + chromedriver.exe for channel: {_chromeConfig.PortableChromeChannel}");
-            Console.WriteLine($"      Chrome  → {_chromeConfig.PortableChromeExtractTo}");
-            Console.WriteLine($"      Driver  → {_chromeConfig.ChromeDriverExtractTo}");
-            Console.WriteLine("   2. Or download manually:");
-            Console.WriteLine("      https://googlechromelabs.github.io/chrome-for-testing/");
-            Console.WriteLine("   3. Versions must match (same build number).");
+            LoggerService.LogInformation("\n💡 TROUBLESHOOTING:");
+            LoggerService.LogInformation($"   Chrome  → {(_chromeConfig.UsePortableChrome ? _chromeConfig.PortableChromePath : "system Chrome")}");
+            LoggerService.LogInformation($"   Driver  → {_chromeConfig.ChromeDriverPath}");
+            LoggerService.LogInformation("   • Versions must match (same major number)");
+            LoggerService.LogInformation("   • Use 🌐 Download Portable Chrome to get a matched pair");
+            LoggerService.LogInformation("   • https://googlechromelabs.github.io/chrome-for-testing/");
+        }
+
+        private void LogVersionInfo()
+        {
+            try
+            {
+                string? chromePath = _chromeConfig.UsePortableChrome
+                    ? _chromeConfig.PortableChromePath
+                    : FindSystemChrome();
+
+                if (chromePath != null)
+                {
+                    if (!_chromeConfig.UsePortableChrome)
+                        LoggerService.LogInformation($"   🖥️  System Chrome   : {chromePath}");
+                    var cv = FileVersionInfo.GetVersionInfo(chromePath);
+                    LoggerService.LogInformation($"   🔢 Chrome version   : {cv.FileVersion} (major {cv.FileMajorPart})");
+                }
+
+                var driverExe = Path.Combine(_chromeConfig.ChromeDriverPath, "chromedriver.exe");
+                if (File.Exists(driverExe))
+                {
+                    var dv = FileVersionInfo.GetVersionInfo(driverExe);
+                    LoggerService.LogInformation($"   🔢 Driver version   : {dv.FileVersion} (major {dv.FileMajorPart})");
+                    if (chromePath != null)
+                    {
+                        var cm = FileVersionInfo.GetVersionInfo(chromePath).FileMajorPart;
+                        if (cm != dv.FileMajorPart)
+                            LoggerService.LogWarning($"   ⚠️  VERSION MISMATCH — Chrome {cm} vs Driver {dv.FileMajorPart}");
+                        else
+                            LoggerService.LogInformation($"   ✅ Versions match   : major {cm}");
+                    }
+                }
+            }
+            catch (Exception ex) { LoggerService.LogWarning($"   ⚠️  Could not read version info: {ex.Message}"); }
+        }
+
+        public static string? FindSystemChrome()
+        {
+            var candidates = new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                    "Google", "Chrome", "Application", "chrome.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                    "Google", "Chrome", "Application", "chrome.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Google", "Chrome", "Application", "chrome.exe")
+            };
+            return candidates.FirstOrDefault(File.Exists);
         }
 
         public static string? GetChromeVersion()
         {
-            string[] paths =
-            [
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),        "Google\\Chrome\\Application\\chrome.exe"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),     "Google\\Chrome\\Application\\chrome.exe"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Google\\Chrome\\Application\\chrome.exe")
-            ];
+            var path = FindSystemChrome();
+            if (path == null) { LoggerService.LogInformation("⚠️  System Chrome not found"); return null; }
+            var v = FileVersionInfo.GetVersionInfo(path);
+            LoggerService.LogInformation($"✅ System Chrome: {path} ({v.FileVersion})");
+            return v.FileVersion;
+        }
 
-            foreach (var p in paths)
+        #endregion
+
+        #region Download Helpers
+
+
+        /// <summary>
+        /// Downloads the chromedriver.exe that exactly matches the currently installed
+        /// system Chrome version and places it in ChromeDriverPath.
+        /// No admin rights required — writes only to the configured user-accessible folder.
+        /// Call this from the UI when a Chrome/driver version mismatch is detected.
+        /// </summary>
+        public async Task<bool> UpdateSystemChromeDriverAsync(
+            Action<string>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            try
             {
-                if (!File.Exists(p)) continue;
-                var v = System.Diagnostics.FileVersionInfo.GetVersionInfo(p);
-                Console.WriteLine($"✅ System Chrome: {p} ({v.FileVersion})");
-                return v.FileVersion;
-            }
+                // ── Step 1: Detect system Chrome version ─────────────────────
+                var chromePath = FindSystemChrome();
+                if (chromePath == null)
+                {
+                    progress?.Invoke("❌ System Chrome not found. Cannot determine required driver version.");
+                    return false;
+                }
 
-            Console.WriteLine("⚠️  System Chrome not found");
+                var chromeVersion = FileVersionInfo.GetVersionInfo(chromePath).FileVersion;
+                if (string.IsNullOrWhiteSpace(chromeVersion))
+                {
+                    progress?.Invoke("❌ Could not read system Chrome version.");
+                    return false;
+                }
+
+                progress?.Invoke($"🔍 System Chrome detected : {chromeVersion}");
+                progress?.Invoke($"   Path                  : {chromePath}");
+
+                // ── Step 2: Check if current driver already matches ───────────
+                var driverExe = Path.Combine(_chromeConfig.ChromeDriverPath, "chromedriver.exe");
+                if (File.Exists(driverExe))
+                {
+                    var currentDriver = FileVersionInfo.GetVersionInfo(driverExe).FileVersion ?? "";
+                    if (currentDriver == chromeVersion)
+                    {
+                        progress?.Invoke($"✅ ChromeDriver already matches Chrome {chromeVersion} — no update needed.");
+                        return true;
+                    }
+                    progress?.Invoke($"⚠️  Driver mismatch: have {currentDriver}, need {chromeVersion}");
+                }
+
+                // ── Step 3: Download matching chromedriver ────────────────────
+                var url = $"https://storage.googleapis.com/chrome-for-testing-public/{chromeVersion}/win64/chromedriver-win64.zip";
+                progress?.Invoke($"⬇️  Downloading ChromeDriver {chromeVersion}...");
+                progress?.Invoke($"   URL: {url}");
+
+                using var http = new System.Net.Http.HttpClient();
+                http.DefaultRequestHeaders.UserAgent.ParseAdd("ConsentSync/1.0");
+
+                byte[] bytes;
+                try
+                {
+                    bytes = await http.GetByteArrayAsync(url, cancellationToken);
+                }
+                catch (System.Net.Http.HttpRequestException ex) when (ex.Message.Contains("404"))
+                {
+                    // ── Fallback: try major.minor.build.0 variant ─────────────
+                    var parts = chromeVersion.Split('.');
+                    var approx = $"{parts[0]}.{parts[1]}.{parts[2]}.0";
+                    progress?.Invoke($"   ⚠️  Exact build not found, trying {approx}...");
+                    var fallbackUrl = $"https://storage.googleapis.com/chrome-for-testing-public/{approx}/win64/chromedriver-win64.zip";
+                    bytes = await http.GetByteArrayAsync(fallbackUrl, cancellationToken);
+                }
+
+                // ── Step 4: Extract into temp folder ─────────────────────────
+                var zipPath = Path.Combine(Path.GetTempPath(), $"chromedriver-{chromeVersion}.zip");
+                var extractDir = Path.Combine(Path.GetTempPath(), $"chromedriver-{chromeVersion}");
+
+                await File.WriteAllBytesAsync(zipPath, bytes, cancellationToken);
+                progress?.Invoke("📂 Extracting...");
+
+                if (Directory.Exists(extractDir))
+                    Directory.Delete(extractDir, recursive: true);
+                System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, extractDir);
+                TryDelete(zipPath);
+
+                // ── Step 5: Locate chromedriver.exe in the extracted folder ───
+                var extracted = Directory.GetFiles(extractDir, "chromedriver.exe", SearchOption.AllDirectories)
+                                         .FirstOrDefault();
+                if (extracted == null)
+                {
+                    progress?.Invoke("❌ chromedriver.exe not found in downloaded archive.");
+                    return false;
+                }
+
+                // ── Step 6: Kill running chromedriver & copy ──────────────────
+                try
+                {
+                    foreach (var proc in System.Diagnostics.Process.GetProcessesByName("chromedriver"))
+                    {
+                        proc.Kill();
+                        proc.WaitForExit(3_000);
+                    }
+                }
+                catch { /* non-fatal */ }
+
+                Directory.CreateDirectory(_chromeConfig.ChromeDriverPath);
+                File.Copy(extracted, driverExe, overwrite: true);
+
+                // ── Step 7: Verify ────────────────────────────────────────────
+                var installedVersion = FileVersionInfo.GetVersionInfo(driverExe).FileVersion;
+                progress?.Invoke($"✅ ChromeDriver updated successfully!");
+                progress?.Invoke($"   Installed version : {installedVersion}");
+                progress?.Invoke($"   Location          : {driverExe}");
+
+                // Cleanup
+                TryDelete(extractDir);
+
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                progress?.Invoke("⚠️  Update cancelled.");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                progress?.Invoke($"❌ ChromeDriver update failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static string? GetWin64Url(JsonElement arr)
+        {
+            foreach (var item in arr.EnumerateArray())
+                if (item.TryGetProperty("platform", out var p) && p.GetString() == "win64" &&
+                    item.TryGetProperty("url", out var u))
+                    return u.GetString();
             return null;
         }
+
+        private static async Task DownloadFileAsync(System.Net.Http.HttpClient http, string url, string dest, CancellationToken ct)
+            => await File.WriteAllBytesAsync(dest, await http.GetByteArrayAsync(url, ct), ct);
+
+        private static void ExtractZip(string zipPath, string extractTo, Action<string>? progress)
+        {
+            Directory.CreateDirectory(extractTo);
+            using var archive = ZipFile.OpenRead(zipPath);
+            foreach (var entry in archive.Entries)
+            {
+                var rel = string.Join('\\', entry.FullName.Split('/').Skip(1));
+                if (string.IsNullOrWhiteSpace(rel)) continue;
+                var dest = Path.Combine(extractTo, rel);
+                if (entry.FullName.EndsWith('/')) Directory.CreateDirectory(dest);
+                else { Directory.CreateDirectory(Path.GetDirectoryName(dest)!); entry.ExtractToFile(dest, overwrite: true); }
+            }
+        }
+
+        private static void TryDelete(string path)
+        { try { if (File.Exists(path)) File.Delete(path); } catch { } }
 
         #endregion
     }

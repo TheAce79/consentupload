@@ -19,7 +19,13 @@ namespace OrchestratorUi
     public partial class UploadConsent : Form
     {
         private static readonly string AppSettingsPath =
-            Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+         Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+
+        // ✅ Source appsettings.json in the project — kept in sync with the output copy
+        private static readonly string AppSettingsSourcePath =
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+                "..", "..", "..", "..", "..", // bin\Debug\net9.0-windows\win-x64 → solution root
+                "ConsentSyncCore", "appsettings.json"));
 
         private CancellationTokenSource? _chromeCts;
 
@@ -268,35 +274,75 @@ namespace OrchestratorUi
         private bool PreFlightChecks()
         {
             // 1. Processed CSV must exist
-            var csvRepo = new StudentCsvRepository();
-            if (!csvRepo.ProcessedCsvExists())
+            var processedCsvPath = ConfigurationService.GetOutputCsvFullPath();
+            var csvConfig = ConfigurationService.GetCsvConfig();
+            var csvWs = ConfigurationService.GetCsvWorkspaceConfig();
+
+            if (!File.Exists(processedCsvPath))
             {
-                var csvWs = ConfigurationService.GetCsvWorkspaceConfig();
+                LoggerService.LogWarning($"⚠️  Pre-flight failed: {processedCsvPath}");
                 MessageBox.Show(
-                    "⚠️  No processed CSV file found.\n\n" +
-                    "Please run 'Process CSV' in Phase 0 before starting Phase 1.\n\n" +
-                    $"Expected location:\n{csvWs.GetProcessedCsvPath()}",
-                    "CSV Not Ready", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                LoggerService.LogWarning("⚠️  Pre-flight failed: processed CSV not found.");
+                    $"⚠️  The processed CSV file was not found.\n\n" +
+                    $"  Expected file   : {csvConfig.OutputCsvFileName}\n" +
+                    $"  Expected folder : {csvWs.GetProcessedCsvPath()}\n\n" +
+                    "Please click  📋 Process CSV  in Phase 0 first.",
+                    "Processed CSV Not Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
-            // 2. Chrome must be available
-            var chromeConfig = ConfigurationService.GetChromeDriverConfig();
-            if (chromeConfig.UsePortableChrome && !File.Exists(chromeConfig.PortableChromePath))
+            // 2. Chrome + ChromeDriver version check
+            var factory = new ChromeDriverFactory();
+            var check = factory.VerifyVersionMatch();
+
+            // Always log the details
+            LoggerService.LogInformation("🔍 Chrome Version Check:");
+            LoggerService.LogInformation($"   chrome.exe       : v{check.ChromeVersion}  ({check.ChromePath})");
+            LoggerService.LogInformation($"   chromedriver.exe : v{check.DriverVersion}  ({check.DriverPath})");
+
+            if (!check.ChromeFound)
             {
+                LoggerService.LogWarning($"⚠️  chrome.exe not found: {check.ChromePath}");
                 MessageBox.Show(
-                    "⚠️  Portable Chrome is not installed.\n\n" +
-                    "Please click '🌐 Download Portable Chrome' to install it before running Phase 1.",
+                    $"⚠️  Portable Chrome was not found.\n\n" +
+                    $"  Expected: {check.ChromePath}\n\n" +
+                    "Please click  🌐 Download Portable Chrome  to install it.",
                     "Chrome Not Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                LoggerService.LogWarning("⚠️  Pre-flight failed: portable chrome.exe not found.");
                 return false;
+            }
+
+            if (!check.DriverFound)
+            {
+                LoggerService.LogWarning($"⚠️  chromedriver.exe not found: {check.DriverPath}");
+                MessageBox.Show(
+                    $"⚠️  ChromeDriver was not found.\n\n" +
+                    $"  Expected: {check.DriverPath}\n\n" +
+                    "Please click  🌐 Download Portable Chrome  to re-download both\n" +
+                    "chrome.exe and chromedriver.exe together.",
+                    "ChromeDriver Not Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (!check.VersionsMatch)
+            {
+                LoggerService.LogWarning($"⚠️  Version mismatch — {check.ErrorMessage}");
+                var answer = MessageBox.Show(
+                    $"⚠️  Chrome and ChromeDriver version mismatch!\n\n" +
+                    $"  chrome.exe       : v{check.ChromeVersion}\n" +
+                    $"  chromedriver.exe : v{check.DriverVersion}\n\n" +
+                    "Chrome will crash immediately with mismatched versions.\n\n" +
+                    "Click  🌐 Download Portable Chrome  to re-download matching versions.\n\n" +
+                    "Continue anyway?",
+                    "Version Mismatch", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+
+                if (answer == DialogResult.No) return false;
+            }
+            else
+            {
+                LoggerService.LogInformation($"   ✅ Versions match — v{check.ChromeMajor} ready.");
             }
 
             return true;
         }
-
-
 
         // ── Button 1: Extract Bulk PDF ────────────────────────────────
         private async void btn_ExtractBulk_Click(object sender, EventArgs e)
@@ -450,54 +496,113 @@ namespace OrchestratorUi
         }
 
         // ── Portable Chrome ───────────────────────────────────────────
+
+
+
         private void RefreshChromeButtonState()
         {
             var chromeConfig = ConfigurationService.GetChromeDriverConfig();
-            bool exists = File.Exists(chromeConfig.PortableChromePath);
-            btn_PortableChrome.Text = exists ? "✅ Chrome Ready" : "🌐 Download Portable Chrome";
-            btn_PortableChrome.BackColor = exists ? Color.DarkGreen : Color.SteelBlue;
-            btn_PortableChrome.Enabled = true;
+
+            if (!chromeConfig.UsePortableChrome)
+            {
+                // ✅ System Chrome mode — button updates the driver
+                var check = new ChromeDriverFactory().VerifyVersionMatch();
+                bool matched = check.IsReady;
+                btn_PortableChrome.Text = matched ? "✅ Driver Up-to-Date" : "🔄 Update ChromeDriver";
+                btn_PortableChrome.BackColor = matched ? Color.DarkGreen : Color.DarkOrange;
+                btn_PortableChrome.Enabled = true;
+            }
+            else
+            {
+                // Portable Chrome mode — button downloads CfT
+                bool exists = File.Exists(chromeConfig.PortableChromePath);
+                btn_PortableChrome.Text = exists ? "✅ Chrome Ready" : "🌐 Download Portable Chrome";
+                btn_PortableChrome.BackColor = exists ? Color.DarkGreen : Color.SteelBlue;
+                btn_PortableChrome.Enabled = true;
+            }
         }
+
+
+
 
         private async void btn_PortableChrome_Click(object sender, EventArgs e)
         {
             var chromeConfig = ConfigurationService.GetChromeDriverConfig();
-            if (File.Exists(chromeConfig.PortableChromePath))
-            {
-                if (MessageBox.Show(
-                    $"✅ Portable Chrome is already installed at:\n{chromeConfig.PortableChromePath}\n\nRe-download anyway?",
-                    "Already Installed", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
-                    return;
-            }
-
             btn_PortableChrome.Enabled = false;
-            btn_PortableChrome.Text = "⏳ Downloading…";
             _chromeCts = new CancellationTokenSource();
 
             try
             {
-                LoggerService.LogInformation($"\n🌐 Downloading Portable Chrome ({chromeConfig.PortableChromeChannel} channel)...");
                 var factory = new ChromeDriverFactory();
-                bool success = await Task.Run(() =>
+
+                // ✅ System Chrome mode — update chromedriver to match installed Chrome
+                if (!chromeConfig.UsePortableChrome)
+                {
+                    btn_PortableChrome.Text = "⏳ Updating driver…";
+                    LoggerService.LogInformation("\n🔄 Updating ChromeDriver to match system Chrome...");
+
+                    bool success = await Task.Run(() =>
+                        factory.UpdateSystemChromeDriverAsync(
+                            progress: msg => LoggerService.LogInformation(msg),
+                            cancellationToken: _chromeCts.Token));
+
+                    MessageBox.Show(
+                        success
+                            ? "✅ ChromeDriver updated successfully!\n\nIt now matches your system Chrome version."
+                            : "❌ ChromeDriver update failed.\nCheck the log panel for details.",
+                        success ? "Driver Updated" : "Update Failed",
+                        MessageBoxButtons.OK,
+                        success ? MessageBoxIcon.Information : MessageBoxIcon.Error);
+
+                    return;
+                }
+
+                // ── Portable Chrome mode — download CfT ──────────────────────
+                if (File.Exists(chromeConfig.PortableChromePath))
+                {
+                    if (MessageBox.Show(
+                        $"✅ Portable Chrome is already installed at:\n{chromeConfig.PortableChromePath}\n\nRe-download anyway?",
+                        "Already Installed", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+                        return;
+                }
+
+                btn_PortableChrome.Text = "⏳ Downloading…";
+                LoggerService.LogInformation($"\n🌐 Downloading Portable Chrome ({chromeConfig.PortableChromeChannel} channel)...");
+
+                bool dlSuccess = await Task.Run(() =>
                     factory.DownloadPortableChromeAsync(
                         progress: msg => LoggerService.LogInformation(msg),
                         cancellationToken: _chromeCts.Token));
 
-                if (success)
+                if (dlSuccess)
                 {
-                    var chrome = Directory.GetFiles(chromeConfig.PortableChromeExtractTo, "chrome.exe", SearchOption.AllDirectories).FirstOrDefault();
+                    var chrome = Directory.GetFiles(
+                        chromeConfig.PortableChromeExtractTo, "chrome.exe",
+                        SearchOption.AllDirectories).FirstOrDefault();
                     if (chrome != null) SaveChromePathToConfig(chrome);
-                    MessageBox.Show($"✅ Portable Chrome is ready!\n\n{chrome ?? chromeConfig.PortableChromeExtractTo}",
+                    MessageBox.Show(
+                        $"✅ Portable Chrome is ready!\n\n{chrome ?? chromeConfig.PortableChromeExtractTo}",
                         "Download Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
                 {
-                    MessageBox.Show("❌ Download failed.\nCheck the log for details.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("❌ Download failed.\nCheck the log for details.",
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
-            catch (OperationCanceledException) { LoggerService.LogWarning("⚠️  Download cancelled."); }
-            finally { _chromeCts?.Dispose(); _chromeCts = null; RefreshChromeButtonState(); }
+            catch (OperationCanceledException) { LoggerService.LogWarning("⚠️  Cancelled."); }
+            finally
+            {
+                _chromeCts?.Dispose();
+                _chromeCts = null;
+                RefreshChromeButtonState();
+            }
         }
+
+
+
+
+
 
         private void SaveChromePathToConfig(string chromePath)
         {
@@ -506,12 +611,21 @@ namespace OrchestratorUi
                 var node = JsonNode.Parse(File.ReadAllText(AppSettingsPath))!;
                 node["ChromeDriver"]!["PortableChromePath"] = chromePath;
                 node["ChromeDriver"]!["UsePortableChrome"] = true;
-                File.WriteAllText(AppSettingsPath, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+                var json = node.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+
+                // ✅ Write to output copy (runtime reads this)
+                File.WriteAllText(AppSettingsPath, json);
+
+                // ✅ Write back to source file so next build doesn't overwrite with stale values
+                SyncToSourceAppsettings(json);
+
                 ConfigurationService.ReloadConfiguration();
                 LoggerService.LogInformation($"   ✅ PortableChromePath saved: {chromePath}");
             }
             catch (Exception ex) { LoggerService.LogWarning($"   ⚠️  Could not update appsettings.json: {ex.Message}"); }
         }
+
 
         private void btn_BrowseDir_Click(object sender, EventArgs e)
         {
@@ -521,6 +635,7 @@ namespace OrchestratorUi
             if (folderBrowserDialog1.ShowDialog() == DialogResult.OK)
                 txt_BaseDir.Text = folderBrowserDialog1.SelectedPath;
         }
+
 
         private void btn_SaveConfig_Click(object sender, EventArgs e)
         {
@@ -538,13 +653,50 @@ namespace OrchestratorUi
                 node["SchoolContext"]!["SchoolName"] = txt_SchoolName.Text;
                 node["SchoolContext"]!["Grade"] = cb_Grade.SelectedItem!.ToString();
                 node["PhisAutomation"]!["BatchSize"] = batchSize;
-                File.WriteAllText(AppSettingsPath, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+                var json = node.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+
+                // ✅ Write to output copy (runtime reads this)
+                File.WriteAllText(AppSettingsPath, json);
+
+                // ✅ Write back to source file so next build doesn't overwrite with stale values
+                SyncToSourceAppsettings(json);
+
                 ConfigurationService.ReloadConfiguration();
                 WorkspaceInitializer.EnsureAllFoldersExist();
                 MessageBox.Show($"✅ Configuration saved!\n\n  Base Dir : {txt_BaseDir.Text}\n  School   : {txt_SchoolName.Text}\n  Grade    : {cb_Grade.SelectedItem}\n  Batch    : {batchSize}", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex) { MessageBox.Show($"❌ Failed to save:\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
+
+
+        /// <summary>
+        /// Writes the given JSON content back to the source appsettings.json in ConsentSyncCore,
+        /// so that a future build does not overwrite the output copy with stale values.
+        /// Silently skips if the source path cannot be resolved (e.g. published single-file).
+        /// </summary>
+        private static void SyncToSourceAppsettings(string json)
+        {
+            try
+            {
+                if (File.Exists(AppSettingsSourcePath))
+                {
+                    File.WriteAllText(AppSettingsSourcePath, json);
+                    LoggerService.LogInformation($"   🔄 Source appsettings.json synced: {AppSettingsSourcePath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal — output copy is the authoritative runtime file
+                LoggerService.LogWarning($"   ⚠️  Could not sync source appsettings.json: {ex.Message}");
+            }
+        }
+
+
+
+
+
+
 
         private void txtBox_BatchSize_KeyPress(object sender, KeyPressEventArgs e)
         {

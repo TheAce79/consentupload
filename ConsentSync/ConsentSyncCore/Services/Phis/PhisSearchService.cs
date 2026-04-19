@@ -65,10 +65,10 @@ namespace ConsentSyncCore.Services.Phis
                     return SearchResult.Failed("Session validation failed");
                 }
 
-                Console.WriteLine($"   🔍 Searching by DOB: {dateOfBirth}");
+                 LoggerService.LogInformation($"   🔍 Searching by DOB: {dateOfBirth}");
                 if (!string.IsNullOrEmpty(expectedFirstName) && !string.IsNullOrEmpty(expectedLastName))
                 {
-                    Console.WriteLine($"      Looking for: {expectedFirstName} {expectedLastName}");
+                     LoggerService.LogInformation($"      Looking for: {expectedFirstName} {expectedLastName}");
                 }
 
                 // Navigate to search page
@@ -91,22 +91,22 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (results.Count == 0)
                 {
-                    Console.WriteLine($"   ⚠️  No results found for DOB: {dateOfBirth}");
+                     LoggerService.LogInformation($"   ⚠️  No results found for DOB: {dateOfBirth}");
                     return SearchResult.NoResults();
                 }
 
-                Console.WriteLine($"   📊 Found {results.Count} result(s)");
+                 LoggerService.LogInformation($"   📊 Found {results.Count} result(s)");
 
                 return SearchResult.IsSuccess(results);
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("Session expired"))
             {
-                Console.WriteLine($"   ❌ Session expired during search");
+                 LoggerService.LogInformation($"   ❌ Session expired during search");
                 return SearchResult.Failed("Session expired");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Search error: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Search error: {ex.Message}");
                 return SearchResult.Failed(ex.Message);
             }
         }
@@ -128,7 +128,7 @@ namespace ConsentSyncCore.Services.Phis
                     return SearchResult.Failed("Session validation failed");
                 }
 
-                Console.WriteLine($"   🔍 Searching by Client ID: {clientId}");
+                 LoggerService.LogInformation($"   🔍 Searching by Client ID: {clientId}");
 
                 // Navigate to search page
                 await EnsureOnSearchPageAsync();
@@ -150,22 +150,22 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (results.Count == 0)
                 {
-                    Console.WriteLine($"   ⚠️  Client not found: {clientId}");
+                     LoggerService.LogInformation($"   ⚠️  Client not found: {clientId}");
                     return SearchResult.NoResults();
                 }
 
                 if (results.Count > 1)
                 {
-                    Console.WriteLine($"   ⚠️  WARNING: Multiple results for Client ID {clientId} (expected 1)");
+                     LoggerService.LogInformation($"   ⚠️  WARNING: Multiple results for Client ID {clientId} (expected 1)");
                 }
 
-                Console.WriteLine($"   ✅ Found: {results[0].FirstName} {results[0].LastName}");
+                 LoggerService.LogInformation($"   ✅ Found: {results[0].FirstName} {results[0].LastName}");
 
                 return SearchResult.IsSuccess(results);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Search error: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Search error: {ex.Message}");
                 return SearchResult.Failed(ex.Message);
             }
         }
@@ -184,7 +184,7 @@ namespace ConsentSyncCore.Services.Phis
                     return SearchResult.Failed("Session validation failed");
                 }
 
-                Console.WriteLine($"   🔍 Searching by Name: {firstName} {lastName}");
+                 LoggerService.LogInformation($"   🔍 Searching by Name: {firstName} {lastName}");
 
                 await EnsureOnSearchPageAsync();
                 await ClearSearchFormAsync();
@@ -203,7 +203,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Search error: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Search error: {ex.Message}");
                 return SearchResult.Failed(ex.Message);
             }
         }
@@ -224,7 +224,7 @@ namespace ConsentSyncCore.Services.Phis
                     return SearchResult.Failed("Session validation failed");
                 }
 
-                Console.WriteLine($"   🔍 Searching by Medicare: {medicareNumber}");
+                 LoggerService.LogInformation($"   🔍 Searching by Medicare: {medicareNumber}");
 
                 // Navigate to search page
                 await EnsureOnSearchPageAsync();
@@ -246,22 +246,22 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (results.Count == 0)
                 {
-                    Console.WriteLine($"   ⚠️  No results found for Medicare: {medicareNumber}");
+                     LoggerService.LogInformation($"   ⚠️  No results found for Medicare: {medicareNumber}");
                     return SearchResult.NoResults();
                 }
 
-                Console.WriteLine($"   📊 Found {results.Count} result(s)");
+                 LoggerService.LogInformation($"   📊 Found {results.Count} result(s)");
 
                 return SearchResult.IsSuccess(results);
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("Session expired"))
             {
-                Console.WriteLine($"   ❌ Session expired during search");
+                 LoggerService.LogInformation($"   ❌ Session expired during search");
                 return SearchResult.Failed("Session expired");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Search error: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Search error: {ex.Message}");
                 return SearchResult.Failed(ex.Message);
             }
         }
@@ -291,12 +291,12 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (string.IsNullOrEmpty(phisFormattedDate))
                 {
-                    Console.WriteLine($"   ❌ Invalid date format: {dateOfBirth}");
+                     LoggerService.LogInformation($"   ❌ Invalid date format: {dateOfBirth}");
                     throw new ArgumentException($"Invalid date format: {dateOfBirth}");
                 }
 
-                Console.WriteLine($"   📅 Original DOB: {dateOfBirth}");
-                Console.WriteLine($"   📅 PHIS format: {phisFormattedDate}");
+                 LoggerService.LogInformation($"   📅 Original DOB: {dateOfBirth}");
+                 LoggerService.LogInformation($"   📅 PHIS format: {phisFormattedDate}");
 
                 // Find and fill DOB input using JavaScript (PrimeFaces calendar requires this)
                 var dobInputId = "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input";
@@ -322,7 +322,7 @@ namespace ConsentSyncCore.Services.Phis
             }}
         ");
 
-                Console.WriteLine($"   ✏️  Entered DOB via JavaScript");
+                 LoggerService.LogInformation($"   ✏️  Entered DOB via JavaScript");
 
                 // Give PrimeFaces time to process
                 await Task.Delay(800);
@@ -331,9 +331,9 @@ namespace ConsentSyncCore.Services.Phis
                 var setValue = (string)js.ExecuteScript($"return document.getElementById('{dobInputId}').value;");
                 if (setValue != phisFormattedDate)
                 {
-                    Console.WriteLine($"   ⚠️  WARNING: DOB value mismatch!");
-                    Console.WriteLine($"      Expected: {phisFormattedDate}");
-                    Console.WriteLine($"      Got: {setValue}");
+                     LoggerService.LogInformation($"   ⚠️  WARNING: DOB value mismatch!");
+                     LoggerService.LogInformation($"      Expected: {phisFormattedDate}");
+                     LoggerService.LogInformation($"      Got: {setValue}");
 
                     // Fallback: Try direct SendKeys
                     var dobInput = _driver.FindElement(By.Id(dobInputId));
@@ -343,11 +343,11 @@ namespace ConsentSyncCore.Services.Phis
 
                     // Re-verify
                     setValue = dobInput.GetAttribute("value");
-                    Console.WriteLine($"      After SendKeys: {setValue}");
+                     LoggerService.LogInformation($"      After SendKeys: {setValue}");
                 }
                 else
                 {
-                    Console.WriteLine($"   ✅ DOB value confirmed: {setValue}");
+                     LoggerService.LogInformation($"   ✅ DOB value confirmed: {setValue}");
                 }
 
                 // Click search
@@ -355,7 +355,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Error in ExecuteDobSearchAsync: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Error in ExecuteDobSearchAsync: {ex.Message}");
                 throw;
             }
         }
@@ -369,7 +369,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"   🔍 Locating Medicare search elements...");
+                 LoggerService.LogInformation($"   🔍 Locating Medicare search elements...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
@@ -393,7 +393,7 @@ namespace ConsentSyncCore.Services.Phis
             }}
         ");
 
-                Console.WriteLine($"   ✅ Set dropdown to 'Health Card Number' via JavaScript");
+                 LoggerService.LogInformation($"   ✅ Set dropdown to 'Health Card Number' via JavaScript");
                 await Task.Delay(_phisConfig.AjaxWaitMs); // Wait for PrimeFaces to process
 
                 // Step 2: Enter Medicare number using JavaScript
@@ -419,20 +419,20 @@ namespace ConsentSyncCore.Services.Phis
             }}
         ");
 
-                Console.WriteLine($"   ✅ Entered Medicare Number: {medicareNumber}");
+                 LoggerService.LogInformation($"   ✅ Entered Medicare Number: {medicareNumber}");
                 await Task.Delay(500); // Brief pause to ensure value is set
 
                 // Step 3: Verify values were set
                 var dropdownValue = (string)js.ExecuteScript($"return document.getElementById('{dropdownInputId}').value;");
                 var inputValue = (string)js.ExecuteScript($"return document.getElementById('{clientNumberInputId}').value;");
 
-                Console.WriteLine($"   🔍 Verification - Dropdown: {dropdownValue}, Input: {inputValue}");
+                 LoggerService.LogInformation($"   🔍 Verification - Dropdown: {dropdownValue}, Input: {inputValue}");
 
                 if (dropdownValue != "HEALTH_CARD_NUMBER" || inputValue != medicareNumber)
                 {
-                    Console.WriteLine($"   ⚠️  WARNING: Values not set correctly!");
-                    Console.WriteLine($"      Expected dropdown: HEALTH_CARD_NUMBER, Got: {dropdownValue}");
-                    Console.WriteLine($"      Expected input: {medicareNumber}, Got: {inputValue}");
+                     LoggerService.LogInformation($"   ⚠️  WARNING: Values not set correctly!");
+                     LoggerService.LogInformation($"      Expected dropdown: HEALTH_CARD_NUMBER, Got: {dropdownValue}");
+                     LoggerService.LogInformation($"      Expected input: {medicareNumber}, Got: {inputValue}");
                 }
 
                 // Click search
@@ -440,8 +440,8 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (NoSuchElementException ex)
             {
-                Console.WriteLine($"   ❌ Element not found in ExecuteMedicareSearchAsync");
-                Console.WriteLine($"      Error: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Element not found in ExecuteMedicareSearchAsync");
+                 LoggerService.LogInformation($"      Error: {ex.Message}");
 
                 // Debug: Log page source snippet
                 try
@@ -462,7 +462,7 @@ namespace ConsentSyncCore.Services.Phis
                 return null;
             ");
 
-                    Console.WriteLine($"   🔍 Input element state: {clientNumberSection}");
+                     LoggerService.LogInformation($"   🔍 Input element state: {clientNumberSection}");
                 }
                 catch { }
 
@@ -470,7 +470,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Error in ExecuteMedicareSearchAsync: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Error in ExecuteMedicareSearchAsync: {ex.Message}");
                 throw;
             }
         }
@@ -513,12 +513,12 @@ namespace ConsentSyncCore.Services.Phis
                     }
                 }
 
-                Console.WriteLine($"   ⚠️  Failed to parse date: {csvDate}");
+                 LoggerService.LogInformation($"   ⚠️  Failed to parse date: {csvDate}");
                 return string.Empty;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Date conversion error: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Date conversion error: {ex.Message}");
                 return string.Empty;
             }
         }
@@ -532,7 +532,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"   🔍 Locating Client ID search elements...");
+                 LoggerService.LogInformation($"   🔍 Locating Client ID search elements...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
@@ -556,7 +556,7 @@ namespace ConsentSyncCore.Services.Phis
             }}
         ");
 
-                Console.WriteLine($"   ✅ Set dropdown to 'Client ID' via JavaScript");
+                 LoggerService.LogInformation($"   ✅ Set dropdown to 'Client ID' via JavaScript");
                 await Task.Delay(_phisConfig.AjaxWaitMs); // Wait for PrimeFaces to process
 
                 // Step 2: Enter Client ID using JavaScript
@@ -582,20 +582,20 @@ namespace ConsentSyncCore.Services.Phis
             }}
         ");
 
-                Console.WriteLine($"   ✅ Entered Client ID: {clientId}");
+                 LoggerService.LogInformation($"   ✅ Entered Client ID: {clientId}");
                 await Task.Delay(500); // Brief pause to ensure value is set
 
                 // Step 3: Verify values were set
                 var dropdownValue = (string)js.ExecuteScript($"return document.getElementById('{dropdownInputId}').value;");
                 var inputValue = (string)js.ExecuteScript($"return document.getElementById('{clientNumberInputId}').value;");
 
-                Console.WriteLine($"   🔍 Verification - Dropdown: {dropdownValue}, Input: {inputValue}");
+                 LoggerService.LogInformation($"   🔍 Verification - Dropdown: {dropdownValue}, Input: {inputValue}");
 
                 if (dropdownValue != "CLIENT_ID" || inputValue != clientId)
                 {
-                    Console.WriteLine($"   ⚠️  WARNING: Values not set correctly!");
-                    Console.WriteLine($"      Expected dropdown: CLIENT_ID, Got: {dropdownValue}");
-                    Console.WriteLine($"      Expected input: {clientId}, Got: {inputValue}");
+                     LoggerService.LogInformation($"   ⚠️  WARNING: Values not set correctly!");
+                     LoggerService.LogInformation($"      Expected dropdown: CLIENT_ID, Got: {dropdownValue}");
+                     LoggerService.LogInformation($"      Expected input: {clientId}, Got: {inputValue}");
                 }
 
                 // Click search
@@ -603,7 +603,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Error in ExecuteClientIdSearchAsync: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Error in ExecuteClientIdSearchAsync: {ex.Message}");
                 throw;
             }
         }
@@ -657,7 +657,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"   🎯 Selecting search result and setting in context...");
+                 LoggerService.LogInformation($"   🎯 Selecting search result and setting in context...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
@@ -674,14 +674,14 @@ namespace ConsentSyncCore.Services.Phis
                 // Click checkbox using JavaScript to ensure it works
                 js.ExecuteScript("arguments[0].click();", firstRowCheckbox);
 
-                Console.WriteLine($"   ✅ Selected first result checkbox");
+                 LoggerService.LogInformation($"   ✅ Selected first result checkbox");
                 await Task.Delay(_phisConfig.AjaxWaitMs); // Wait for AJAX to process row selection
 
                 // Step 3: Verify checkbox is checked
                 var isChecked = firstRowCheckbox.GetAttribute("class").Contains("ui-state-active");
                 if (!isChecked)
                 {
-                    Console.WriteLine($"   ⚠️  WARNING: Checkbox might not be selected, retrying...");
+                     LoggerService.LogInformation($"   ⚠️  WARNING: Checkbox might not be selected, retrying...");
                     js.ExecuteScript("arguments[0].click();", firstRowCheckbox);
                     await Task.Delay(500);
                 }
@@ -697,7 +697,7 @@ namespace ConsentSyncCore.Services.Phis
                 // Click using JavaScript for reliability
                 js.ExecuteScript("arguments[0].click();", setInContextButton);
 
-                Console.WriteLine($"   ✅ Clicked 'Set In Context' button");
+                 LoggerService.LogInformation($"   ✅ Clicked 'Set In Context' button");
                 await Task.Delay(_phisConfig.PageLoadDelayMs); // Wait for page to process
 
                 // Step 5: Verify success by checking if we're redirected or context is set
@@ -707,12 +707,12 @@ namespace ConsentSyncCore.Services.Phis
                 // Update session activity
                 _sessionManager.UpdateActivity();
 
-                Console.WriteLine($"   ✅ Client set in context successfully");
+                 LoggerService.LogInformation($"   ✅ Client set in context successfully");
                 return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Error setting client in context: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Error setting client in context: {ex.Message}");
                 return false;
             }
         }
@@ -729,7 +729,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"   🎯 Selecting search result via JavaScript...");
+                 LoggerService.LogInformation($"   🎯 Selecting search result via JavaScript...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
@@ -753,7 +753,7 @@ namespace ConsentSyncCore.Services.Phis
             });
         ");
 
-                Console.WriteLine($"   ✅ Row selection triggered via PrimeFaces AJAX");
+                 LoggerService.LogInformation($"   ✅ Row selection triggered via PrimeFaces AJAX");
                 await Task.Delay(_phisConfig.AjaxWaitMs * 2); // Extra wait for AJAX
 
                 // Step 2: Click "Set In Context" button
@@ -762,17 +762,17 @@ namespace ConsentSyncCore.Services.Phis
 
                 js.ExecuteScript("arguments[0].click();", setInContextButton);
 
-                Console.WriteLine($"   ✅ Clicked 'Set In Context' button");
+                 LoggerService.LogInformation($"   ✅ Clicked 'Set In Context' button");
                 await Task.Delay(_phisConfig.PageLoadDelayMs);
 
                 _sessionManager.UpdateActivity();
 
-                Console.WriteLine($"   ✅ Client set in context successfully");
+                 LoggerService.LogInformation($"   ✅ Client set in context successfully");
                 return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Error in SelectResultAndSetInContextViaJavaScriptAsync: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Error in SelectResultAndSetInContextViaJavaScriptAsync: {ex.Message}");
                 return false;
             }
         }
@@ -784,26 +784,26 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"   🔍 Phase 3: Searching for Client ID {clientId} and setting in context...");
+                 LoggerService.LogInformation($"   🔍 Phase 3: Searching for Client ID {clientId} and setting in context...");
 
                 // Step 1: Search by Client ID
                 var searchResult = await SearchByClientIdAsync(clientId);
 
                 if (!searchResult.Success)
                 {
-                    Console.WriteLine($"   ❌ Search failed: {searchResult.ErrorMessage}");
+                     LoggerService.LogInformation($"   ❌ Search failed: {searchResult.ErrorMessage}");
                     return false;
                 }
 
                 if (searchResult.Results.Count == 0)
                 {
-                    Console.WriteLine($"   ❌ No results found for Client ID: {clientId}");
+                     LoggerService.LogInformation($"   ❌ No results found for Client ID: {clientId}");
                     return false;
                 }
 
                 if (searchResult.Results.Count > 1)
                 {
-                    Console.WriteLine($"   ⚠️  WARNING: Found {searchResult.Results.Count} results, expected 1");
+                     LoggerService.LogInformation($"   ⚠️  WARNING: Found {searchResult.Results.Count} results, expected 1");
                 }
 
                 // Step 2: Select result and set in context
@@ -811,7 +811,7 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (!contextSet)
                 {
-                    Console.WriteLine($"   ⚠️  Standard method failed, trying JavaScript approach...");
+                     LoggerService.LogInformation($"   ⚠️  Standard method failed, trying JavaScript approach...");
                     contextSet = await SelectResultAndSetInContextViaJavaScriptAsync();
                 }
 
@@ -819,7 +819,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Error in Phase 3: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Error in Phase 3: {ex.Message}");
                 return false;
             }
         }
@@ -836,7 +836,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"   🧭 Navigating to Consent Directives > Immunization Service...");
+                 LoggerService.LogInformation($"   🧭 Navigating to Consent Directives > Immunization Service...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
@@ -848,7 +848,7 @@ namespace ConsentSyncCore.Services.Phis
                 var baseUrl = _phisConfig.LoginUrl.Replace("/phsdsm/", "");
                 var immunizationUrl = $"{baseUrl}{navConfig.ImmunizationServiceUrl}";
 
-                Console.WriteLine($"   📍 Navigating to: {immunizationUrl}");
+                 LoggerService.LogInformation($"   📍 Navigating to: {immunizationUrl}");
                 _driver.Navigate().GoToUrl(immunizationUrl);
 
                 // Wait for page to load
@@ -870,9 +870,9 @@ namespace ConsentSyncCore.Services.Phis
 
                             if (!titleMatches)
                             {
-                                Console.WriteLine($"   ⚠️  Title mismatch:");
-                                Console.WriteLine($"      Expected: '{expectedTitle}'");
-                                Console.WriteLine($"      Got: '{actualTitle}'");
+                                 LoggerService.LogInformation($"   ⚠️  Title mismatch:");
+                                 LoggerService.LogInformation($"      Expected: '{expectedTitle}'");
+                                 LoggerService.LogInformation($"      Got: '{actualTitle}'");
                             }
 
                             return titleMatches;
@@ -880,8 +880,8 @@ namespace ConsentSyncCore.Services.Phis
                         return false;
                     });
 
-                    Console.WriteLine($"   ✅ Page title verified: '{navConfig.ImmunizationServicePageTitle}'");
-                    Console.WriteLine($"   ✅ Successfully navigated to Immunization Service page");
+                     LoggerService.LogInformation($"   ✅ Page title verified: '{navConfig.ImmunizationServicePageTitle}'");
+                     LoggerService.LogInformation($"   ✅ Successfully navigated to Immunization Service page");
 
                     // Update session activity
                     _sessionManager.UpdateActivity();
@@ -890,13 +890,13 @@ namespace ConsentSyncCore.Services.Phis
                 }
                 catch (WebDriverTimeoutException)
                 {
-                    Console.WriteLine($"   ⚠️  Page title verification timed out");
+                     LoggerService.LogInformation($"   ⚠️  Page title verification timed out");
 
                     // Check if we can find the consent table as fallback verification
                     var consentTable = _driver.FindElements(By.CssSelector("table[role='grid']"));
                     if (consentTable.Count > 0)
                     {
-                        Console.WriteLine($"   ✅ Found consent table - assuming navigation successful");
+                         LoggerService.LogInformation($"   ✅ Found consent table - assuming navigation successful");
                         _sessionManager.UpdateActivity();
                         return true;
                     }
@@ -906,7 +906,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Error navigating to Immunization Service: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Error navigating to Immunization Service: {ex.Message}");
                 return false;
             }
         }
@@ -919,12 +919,12 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"   🧭 Navigating via menu: Consent Directives > Immunization Service...");
+                 LoggerService.LogInformation($"   🧭 Navigating via menu: Consent Directives > Immunization Service...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
                 // Step 1: Find and expand "Consent Directives" menu
-                Console.WriteLine($"   📂 Expanding 'Consent Directives' menu...");
+                 LoggerService.LogInformation($"   📂 Expanding 'Consent Directives' menu...");
 
                 var consentDirectivesMenuId = "menu:comibmpdcephsimmunization_ConsentDirectives";
 
@@ -941,23 +941,23 @@ namespace ConsentSyncCore.Services.Phis
                     var menuToggle = consentDirectivesMenu.FindElement(By.CssSelector("a[onclick*='toggleSubMenu']"));
                     js.ExecuteScript("arguments[0].click();", menuToggle);
 
-                    Console.WriteLine($"   ✅ Expanded 'Consent Directives' menu");
+                     LoggerService.LogInformation($"   ✅ Expanded 'Consent Directives' menu");
                     await Task.Delay(500); // Wait for menu animation
                 }
                 else
                 {
-                    Console.WriteLine($"   ℹ️  'Consent Directives' menu already expanded");
+                     LoggerService.LogInformation($"   ℹ️  'Consent Directives' menu already expanded");
                 }
 
                 // Step 2: Click "Immunization Service" submenu item
-                Console.WriteLine($"   🎯 Clicking 'Immunization Service'...");
+                 LoggerService.LogInformation($"   🎯 Clicking 'Immunization Service'...");
 
                 var immunizationServiceMenuId = "menu:comibmpdcephsimmunization_ImmunizationService";
                 var immunizationServiceLink = _driver.FindElement(By.CssSelector($"#{immunizationServiceMenuId} a"));
 
                 js.ExecuteScript("arguments[0].click();", immunizationServiceLink);
 
-                Console.WriteLine($"   ✅ Clicked 'Immunization Service'");
+                 LoggerService.LogInformation($"   ✅ Clicked 'Immunization Service'");
                 await Task.Delay(_phisConfig.PageLoadDelayMs);
 
                 // Step 3: Verify we're on the correct page
@@ -972,7 +972,7 @@ namespace ConsentSyncCore.Services.Phis
                     return false;
                 });
 
-                Console.WriteLine($"   ✅ Successfully navigated to Immunization Service page via menu");
+                 LoggerService.LogInformation($"   ✅ Successfully navigated to Immunization Service page via menu");
 
                 // Update session activity
                 _sessionManager.UpdateActivity();
@@ -981,7 +981,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Error navigating via menu: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Error navigating via menu: {ex.Message}");
                 return false;
             }
         }
@@ -1010,7 +1010,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"   🔍 Searching for consent directive with antigen: '{phisAntigen}'");
+                 LoggerService.LogInformation($"   🔍 Searching for consent directive with antigen: '{phisAntigen}'");
 
                 // Wait for the page to fully load after navigation
                 await Task.Delay(2000); // Give time for the table to load
@@ -1020,19 +1020,19 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (matchingRowIndex == -1)
                 {
-                    Console.WriteLine($"   ⚠️  Not found in Active records (or table is empty)");
-                    Console.WriteLine($"   🔧 Applying Inactive filter to show all records...");
+                     LoggerService.LogInformation($"   ⚠️  Not found in Active records (or table is empty)");
+                     LoggerService.LogInformation($"   🔧 Applying Inactive filter to show all records...");
 
                     // Apply filter to show both Active and Inactive
                     bool filterApplied = await ApplyActiveInactiveFilterAsync();
 
                     if (!filterApplied)
                     {
-                        Console.WriteLine($"   ❌ Failed to apply Active/Inactive filter");
+                         LoggerService.LogInformation($"   ❌ Failed to apply Active/Inactive filter");
                         return false;
                     }
 
-                    Console.WriteLine($"   ✅ Filter applied successfully");
+                     LoggerService.LogInformation($"   ✅ Filter applied successfully");
 
                     // Wait for table to refresh after filter (important!)
                     await Task.Delay(_phisConfig.AjaxWaitMs * 3); // Extra time for AJAX and table refresh
@@ -1042,19 +1042,19 @@ namespace ConsentSyncCore.Services.Phis
 
                     if (matchingRowIndex == -1)
                     {
-                        Console.WriteLine($"   ❌ No consent directive found for antigen: '{phisAntigen}' (even with Inactive filter)");
+                         LoggerService.LogInformation($"   ❌ No consent directive found for antigen: '{phisAntigen}' (even with Inactive filter)");
                         return false;
                     }
                 }
 
                 // Select the checkbox for the matching row
-                Console.WriteLine($"   🎯 Found at row {matchingRowIndex}, selecting checkbox...");
+                 LoggerService.LogInformation($"   🎯 Found at row {matchingRowIndex}, selecting checkbox...");
 
                 return await SelectConsentDirectiveCheckboxAsync(matchingRowIndex);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Error selecting consent directive: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ Error selecting consent directive: {ex.Message}");
                 return false;
             }
         }
@@ -1078,11 +1078,11 @@ namespace ConsentSyncCore.Services.Phis
                 }
                 catch (WebDriverTimeoutException)
                 {
-                    Console.WriteLine($"      ⚠️  Consent directives table not found");
+                     LoggerService.LogInformation($"      ⚠️  Consent directives table not found");
                     return -1;
                 }
 
-                Console.WriteLine($"      📊 Table loaded, searching for antigen...");
+                 LoggerService.LogInformation($"      📊 Table loaded, searching for antigen...");
 
                 // Find all rows in the table
                 var tbody = _driver.FindElement(By.Id(tableId));
@@ -1090,11 +1090,11 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (rows.Count == 0)
                 {
-                    Console.WriteLine($"      ⚠️  Table is empty (no consent directives found)");
+                     LoggerService.LogInformation($"      ⚠️  Table is empty (no consent directives found)");
                     return -1;
                 }
 
-                Console.WriteLine($"      📊 Found {rows.Count} consent directive(s) in table");
+                 LoggerService.LogInformation($"      📊 Found {rows.Count} consent directive(s) in table");
 
                 // Search for the row with matching antigen
                 for (int i = 0; i < rows.Count; i++)
@@ -1110,27 +1110,27 @@ namespace ConsentSyncCore.Services.Phis
                         {
                             var antigenText = cells[6].Text.Trim(); // Antigen is at index 6
 
-                            Console.WriteLine($"         Row {i}: Antigen = '{antigenText}' (data-ri='{rows[i].GetAttribute("data-ri")}')");
+                             LoggerService.LogInformation($"         Row {i}: Antigen = '{antigenText}' (data-ri='{rows[i].GetAttribute("data-ri")}')");
 
                             if (antigenText.Equals(phisAntigen, StringComparison.OrdinalIgnoreCase))
                             {
-                                Console.WriteLine($"         ✅ MATCH FOUND at row {i}!");
+                                 LoggerService.LogInformation($"         ✅ MATCH FOUND at row {i}!");
                                 return i;
                             }
                         }
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"         ⚠️  Error reading row {i}: {ex.Message}");
+                         LoggerService.LogInformation($"         ⚠️  Error reading row {i}: {ex.Message}");
                     }
                 }
 
-                Console.WriteLine($"      ❌ Antigen '{phisAntigen}' not found in {rows.Count} row(s)");
+                 LoggerService.LogInformation($"      ❌ Antigen '{phisAntigen}' not found in {rows.Count} row(s)");
                 return -1; // Not found
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"      ❌ Error searching for consent directive: {ex.Message}");
+                 LoggerService.LogInformation($"      ❌ Error searching for consent directive: {ex.Message}");
                 return -1;
             }
         }
@@ -1145,7 +1145,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"      🔄 Trying AJAX method to apply filter...");
+                 LoggerService.LogInformation($"      🔄 Trying AJAX method to apply filter...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
@@ -1156,7 +1156,7 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (string.IsNullOrEmpty(viewState))
                 {
-                    Console.WriteLine($"      ⚠️  Could not get ViewState");
+                     LoggerService.LogInformation($"      ⚠️  Could not get ViewState");
                 }
 
                 // Build the filter AJAX request matching your network trace
@@ -1218,11 +1218,11 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (ajaxResult is bool ajaxBoolResult && !ajaxBoolResult)
                 {
-                    Console.WriteLine($"      ❌ AJAX method failed");
+                     LoggerService.LogInformation($"      ❌ AJAX method failed");
                     return await ApplyActiveInactiveFilterViaClickAsync();
                 }
 
-                Console.WriteLine($"      ✅ AJAX filter request sent");
+                 LoggerService.LogInformation($"      ✅ AJAX filter request sent");
                 await Task.Delay(_phisConfig.AjaxWaitMs * 3);
 
                 _sessionManager.UpdateActivity();
@@ -1230,7 +1230,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"      ❌ AJAX method error: {ex.Message}");
+                 LoggerService.LogInformation($"      ❌ AJAX method error: {ex.Message}");
                 return await ApplyActiveInactiveFilterViaClickAsync();
             }
         }
@@ -1253,7 +1253,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"      🔧 Applying Active + Inactive filter...");
+                 LoggerService.LogInformation($"      🔧 Applying Active + Inactive filter...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
@@ -1304,14 +1304,14 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (result is bool boolResult && !boolResult)
                 {
-                    Console.WriteLine($"      ⚠️  Widget method failed, trying AJAX method...");
+                     LoggerService.LogInformation($"      ⚠️  Widget method failed, trying AJAX method...");
                     return await ApplyActiveInactiveFilterViaAjaxAsync();
                 }
 
-                Console.WriteLine($"      ✅ Inactive filter checkbox checked");
+                 LoggerService.LogInformation($"      ✅ Inactive filter checkbox checked");
 
                 // Wait for the filter to apply and table to refresh
-                Console.WriteLine($"      ⏳ Waiting for table to refresh...");
+                 LoggerService.LogInformation($"      ⏳ Waiting for table to refresh...");
                 await Task.Delay(_phisConfig.AjaxWaitMs * 3);
 
                 // Verify the filter was applied by checking if table has more rows
@@ -1321,7 +1321,7 @@ namespace ConsentSyncCore.Services.Phis
                 if (tbody.Count > 0)
                 {
                     var rows = tbody[0].FindElements(By.XPath(".//tr[@role='row']"));
-                    Console.WriteLine($"      ✅ Table now has {rows.Count} row(s)");
+                     LoggerService.LogInformation($"      ✅ Table now has {rows.Count} row(s)");
                 }
 
                 _sessionManager.UpdateActivity();
@@ -1329,7 +1329,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"      ❌ Error applying filter: {ex.Message}");
+                 LoggerService.LogInformation($"      ❌ Error applying filter: {ex.Message}");
                 return await ApplyActiveInactiveFilterViaAjaxAsync();
             }
         }
@@ -1344,7 +1344,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"      🖱️  Trying direct click method...");
+                 LoggerService.LogInformation($"      🖱️  Trying direct click method...");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
@@ -1360,7 +1360,7 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (isChecked)
                 {
-                    Console.WriteLine($"      ℹ️  Inactive checkbox is already checked");
+                     LoggerService.LogInformation($"      ℹ️  Inactive checkbox is already checked");
                     return true;
                 }
 
@@ -1371,7 +1371,7 @@ namespace ConsentSyncCore.Services.Phis
             checkbox.dispatchEvent(new Event('change', { bubbles: true }));
         ", inactiveCheckbox);
 
-                Console.WriteLine($"      ✅ Clicked Inactive checkbox");
+                 LoggerService.LogInformation($"      ✅ Clicked Inactive checkbox");
 
                 // Wait for filter to apply
                 await Task.Delay(_phisConfig.AjaxWaitMs * 3);
@@ -1381,7 +1381,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"      ❌ Direct click failed: {ex.Message}");
+                 LoggerService.LogInformation($"      ❌ Direct click failed: {ex.Message}");
                 return false;
             }
         }
@@ -1401,19 +1401,19 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (rowIndex >= rows.Count)
                 {
-                    Console.WriteLine($"   ❌ Row index {rowIndex} out of bounds (total rows: {rows.Count})");
+                     LoggerService.LogInformation($"   ❌ Row index {rowIndex} out of bounds (total rows: {rows.Count})");
                     return false;
                 }
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
                 var targetRow = rows[rowIndex];
 
-                Console.WriteLine($"   🎯 Attempting to select row {rowIndex}...");
+                 LoggerService.LogInformation($"   🎯 Attempting to select row {rowIndex}...");
 
                 // Method 1: Try direct checkbox click first (most reliable for visual feedback)
                 try
                 {
-                    Console.WriteLine($"   🖱️  Method 1: Direct checkbox click...");
+                     LoggerService.LogInformation($"   🖱️  Method 1: Direct checkbox click...");
 
                     // Find the checkbox in the row
                     var checkboxCell = targetRow.FindElement(By.CssSelector(".ui-chkbox"));
@@ -1428,43 +1428,43 @@ namespace ConsentSyncCore.Services.Phis
                     var rowKey = targetRow.GetAttribute("data-rk");
                     var dataRi = targetRow.GetAttribute("data-ri");
 
-                    Console.WriteLine($"      Row key: {rowKey}, Data-ri: {dataRi}");
+                     LoggerService.LogInformation($"      Row key: {rowKey}, Data-ri: {dataRi}");
 
                     // Click the checkbox box (visual element)
                     js.ExecuteScript("arguments[0].click();", checkboxBox);
 
-                    Console.WriteLine($"      ✅ Checkbox clicked");
+                     LoggerService.LogInformation($"      ✅ Checkbox clicked");
                     await Task.Delay(_phisConfig.AjaxWaitMs);
 
                     // Verify the checkbox is visually checked
                     var isVisuallyChecked = checkboxBox.GetAttribute("class").Contains("ui-state-active");
                     var isInputChecked = checkboxInput.Selected || checkboxInput.GetAttribute("checked") == "checked";
 
-                    Console.WriteLine($"      📊 Visual check: {isVisuallyChecked}, Input checked: {isInputChecked}");
+                     LoggerService.LogInformation($"      📊 Visual check: {isVisuallyChecked}, Input checked: {isInputChecked}");
 
                     if (isVisuallyChecked || isInputChecked)
                     {
-                        Console.WriteLine($"   ✅ Checkbox is visually checked!");
+                         LoggerService.LogInformation($"   ✅ Checkbox is visually checked!");
 
                         // Verify Documents button is enabled
                         bool buttonsEnabled = await VerifyRowSelectionAsync();
 
                         if (buttonsEnabled)
                         {
-                            Console.WriteLine($"   ✅ Documents button is enabled - selection confirmed!");
+                             LoggerService.LogInformation($"   ✅ Documents button is enabled - selection confirmed!");
                             _sessionManager.UpdateActivity();
                             return true;
                         }
                         else
                         {
-                            Console.WriteLine($"   ⚠️  Checkbox checked but Documents button not enabled yet");
+                             LoggerService.LogInformation($"   ⚠️  Checkbox checked but Documents button not enabled yet");
                             await Task.Delay(1000); // Give more time
 
                             // Check again
                             buttonsEnabled = await VerifyRowSelectionAsync();
                             if (buttonsEnabled)
                             {
-                                Console.WriteLine($"   ✅ Documents button now enabled!");
+                                 LoggerService.LogInformation($"   ✅ Documents button now enabled!");
                                 _sessionManager.UpdateActivity();
                                 return true;
                             }
@@ -1472,16 +1472,16 @@ namespace ConsentSyncCore.Services.Phis
                     }
                     else
                     {
-                        Console.WriteLine($"   ⚠️  Checkbox not visually checked after click, trying AJAX method...");
+                         LoggerService.LogInformation($"   ⚠️  Checkbox not visually checked after click, trying AJAX method...");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"   ⚠️  Direct click failed: {ex.Message}");
+                     LoggerService.LogInformation($"   ⚠️  Direct click failed: {ex.Message}");
                 }
 
                 // Method 2: Use PrimeFaces AJAX as fallback
-                Console.WriteLine($"   🔄 Method 2: Using PrimeFaces AJAX...");
+                 LoggerService.LogInformation($"   🔄 Method 2: Using PrimeFaces AJAX...");
 
                 var rowKey2 = targetRow.GetAttribute("data-rk");
                 var dataRi2 = targetRow.GetAttribute("data-ri");
@@ -1504,11 +1504,11 @@ namespace ConsentSyncCore.Services.Phis
 
                         if (checkboxes.Count > 0)
                         {
-                            Console.WriteLine($"   ✅ Checkbox is now visually checked after AJAX!");
+                             LoggerService.LogInformation($"   ✅ Checkbox is now visually checked after AJAX!");
                         }
                         else
                         {
-                            Console.WriteLine($"   ⚠️  AJAX completed but checkbox still not visually checked");
+                             LoggerService.LogInformation($"   ⚠️  AJAX completed but checkbox still not visually checked");
                         }
                     }
 
@@ -1517,24 +1517,24 @@ namespace ConsentSyncCore.Services.Phis
 
                     if (buttonsEnabled)
                     {
-                        Console.WriteLine($"   ✅ Row selection confirmed via Documents button!");
+                         LoggerService.LogInformation($"   ✅ Row selection confirmed via Documents button!");
                         _sessionManager.UpdateActivity();
                         return true;
                     }
                     else
                     {
-                        Console.WriteLine($"   ⚠️  Documents button not enabled - selection may have failed");
+                         LoggerService.LogInformation($"   ⚠️  Documents button not enabled - selection may have failed");
                         return false;
                     }
                 }
 
-                Console.WriteLine($"   ❌ All selection methods failed");
+                 LoggerService.LogInformation($"   ❌ All selection methods failed");
                 return false;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ Error selecting checkbox: {ex.Message}");
-                Console.WriteLine($"      Stack trace: {ex.StackTrace}");
+                 LoggerService.LogInformation($"   ❌ Error selecting checkbox: {ex.Message}");
+                 LoggerService.LogInformation($"      Stack trace: {ex.StackTrace}");
                 return false;
             }
         }
@@ -1549,8 +1549,8 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine($"   📡 Sending PrimeFaces AJAX selection...");
-                Console.WriteLine($"      Row index: {rowIndex}, Row key: {rowKey}, Data-ri: {dataRi}");
+                 LoggerService.LogInformation($"   📡 Sending PrimeFaces AJAX selection...");
+                 LoggerService.LogInformation($"      Row index: {rowIndex}, Row key: {rowKey}, Data-ri: {dataRi}");
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
@@ -1607,20 +1607,20 @@ namespace ConsentSyncCore.Services.Phis
 
                 if (result is bool boolResult && boolResult)
                 {
-                    Console.WriteLine($"   ✅ AJAX request sent successfully");
+                     LoggerService.LogInformation($"   ✅ AJAX request sent successfully");
                     await Task.Delay(_phisConfig.AjaxWaitMs * 2);
                     _sessionManager.UpdateActivity();
                     return true;
                 }
                 else
                 {
-                    Console.WriteLine($"   ❌ AJAX request failed");
+                     LoggerService.LogInformation($"   ❌ AJAX request failed");
                     return false;
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ❌ AJAX selection error: {ex.Message}");
+                 LoggerService.LogInformation($"   ❌ AJAX selection error: {ex.Message}");
                 return false;
             }
         }
@@ -1654,30 +1654,30 @@ namespace ConsentSyncCore.Services.Phis
 
                     if (isEnabled)
                     {
-                        Console.WriteLine($"      ✅ Documents button is enabled");
+                         LoggerService.LogInformation($"      ✅ Documents button is enabled");
                         return true;
                     }
                     else
                     {
-                        Console.WriteLine($"      ℹ️  Documents button is disabled");
+                         LoggerService.LogInformation($"      ℹ️  Documents button is disabled");
                         return false;
                     }
                 }
 
-                Console.WriteLine($"      ⚠️  Documents button not found");
+                 LoggerService.LogInformation($"      ⚠️  Documents button not found");
 
                 // Fallback: check for checked checkboxes
                 var checkedBoxes = _driver.FindElements(By.CssSelector(
                     "#consentForm\\:ConsentDataTable\\:dataTable_data .ui-chkbox-box.ui-state-active"));
 
                 var count = checkedBoxes.Count;
-                Console.WriteLine($"      ℹ️  Found {count} checked checkbox(es)");
+                 LoggerService.LogInformation($"      ℹ️  Found {count} checked checkbox(es)");
 
                 return count > 0;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"      ⚠️  Verification error: {ex.Message}");
+                 LoggerService.LogInformation($"      ⚠️  Verification error: {ex.Message}");
                 return false;
             }
         }
@@ -1708,7 +1708,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ⚠️  Could not select criteria type: {ex.Message}");
+                 LoggerService.LogInformation($"   ⚠️  Could not select criteria type: {ex.Message}");
             }
         }
 
@@ -1721,7 +1721,7 @@ namespace ConsentSyncCore.Services.Phis
             var searchButton = _driver.FindElement(By.Id("actionMenuSearch:commandButtonId"));
             searchButton.Click();
 
-            Console.WriteLine($"   🔎 Search clicked");
+             LoggerService.LogInformation($"   🔎 Search clicked");
             await Task.Delay(_phisConfig.PageLoadDelayMs);
         }
 
@@ -1765,7 +1765,7 @@ namespace ConsentSyncCore.Services.Phis
 
             if (searchForm.Count > 0) return; // Already on search page
 
-            Console.WriteLine($"   🔄 Navigating to search page...");
+             LoggerService.LogInformation($"   🔄 Navigating to search page...");
 
             _driver.Navigate().GoToUrl(_phisConfig.SearchUrl);
             await Task.Delay(_phisConfig.PageLoadDelayMs);
@@ -1774,7 +1774,7 @@ namespace ConsentSyncCore.Services.Phis
             _wait.Until(d => d.FindElements(By.Id(
                 "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input")).Count > 0);
 
-            Console.WriteLine($"   ✅ On search page");
+             LoggerService.LogInformation($"   ✅ On search page");
 
             _sessionManager.UpdateActivity();
         }
@@ -1798,7 +1798,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ⚠️  Could not clear form: {ex.Message}");
+                 LoggerService.LogInformation($"   ⚠️  Could not clear form: {ex.Message}");
             }
         }
 

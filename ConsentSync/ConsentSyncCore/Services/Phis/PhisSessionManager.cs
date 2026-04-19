@@ -70,7 +70,7 @@ namespace ConsentSyncCore.Services.Phis
             // Refresh if less than buffer time remaining
             if (timeUntilTimeout.TotalMinutes < _phisConfig.RefreshBufferMinutes)
             {
-                Console.WriteLine($"\n⚠️  Session timeout approaching ({timeUntilTimeout.TotalMinutes:F1} min remaining)");
+                 LoggerService.LogInformation($"\n⚠️  Session timeout approaching ({timeUntilTimeout.TotalMinutes:F1} min remaining)");
                 return RefreshSession();
             }
 
@@ -147,16 +147,16 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine("\n👤 MANUAL LOGIN MODE");
-                Console.WriteLine("══════════════════════════════════════════════════════");
+                 LoggerService.LogInformation("\n👤 MANUAL LOGIN MODE");
+                 LoggerService.LogInformation("══════════════════════════════════════════════════════");
 
                 _driver.Navigate().GoToUrl(_phisConfig.LoginUrl);
 
-                Console.WriteLine($"📌 Browser opened to: {_phisConfig.LoginUrl}");
-                Console.WriteLine($"\n⏳ Please log in manually within {_phisConfig.ManualLoginWaitSeconds} seconds...");
-                Console.WriteLine("   The automation will start once you're logged in.");
-                Console.WriteLine("\n💡 TIP: Navigate to the PHIS dashboard after logging in.");
-                Console.WriteLine("══════════════════════════════════════════════════════\n");
+                 LoggerService.LogInformation($"📌 Browser opened to: {_phisConfig.LoginUrl}");
+                 LoggerService.LogInformation($"\n⏳ Please log in manually within {_phisConfig.ManualLoginWaitSeconds} seconds...");
+                 LoggerService.LogInformation("   The automation will start once you're logged in.");
+                 LoggerService.LogInformation("\n💡 TIP: Navigate to the PHIS dashboard after logging in.");
+                 LoggerService.LogInformation("══════════════════════════════════════════════════════\n");
 
                 var endTime = DateTime.Now.AddSeconds(_phisConfig.ManualLoginWaitSeconds);
                 bool loggedIn = false;
@@ -172,8 +172,8 @@ namespace ConsentSyncCore.Services.Phis
                         !currentUrl.Contains("signin", StringComparison.OrdinalIgnoreCase))
                     {
                         loggedIn = true;
-                        Console.WriteLine($"✅ Login detected! Current URL: {currentUrl}");
-                        Console.WriteLine("🚀 Starting automation...\n");
+                         LoggerService.LogInformation($"✅ Login detected! Current URL: {currentUrl}");
+                         LoggerService.LogInformation("🚀 Starting automation...\n");
                         Thread.Sleep(2000); // Give page time to fully load
                         break;
                     }
@@ -181,14 +181,14 @@ namespace ConsentSyncCore.Services.Phis
                     var remaining = (int)(endTime - DateTime.Now).TotalSeconds;
                     if (remaining % 10 == 0 && remaining > 0)
                     {
-                        Console.WriteLine($"   ⏰ {remaining} seconds remaining...");
+                         LoggerService.LogInformation($"   ⏰ {remaining} seconds remaining...");
                     }
                 }
 
                 if (!loggedIn)
                 {
-                    Console.WriteLine($"❌ Login timeout - no login detected within {_phisConfig.ManualLoginWaitSeconds} seconds");
-                    Console.WriteLine("   Please restart and log in more quickly, or increase ManualLoginWaitSeconds in config.");
+                     LoggerService.LogInformation($"❌ Login timeout - no login detected within {_phisConfig.ManualLoginWaitSeconds} seconds");
+                     LoggerService.LogInformation("   Please restart and log in more quickly, or increase ManualLoginWaitSeconds in config.");
                     return false;
                 }
 
@@ -198,7 +198,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Manual login failed: {ex.Message}");
+                 LoggerService.LogInformation($"❌ Manual login failed: {ex.Message}");
                 return false;
             }
         }
@@ -210,7 +210,7 @@ namespace ConsentSyncCore.Services.Phis
         {
             try
             {
-                Console.WriteLine("\n🔐 Logging into PHIS (Automated)...");
+                 LoggerService.LogInformation("\n🔐 Logging into PHIS (Automated)...");
 
                 if (string.IsNullOrWhiteSpace(_phisConfig.Username) || string.IsNullOrWhiteSpace(_phisConfig.Password))
                 {
@@ -227,7 +227,7 @@ namespace ConsentSyncCore.Services.Phis
 
                 Thread.Sleep(3000);
 
-                Console.WriteLine("✅ Successfully logged in");
+                 LoggerService.LogInformation("✅ Successfully logged in");
 
                 _isLoggedIn = true;
                 _lastSessionActivity = DateTime.Now;
@@ -235,7 +235,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Login failed: {ex.Message}");
+                 LoggerService.LogInformation($"❌ Login failed: {ex.Message}");
                 return false;
             }
         }
@@ -251,7 +251,7 @@ namespace ConsentSyncCore.Services.Phis
         /// </summary>
         private bool RefreshSession()
         {
-            Console.WriteLine($"🔄 Refreshing session...");
+             LoggerService.LogInformation($"🔄 Refreshing session...");
 
             try
             {
@@ -262,7 +262,7 @@ namespace ConsentSyncCore.Services.Phis
                 // Check if we're still logged in
                 if (IsSessionExpired())
                 {
-                    Console.WriteLine($"❌ Session expired - attempting re-login...");
+                     LoggerService.LogInformation($"❌ Session expired - attempting re-login...");
 
                     _isLoggedIn = false;
 
@@ -270,15 +270,15 @@ namespace ConsentSyncCore.Services.Phis
                     bool loginSuccess = Login();
                     if (!loginSuccess)
                     {
-                        Console.WriteLine($"❌ Re-login failed");
+                         LoggerService.LogInformation($"❌ Re-login failed");
                         return false;
                     }
 
-                    Console.WriteLine($"✅ Session restored successfully");
+                     LoggerService.LogInformation($"✅ Session restored successfully");
                 }
                 else
                 {
-                    Console.WriteLine($"✅ Session refreshed successfully");
+                     LoggerService.LogInformation($"✅ Session refreshed successfully");
                 }
 
                 _lastSessionActivity = DateTime.Now;
@@ -287,7 +287,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Session refresh failed: {ex.Message}");
+                 LoggerService.LogInformation($"❌ Session refresh failed: {ex.Message}");
                 _isLoggedIn = false;
                 return false;
             }
@@ -313,7 +313,7 @@ namespace ConsentSyncCore.Services.Phis
                 // Verify we're on the search page (not redirected to login)
                 if (IsSessionExpired())
                 {
-                    Console.WriteLine($"⚠️  Redirected to login page - session expired");
+                     LoggerService.LogInformation($"⚠️  Redirected to login page - session expired");
                     return false;
                 }
 
@@ -322,7 +322,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Navigation failed: {ex.Message}");
+                 LoggerService.LogInformation($"❌ Navigation failed: {ex.Message}");
                 return false;
             }
         }
@@ -347,7 +347,7 @@ namespace ConsentSyncCore.Services.Phis
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Navigation to {url} failed: {ex.Message}");
+                 LoggerService.LogInformation($"❌ Navigation to {url} failed: {ex.Message}");
                 return false;
             }
         }
@@ -367,12 +367,12 @@ namespace ConsentSyncCore.Services.Phis
             var timeRemaining = GetTimeRemaining();
             var timeSinceActivity = DateTime.Now - _lastSessionActivity;
 
-            Console.WriteLine("\n📊 Session Status:");
-            Console.WriteLine($"   Logged in: {(_isLoggedIn ? "✅ Yes" : "❌ No")}");
-            Console.WriteLine($"   Time since last activity: {timeSinceActivity.TotalMinutes:F1} minutes");
-            Console.WriteLine($"   Time until timeout: {timeRemaining.TotalMinutes:F1} minutes");
-            Console.WriteLine($"   Auto-refresh: {(_phisConfig.SessionRefreshEnabled ? "✅ Enabled" : "❌ Disabled")}");
-            Console.WriteLine($"   Session timeout: {_phisConfig.SessionTimeoutMinutes} minutes\n");
+             LoggerService.LogInformation("\n📊 Session Status:");
+             LoggerService.LogInformation($"   Logged in: {(_isLoggedIn ? "✅ Yes" : "❌ No")}");
+             LoggerService.LogInformation($"   Time since last activity: {timeSinceActivity.TotalMinutes:F1} minutes");
+             LoggerService.LogInformation($"   Time until timeout: {timeRemaining.TotalMinutes:F1} minutes");
+             LoggerService.LogInformation($"   Auto-refresh: {(_phisConfig.SessionRefreshEnabled ? "✅ Enabled" : "❌ Disabled")}");
+             LoggerService.LogInformation($"   Session timeout: {_phisConfig.SessionTimeoutMinutes} minutes\n");
         }
 
         /// <summary>

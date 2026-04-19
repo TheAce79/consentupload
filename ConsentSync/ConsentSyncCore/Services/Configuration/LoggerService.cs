@@ -9,10 +9,6 @@ using ConsentSyncCore.Services.ConfigurationPoco;
 
 namespace ConsentSyncCore.Services.Configuration
 {
-    /// <summary>
-    /// Centralized logging service that supports both console and file logging
-    /// Designed to be easily adaptable to UI TextBox output in the future
-    /// </summary>
     public class LoggerService
     {
         private static ILoggerFactory? _loggerFactory;
@@ -20,23 +16,13 @@ namespace ConsentSyncCore.Services.Configuration
         private static ConsoleLoggingConfig? _consoleConfig;
         private static StreamWriter? _fileWriter;
         private static readonly object _fileLock = new object();
-        private static bool _isInitialized = false; // ✅ Add initialization flag
+        private static bool _isInitialized = false;
 
-        /// <summary>
-        /// Event that can be subscribed to for UI updates (e.g., TextBox)
-        /// </summary>
         public static event EventHandler<LogEventArgs>? LogMessage;
 
-        /// <summary>
-        /// Initialize the logging service
-        /// </summary>
         public static void Initialize()
         {
-            // ✅ Prevent multiple initializations
-            if (_isInitialized)
-            {
-                return;
-            }
+            if (_isInitialized) return;
 
             try
             {
@@ -44,74 +30,52 @@ namespace ConsentSyncCore.Services.Configuration
                 _fileConfig = loggingConfig.File;
                 _consoleConfig = loggingConfig.Console;
 
-                // Setup file logging if enabled
                 if (_fileConfig.Enabled)
-                {
                     SetupFileLogging();
-                }
 
-                // Create logger factory
                 _loggerFactory = LoggerFactory.Create(builder =>
                 {
                     builder.SetMinimumLevel(ParseLogLevel(loggingConfig.LogLevel.Default));
 
-                    // Add console logging
                     if (_consoleConfig.Enabled)
-                    {
                         builder.AddConsole();
-                    }
 
-                    // Configure category-specific log levels
                     builder.AddFilter("ConsentSync", ParseLogLevel(loggingConfig.LogLevel.ConsentSync));
                     builder.AddFilter("Microsoft", ParseLogLevel(loggingConfig.LogLevel.Microsoft));
                     builder.AddFilter("System", ParseLogLevel(loggingConfig.LogLevel.System));
                 });
 
                 _isInitialized = true;
-                Console.WriteLine("✅ Logging service initialized");
+                LogInformation("✅ Logging service initialized");
             }
             catch (Exception ex)
             {
+                // ✅ Use Console directly — LogInformation would recurse here
                 Console.WriteLine($"❌ Failed to initialize logging: {ex.Message}");
                 throw;
             }
         }
 
-        /// <summary>
-        /// Get a logger for a specific category
-        /// </summary>
         public static ILogger<T> GetLogger<T>()
         {
-            if (!_isInitialized)
-            {
-                Initialize();
-            }
-
+            if (!_isInitialized) Initialize();
             return _loggerFactory!.CreateLogger<T>();
         }
 
-        /// <summary>
-        /// Log a message with automatic console, file, and event notification
-        /// </summary>
         public static void Log(LogLevel level, string message, string? category = null)
         {
-            if (!_isInitialized)
-            {
-                Initialize();
-            }
+            if (!_isInitialized) Initialize();
 
             var timestamp = DateTime.Now.ToString(_consoleConfig?.TimestampFormat ?? "yyyy-MM-dd HH:mm:ss");
             var levelStr = level.ToString().ToUpper();
 
-            // ✅ Better formatting with consistent padding
             var formattedMessage = _consoleConfig?.ShowTimestamps == true
                 ? $"[{timestamp}] [{levelStr,-11}] {message}"
                 : $"[{levelStr,-11}] {message}";
 
-            // Console output
+            // ✅ FIX Bug 1: write directly to Console — never call LogInformation here
             if (_consoleConfig?.Enabled == true)
             {
-                // ✅ Add color coding for different log levels (optional)
                 var originalColor = Console.ForegroundColor;
 
                 if (_consoleConfig.UseColoredOutput)
@@ -126,17 +90,14 @@ namespace ConsentSyncCore.Services.Configuration
                     };
                 }
 
-                Console.WriteLine(formattedMessage);
+                Console.WriteLine(formattedMessage); // ✅ was: LoggerService.LogInformation(...)
+
                 Console.ForegroundColor = originalColor;
             }
 
-            // File output
             if (_fileConfig?.Enabled == true)
-            {
                 WriteToFile(formattedMessage);
-            }
 
-            // Raise event for UI subscribers
             LogMessage?.Invoke(null, new LogEventArgs
             {
                 Level = level,
@@ -146,42 +107,30 @@ namespace ConsentSyncCore.Services.Configuration
             });
         }
 
-        /// <summary>
-        /// Helper methods for different log levels
-        /// </summary>
         public static void LogInformation(string message) => Log(LogLevel.Information, message);
         public static void LogDebug(string message) => Log(LogLevel.Debug, message);
         public static void LogWarning(string message) => Log(LogLevel.Warning, message);
         public static void LogError(string message) => Log(LogLevel.Error, message);
         public static void LogError(string message, Exception ex) =>
             Log(LogLevel.Error, $"{message}\n   Exception: {ex.GetType().Name}\n   Message: {ex.Message}\n   StackTrace:\n{ex.StackTrace}");
-
-        // ✅ Add Critical level
         public static void LogCritical(string message) => Log(LogLevel.Critical, message);
         public static void LogCritical(string message, Exception ex) =>
             Log(LogLevel.Critical, $"{message}\n   Exception: {ex.GetType().Name}\n   Message: {ex.Message}\n   StackTrace:\n{ex.StackTrace}");
 
-        /// <summary>
-        /// Setup file logging
-        /// </summary>
         private static void SetupFileLogging()
         {
             try
             {
                 if (_fileConfig == null) return;
 
-                // Create log directory
                 Directory.CreateDirectory(_fileConfig.LogPath);
 
-                // Generate log filename with date
                 var fileName = _fileConfig.LogFileName.Replace("{Date}", DateTime.Now.ToString("yyyyMMdd"));
                 var fullPath = Path.Combine(_fileConfig.LogPath, fileName);
 
-                // ✅ Check if file exists and get size
                 bool fileExists = File.Exists(fullPath);
                 long fileSize = fileExists ? new FileInfo(fullPath).Length : 0;
 
-                // ✅ Rotate if file exceeds max size
                 if (fileExists && fileSize > _fileConfig.MaxFileSizeMB * 1024 * 1024)
                 {
                     var archiveName = Path.Combine(
@@ -189,35 +138,31 @@ namespace ConsentSyncCore.Services.Configuration
                         $"{Path.GetFileNameWithoutExtension(fileName)}_{DateTime.Now:HHmmss}.log");
 
                     File.Move(fullPath, archiveName);
+                    // ✅ Safe: _fileWriter not yet open, console write is fine
                     Console.WriteLine($"   📦 Rotated log file: {Path.GetFileName(archiveName)}");
                 }
 
-                // Open file writer (append mode)
                 _fileWriter = new StreamWriter(fullPath, append: true, encoding: Encoding.UTF8)
                 {
                     AutoFlush = true
                 };
 
-                Console.WriteLine($"   📄 File logging enabled: {fullPath}");
+                Console.WriteLine($"   📄 File logging enabled: {fullPath}"); // ✅ direct Console
 
-                // ✅ Write session separator
                 _fileWriter.WriteLine();
                 _fileWriter.WriteLine($"{'═',60}");
                 _fileWriter.WriteLine($"  New Session Started: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                 _fileWriter.WriteLine($"{'═',60}");
 
-                // Cleanup old logs
                 CleanupOldLogs();
             }
             catch (Exception ex)
             {
+                // ✅ FIX Bug 2: use Console directly — LogInformation recurses into Initialize here
                 Console.WriteLine($"   ⚠️  Failed to setup file logging: {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Write message to log file
-        /// </summary>
         private static void WriteToFile(string message)
         {
             if (_fileWriter == null) return;
@@ -230,14 +175,11 @@ namespace ConsentSyncCore.Services.Configuration
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"   ⚠️  Failed to write to log file: {ex.Message}");
+                    Console.WriteLine($"   ⚠️  Failed to write to log file: {ex.Message}"); // ✅ direct Console
                 }
             }
         }
 
-        /// <summary>
-        /// Cleanup old log files based on RetainDays setting
-        /// </summary>
         private static void CleanupOldLogs()
         {
             if (_fileConfig == null) return;
@@ -259,48 +201,35 @@ namespace ConsentSyncCore.Services.Configuration
                 }
 
                 if (deletedCount > 0)
-                {
-                    Console.WriteLine($"   🗑️  Deleted {deletedCount} old log file(s)");
-                }
+                    Console.WriteLine($"   🗑️  Deleted {deletedCount} old log file(s)"); // ✅ direct Console
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   ⚠️  Failed to cleanup old logs: {ex.Message}");
+                Console.WriteLine($"   ⚠️  Failed to cleanup old logs: {ex.Message}"); // ✅ direct Console
             }
         }
 
-        /// <summary>
-        /// Parse log level from string
-        /// </summary>
-        private static LogLevel ParseLogLevel(string level)
+        private static LogLevel ParseLogLevel(string level) => level.ToLower() switch
         {
-            return level.ToLower() switch
-            {
-                "debug" => LogLevel.Debug,
-                "information" => LogLevel.Information,
-                "warning" => LogLevel.Warning,
-                "error" => LogLevel.Error,
-                "critical" => LogLevel.Critical,
-                "trace" => LogLevel.Trace, // ✅ Add trace level
-                _ => LogLevel.Information
-            };
-        }
+            "debug" => LogLevel.Debug,
+            "information" => LogLevel.Information,
+            "warning" => LogLevel.Warning,
+            "error" => LogLevel.Error,
+            "critical" => LogLevel.Critical,
+            "trace" => LogLevel.Trace,
+            _ => LogLevel.Information
+        };
 
-        /// <summary>
-        /// Dispose resources
-        /// </summary>
         public static void Dispose()
         {
             lock (_fileLock)
             {
                 if (_fileWriter != null)
                 {
-                    // ✅ Write session end marker
                     _fileWriter.WriteLine($"{'═',60}");
                     _fileWriter.WriteLine($"  Session Ended: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                     _fileWriter.WriteLine($"{'═',60}");
                     _fileWriter.WriteLine();
-
                     _fileWriter.Flush();
                     _fileWriter.Dispose();
                     _fileWriter = null;
@@ -313,9 +242,6 @@ namespace ConsentSyncCore.Services.Configuration
         }
     }
 
-    /// <summary>
-    /// Event args for log messages (useful for UI binding)
-    /// </summary>
     public class LogEventArgs : EventArgs
     {
         public LogLevel Level { get; set; }
