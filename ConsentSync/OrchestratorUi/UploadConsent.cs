@@ -512,12 +512,35 @@ namespace OrchestratorUi
                 if (File.Exists(processedFile))
                 {
                     var fi = new FileInfo(processedFile);
+
+                    // ── Check if Phase 1 work would be lost ──────────
+                    bool hasPhase1Work = false;
+                    int clientIdsFound = 0;
+                    try
+                    {
+                        var repo = new StudentCsvRepository(config);
+                        var existing = repo.ReadAll();
+                        clientIdsFound = existing.Count(s => !string.IsNullOrWhiteSpace(s.ClientId));
+                        hasPhase1Work = clientIdsFound > 0;
+                    }
+                    catch { /* non-fatal — fall through to standard prompt */ }
+
+                    string warningExtra = hasPhase1Work
+                        ? $"\n\n⚠️  WARNING — DATA LOSS RISK:\n" +
+                          $"  Phase 1 found {clientIdsFound} Client ID(s) that will be permanently erased.\n" +
+                          $"  DuplicateResolved flags will also be reset.\n" +
+                          $"  You will need to re-run Phase 1 from scratch."
+                        : string.Empty;
+
                     var ans = MessageBox.Show(
                         $"A processed CSV already exists:\n\n{processedFile}\n\n" +
                         $"  Last modified : {fi.LastWriteTime:yyyy-MM-dd HH:mm}\n" +
-                        $"  Size          : {fi.Length / 1024.0:F1} KB\n\n" +
-                        $"Do you want to re-process and overwrite it?",
-                        "Processed CSV Exists", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                        $"  Size          : {fi.Length / 1024.0:F1} KB\n" +
+                        warningExtra +
+                        $"\n\nDo you want to re-process and overwrite it?",
+                        hasPhase1Work ? "⚠️  Data Loss Warning" : "Processed CSV Exists",
+                        MessageBoxButtons.YesNo,
+                        hasPhase1Work ? MessageBoxIcon.Warning : MessageBoxIcon.Question);
 
                     if (ans == DialogResult.No)
                     {
@@ -530,6 +553,7 @@ namespace OrchestratorUi
                         return;
                     }
                 }
+
 
                 LoggerService.LogInformation("\n" + new string('═', 60));
                 LoggerService.LogInformation("📋 PRE-PHASE: CSV Processing");
