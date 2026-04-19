@@ -107,40 +107,46 @@ namespace Orchestrator.Phase2
 
 
         /// <summary>
-        /// Move PDF to error output directory for manual review
+        /// Copies an unmatched PDF to the error directory for manual review.
+        /// Uses the BulkPdf 6_Error folder so the path is consistent with what
+        /// the UI reports to the user.
         /// </summary>
         private void CopyToErrorDirectory(string sourcePdfPath, string reason)
         {
             try
             {
-                // Check if ErrorOutputDir is configured
-                if (string.IsNullOrWhiteSpace(_phase2Config.ErrorOutputDir))
+                // ✅ Always use bulkPdfConfig.GetErrorPath() = Pdf\6_Error
+                // so the path the UI shows matches where files actually land.
+                var errorDir = _bulkPdfConfig.GetErrorPath();
+
+                if (string.IsNullOrWhiteSpace(errorDir))
                 {
-                     LoggerService.LogInformation($"         ⚠️  ErrorOutputDir not configured - file not moved");
+                    LoggerService.LogWarning($"         ⚠️  Error folder not configured — file not copied");
                     return;
                 }
 
-                // Create error directory if it doesn't exist
-                if (!Directory.Exists(_phase2Config.ErrorOutputDir))
-                {
-                    Directory.CreateDirectory(_phase2Config.ErrorOutputDir);
-                     LoggerService.LogInformation($"         📁 Created error directory: {_phase2Config.ErrorOutputDir}");
-                }
+                Directory.CreateDirectory(errorDir);
 
-                // Generate new filename with reason prefix
                 var originalFileName = Path.GetFileNameWithoutExtension(sourcePdfPath);
                 var extension = Path.GetExtension(sourcePdfPath);
                 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                var newFileName = $"{reason}_{originalFileName}_{timestamp}{extension}";
-                var destinationPath = Path.Combine(_phase2Config.ErrorOutputDir, newFileName);
 
-                // Move the file
-                File.Copy(sourcePdfPath, destinationPath, overwrite: false);
-                 LoggerService.LogInformation($"         📤 copy to errors: {newFileName}");
+                // Sanitise reason so it is safe as a filename prefix
+                var safeReason = string.Concat(
+                    reason.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+
+                var newFileName = $"{safeReason}_{originalFileName}_{timestamp}{extension}";
+                var destinationPath = Path.Combine(errorDir, newFileName);
+
+                // ✅ overwrite: true — timestamp makes names unique anyway
+                File.Copy(sourcePdfPath, destinationPath, overwrite: true);
+                LoggerService.LogWarning($"         📤 Copied to 6_Error: {newFileName}");
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"         ⚠️  Failed to copy file to error directory: {ex.Message}");
+                LoggerService.LogWarning(
+                    $"         ⚠️  Failed to copy to error directory: {ex.Message}\n" +
+                    $"             Source: {sourcePdfPath}");
             }
         }
 
@@ -393,55 +399,74 @@ namespace Orchestrator.Phase2
 
 
 
+
         /// <summary>
-        /// ✅ Find best matching validation record using fuzzy matching
-        /// Returns the best match even if score is below threshold
+        /// Finds the best matching validation record, trying BOTH name orderings
+        /// (LastName/FirstName and FirstName/LastName) to handle filenames where
+        /// the order differs from the CSV.
         /// </summary>
         private (ValidationRecord? record, double score) FindBestMatchingValidationRecord(
             string pdfFirstName,
             string pdfLastName,
             List<ValidationRecord> records)
         {
-            // Try exact match first
+            // ── Pass 1: exact match in normal order ───────────────────────────
             var exactMatch = records.FirstOrDefault(r =>
                 r.FirstName.Equals(pdfFirstName, StringComparison.OrdinalIgnoreCase) &&
                 r.LastName.Equals(pdfLastName, StringComparison.OrdinalIgnoreCase));
 
             if (exactMatch != null)
             {
-                 LoggerService.LogInformation($"         Exact match found");
+                LoggerService.LogInformation("         Exact match found");
                 return (exactMatch, 100.0);
             }
 
-            // Use fuzzy matching
-             LoggerService.LogInformation($"         No exact match - using fuzzy matching...");
+            // ── Pass 2: exact match with names swapped ────────────────────────
+            var swappedExact = records.FirstOrDefault(r =>
+                r.FirstName.Equals(pdfLastName, StringComparison.OrdinalIgnoreCase) &&
+                r.LastName.Equals(pdfFirstName, StringComparison.OrdinalIgnoreCase));
 
-            var matches = records
-                .Select(r =>
-                {
-                    var score = _fuzzyMatcher.CalculateNameMatchScore(
-                        pdfFirstName, pdfLastName,
-                        r.FirstName, r.LastName);
-                    return new { Record = r, Score = score };
-                })
-                .Where(m => m.Score >= 60.0)  // ✅ Lower threshold to 60% to catch weak matches
-                .OrderByDescending(m => m.Score)
-                .ToList();
-
-            if (matches.Count == 0)
+            if (swappedExact != null)
             {
-                 LoggerService.LogInformation($"         No matches found (even at 60% threshold)");
+                LoggerService.LogInformation("         Exact match found (names were reversed in filename)");
+                return (swappedExact, 100.0);
+            }
+
+            // ── Pass 3: fuzzy — both orderings ────────────────────────────────
+            LoggerService.LogInformation("         No exact match — using fuzzy matching (both orderings)...");
+
+            var candidates = records.Select(r =>
+            {
+                // Try normal order
+                double scoreNormal = _fuzzyMatcher.CalculateNameMatchScore(
+                    pdfFirstName, pdfLastName, r.FirstName, r.LastName);
+
+                // Try swapped order (filename Last/First but CSV has First/Last)
+                double scoreSwapped = _fuzzyMatcher.CalculateNameMatchScore(
+                    pdfLastName, pdfFirstName, r.FirstName, r.LastName);
+
+                double best = Math.Max(scoreNormal, scoreSwapped);
+                bool wasSwapped = scoreSwapped > scoreNormal;
+
+                return new { Record = r, Score = best, WasSwapped = wasSwapped };
+            })
+            .Where(m => m.Score >= 60.0)
+            .OrderByDescending(m => m.Score)
+            .ToList();
+
+            if (candidates.Count == 0)
+            {
+                LoggerService.LogInformation("         No match found (even at 60% threshold, both orderings tried)");
                 return (null, 0.0);
             }
 
-            var bestMatch = matches.First();
-             LoggerService.LogInformation($"         Fuzzy match: {bestMatch.Record.FirstName} {bestMatch.Record.LastName} (score: {bestMatch.Score:F1}%)");
+            var best = candidates.First();
+            LoggerService.LogInformation(
+                $"         Fuzzy match: {best.Record.FirstName} {best.Record.LastName} " +
+                $"(score: {best.Score:F1}%{(best.WasSwapped ? ", names were reversed" : "")})");
 
-            // ✅ Return the best match regardless of score
-            // The caller will decide if IsMatch should be true based on threshold
-            return (bestMatch.Record, bestMatch.Score);
+            return (best.Record, best.Score);
         }
-
 
 
         private void DisplaySummary(Phase2Result result, List<ValidationRecord> validationRecords)

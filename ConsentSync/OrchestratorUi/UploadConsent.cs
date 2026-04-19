@@ -760,8 +760,6 @@ namespace OrchestratorUi
 
 
         // ── Phase 2: Validate PDFs against student records ────────────
-
-
         // ── Phase 2: Validate PDFs against student records ────────────
         private async void bt_ValidatePdf_Click(object sender, EventArgs e)
         {
@@ -775,8 +773,10 @@ namespace OrchestratorUi
                     return;
 
                 var config = ConfigurationService.GetConfiguration();
-                var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
-                var errorFolder = bulkConfig.GetErrorPath();
+
+                // ✅ Use the SAME error path Phase 2 actually writes to (Phis\2_Error)
+                var phase2Config = ConfigurationService.GetPhase2Config();
+                var errorFolder = phase2Config.ErrorOutputDir;
 
                 LoggerService.LogInformation("\n" + new string('═', 60));
                 LoggerService.LogInformation("🔍 PHASE 2 — PDF Validation");
