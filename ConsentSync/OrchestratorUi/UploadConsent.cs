@@ -8,6 +8,7 @@ using OpenQA.Selenium;
 using Orchestrator;
 using Orchestrator.Phase1;
 using Orchestrator.Phase2;
+using Orchestrator.Phase3;
 using Orchestrator.PrePhase3;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -822,6 +823,54 @@ namespace OrchestratorUi
 
 
 
+
+        // ── Append FileRose rows to Upload_to_PHIS.csv ────────────────
+        private void bt_AppendFileRose_Click(object sender, EventArgs e)
+        {
+            bt_AppendFileRose.Enabled = false;
+            bt_AppendFileRose.Text = "⏳ Appending…";
+
+            try
+            {
+                var svc = new Orchestrator.Services.FileRoseAppendService();
+                var result = svc.AppendFileRoseRows();
+
+                if (result.HasErrors)
+                {
+                    MessageBox.Show(
+                        "❌ FileRose append encountered errors.\n\n" +
+                        string.Join("\n", result.Messages.Take(5)) +
+                        "\n\nCheck the log panel for details.",
+                        "Append Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                MessageBox.Show(
+                    $"🌹 FileRose rows appended to Upload_to_PHIS.csv\n\n" +
+                    $"  ✅ Appended        : {result.Appended}\n" +
+                    $"  ⏭️  Already exist  : {result.AlreadyExist}\n" +
+                    $"  ⚠️  No ClientId    : {result.NoClientId}\n\n" +
+                    (result.Appended > 0
+                        ? "You may now proceed to Phase 3 — Upload to PHIS."
+                        : "All FileRose rows were already present — nothing to add."),
+                    result.Appended > 0 ? "Append Complete" : "Nothing to Append",
+                    MessageBoxButtons.OK,
+                    result.Appended > 0 ? MessageBoxIcon.Information : MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError($"❌ Unexpected error appending FileRose rows: {ex.Message}", ex);
+                MessageBox.Show($"❌ Unexpected error:\n\n{ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                bt_AppendFileRose.Enabled = true;
+                bt_AppendFileRose.Text = "🌹 Append FileRose Rows to Upload CSV";
+            }
+        }
+
+
         /// <summary>
         /// Writes the given JSON content back to the source appsettings.json in ConsentSyncCore,
         /// so that a future build does not overwrite the output copy with stale values.
@@ -847,6 +896,135 @@ namespace OrchestratorUi
 
 
 
+
+        // ── Phase 3: Upload Consent & FileRose to PHIS ────────────────
+        private async void bt_Upload_Click(object sender, EventArgs e)
+        {
+            bt_Upload.Enabled = false;
+            bt_Upload.Text = "⏳ Uploading…";
+
+            try
+            {
+                // ── Pre-flight ────────────────────────────────────────
+                if (!PreFlightChecks()) return;
+
+                var config = ConfigurationService.GetConfiguration();
+
+                LoggerService.LogInformation("\n" + new string('═', 60));
+                LoggerService.LogInformation("⬆️  PHASE 3 — Upload Consent & FileRose to PHIS");
+                LoggerService.LogInformation(new string('═', 60));
+
+                // ── Reuse existing PHIS session from Phase 1 if available ─
+                if (_driver == null || _sessionManager == null || _phisSearchService == null)
+                {
+                    LoggerService.LogInformation("🌐 No active PHIS session — initializing Chrome...");
+                    var factory = new ChromeDriverFactory(config);
+                    _driver = factory.CreateDriver();
+
+                    var resultExtractor = new PhisResultExtractor(config);
+                    _sessionManager = new PhisSessionManager(_driver, config);
+                    _phisSearchService = new PhisSearchService(_driver, config, resultExtractor, _sessionManager);
+
+                    if (!_sessionManager.Login())
+                    {
+                        LoggerService.LogError("❌ PHIS login failed — cannot proceed with upload.");
+                        MessageBox.Show(
+                            "❌ Could not log into PHIS.\n\n" +
+                            "Ensure your credentials are correct and the PHIS portal is accessible,\n" +
+                            "then try again.",
+                            "Login Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    LoggerService.LogInformation("✅ PHIS session established.");
+                }
+                else
+                {
+                    LoggerService.LogInformation("✅ Reusing active PHIS session from Phase 1.");
+                }
+
+                // ── Run Phase 3 ───────────────────────────────────────
+                Phase3Result phase3Result = null!;
+                await Task.Run(async () =>
+                {
+                    var orchestrator = new Orchestrator.Phase3.Phase3Orchestrator(
+                        config, _driver!, _phisSearchService!, _sessionManager!);
+                    phase3Result = await orchestrator.RunAsync();
+                });
+
+                // ── Summary ───────────────────────────────────────────
+                LoggerService.LogInformation("\n" + new string('═', 60));
+                LoggerService.LogInformation("📊 UPLOAD SUMMARY");
+                LoggerService.LogInformation(new string('═', 60));
+                LoggerService.LogInformation($"   📋 Total records      : {phase3Result.TotalRecords}");
+                LoggerService.LogInformation($"   ✅ Successful uploads : {phase3Result.SuccessfulUploads}");
+                LoggerService.LogInformation($"   ❌ Errors             : {phase3Result.TotalRecords - phase3Result.SuccessfulUploads}");
+                if (phase3Result.BatchLimitReached)
+                    LoggerService.LogWarning("   ⏸️  Batch limit reached — run again to continue.");
+                LoggerService.LogInformation(new string('═', 60));
+
+                if (phase3Result.BatchLimitReached)
+                {
+                    var answer = MessageBox.Show(
+                        $"⏸️  Batch limit reached — upload paused.\n\n" +
+                        $"  ✅ Uploaded this batch : {phase3Result.SuccessfulUploads}\n" +
+                        $"  📋 Total records      : {phase3Result.TotalRecords}\n\n" +
+                        "Progress has been saved. Click Upload again to continue\n" +
+                        "with the remaining records.\n\n" +
+                        "Do you want to run the next batch now?",
+                        "Batch Complete — More Records Remain",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+
+                    if (answer == DialogResult.Yes)
+                    {
+                        bt_Upload.Enabled = true;
+                        bt_Upload.Text = "⬆️  Upload Consent & FileRose to PHIS";
+                        bt_Upload_Click(sender, e);
+                        return;
+                    }
+                }
+                else if (phase3Result.IsSuccessful)
+                {
+                    MessageBox.Show(
+                        $"✅ All documents uploaded successfully to PHIS.\n\n" +
+                        $"  ✅ Successful uploads : {phase3Result.SuccessfulUploads}\n" +
+                        $"  📋 Total records     : {phase3Result.TotalRecords}\n\n" +
+                        "The upload process is complete.",
+                        "Upload Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    MessageBox.Show(
+                        $"⚠️  Upload completed with errors.\n\n" +
+                        $"  ✅ Successful : {phase3Result.SuccessfulUploads}\n" +
+                        $"  ❌ Failed     : {phase3Result.TotalRecords - phase3Result.SuccessfulUploads}\n\n" +
+                        "Check the log panel for details on failed records.",
+                        "Upload Completed with Errors",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                LoggerService.LogError($"❌ Browser error during upload: {ex.Message}", ex);
+                MessageBox.Show(
+                    $"❌ A browser error occurred during upload.\n\n{ex.Message}\n\n" +
+                    "The Chrome session may have timed out. Try running Phase 1 first\n" +
+                    "to establish a fresh PHIS session.",
+                    "Browser Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError($"❌ Unexpected error during upload: {ex.Message}", ex);
+                MessageBox.Show(
+                    $"❌ An unexpected error occurred:\n\n{ex.Message}\n\nCheck the log panel for details.",
+                    "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                bt_Upload.Enabled = true;
+                bt_Upload.Text = "⬆️  Upload Consent & FileRose to PHIS";
+            }
+        }
 
 
 

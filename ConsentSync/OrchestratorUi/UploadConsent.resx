@@ -117,8 +117,56 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
+  <metadata name="toolTip1.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>17, 17</value>
+  </metadata>
+  <data name="bt_ValidatePdf.ToolTip" xml:space="preserve">
+    <value>Scans all PDFs in the Output Ready folder and matches
+each one to a student record using name + fuzzy matching.
+
+✅  Matched PDFs  → ready for upload
+⚠️  Unmatched PDFs → copied to 6_Error for manual review
+
+Produces Validation_Results.csv — review it before
+generating the Upload CSV.</value>
+  </data>
+  <data name="bt_GenerateCsv.ToolTip" xml:space="preserve">
+    <value>Reads Validation_Results.csv (produced by Validate PDFs)
+and generates Upload_to_PHIS.csv for Phase 3.
+
+✅  Validated records  → added to Upload CSV
+⚠️  Missing PDFs       → skipped and logged
+📋  FileRose records   → appended automatically
+
+Run 'Validate PDFs' first, review errors,
+then click this button to prepare the upload.</value>
+  </data>
+  <data name="bt_Upload.ToolTip" xml:space="preserve">
+    <value>Final step — uploads all validated consent forms
+and FileRose documents directly to PHIS client records.
+
+Prerequisites:
+  ✅  Phase 1 complete  (Client IDs resolved)
+  ✅  Phase 2 complete  (PDFs validated)
+  ✅  Upload_to_PHIS.csv generated
+
+Chrome will open and log into PHIS automatically.
+Uploads in batches — progress is saved after each record.
+
+⚠️  Do not close the browser window during upload.</value>
+  </data>
+  <data name="bt_AppendFileRose.ToolTip" xml:space="preserve">
+    <value>Scans the FileRose output folder for renamed PDFs
+and appends missing rows to Upload_to_PHIS.csv.
+
+✅  Safe to run multiple times — duplicates are never
+    written twice (checked by ClientID + DocumentTitle).
+
+Use this when FileRose PDFs were not ready during
+Generate Upload CSV, or to add them later.</value>
+  </data>
   <metadata name="folderBrowserDialog1.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-    <value>120, 17</value>
+    <value>133, 17</value>
   </metadata>
   <metadata name="$this.TrayHeight" type="System.Int32, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
     <value>39</value>
