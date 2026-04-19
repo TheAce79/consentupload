@@ -15,6 +15,18 @@ namespace Orchestrator.Phase3
 {
     public class Phase3Orchestrator
     {
+
+        // ── Progress record ───────────────────────────────────────────────────
+        public record Phase3Progress(
+            int Current,
+            int Total,
+            string ClientId,
+            string StudentName,
+            string DocumentTitle,
+            bool IsFeuilleRose,
+            bool IsSuccess);
+
+
         private readonly IConfiguration _config;
         private readonly Phase3Config _phase3Config;
         private readonly SchoolContextConfig _schoolContext;
@@ -38,7 +50,7 @@ namespace Orchestrator.Phase3
             _logger = LoggerService.GetLogger<Phase3Orchestrator>();
         }
 
-        public async Task<Phase3Result> RunAsync()
+        public async Task<Phase3Result> RunAsync(IProgress<Phase3Progress>? progress = null)
         {
             LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
             LoggerService.LogInformation("║       ConsentSync - Phase 3: Upload to PHIS            ║");
@@ -131,9 +143,10 @@ namespace Orchestrator.Phase3
                     LoggerService.LogInformation($"VerifStatus: {record.VerifStatus}");
                     LoggerService.LogInformation($"{new string('─', 70)}");
 
+                    bool success = false;
                     try
                     {
-                        bool success;
+                       
 
                         if (record.IsFeuilleRose)
                         {
@@ -165,6 +178,17 @@ namespace Orchestrator.Phase3
                         try { await _phisSearchService.NavigateBackToSearchPagesAsync(); } catch { }
                     }
 
+
+                    // ✅ Report progress after every document
+                    progress?.Report(new Phase3Progress(
+                        Current: processedCount,
+                        Total: recordsToProcess.Count,
+                        ClientId: record.ClientID,
+                        StudentName: $"{record.FirstName} {record.LastName}",
+                        DocumentTitle: record.DocumentTitle,
+                        IsFeuilleRose: record.IsFeuilleRose,
+                        IsSuccess: success));
+
                     // Always persist after each document
                     SaveUploadCsv(uploadRecords);
 
@@ -195,8 +219,6 @@ namespace Orchestrator.Phase3
                 DisplaySummary(result, successCount, skipCount, failureCount,
                     uploadRecords.Count, alreadyVerified);
 
-                DisplaySummary(result, successCount, skipCount, failureCount,
-                    uploadRecords.Count, alreadyVerified);
 
                 return result;
             }

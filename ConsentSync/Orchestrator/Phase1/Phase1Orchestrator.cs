@@ -1,6 +1,8 @@
 ﻿using ConsentSyncCore.Models;
 using ConsentSyncCore.Services;
 using ConsentSyncCore.Services.Browser;
+using ConsentSyncCore.Services.Configuration;
+using ConsentSyncCore.Services.ConfigurationPoco;
 using ConsentSyncCore.Services.Matching;
 using ConsentSyncCore.Services.Phis;
 using CsvProcessing;
@@ -10,11 +12,10 @@ using OpenQA.Selenium;
 using Orchestrator.Phase3;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using ConsentSyncCore.Services.ConfigurationPoco;
-using ConsentSyncCore.Services.Configuration;
 
 namespace Orchestrator.Phase1
 {
@@ -24,6 +25,10 @@ namespace Orchestrator.Phase1
     /// </summary>
     public class Phase1Orchestrator : IDisposable
     {
+
+        // ── New progress record ───────────────────────────────────────────────
+        public record Phase1Progress(int Current, int Total, string StudentName, bool IsFound);
+
         private readonly IConfiguration _config;
         private readonly StudentCsvRepository _csvRepo;
         private readonly ChromeDriverFactory _driverFactory;
@@ -88,7 +93,7 @@ namespace Orchestrator.Phase1
         /// <returns></returns>
         /// 
 
-        public async Task<Phase1Result> RunAsync()
+        public async Task<Phase1Result> RunAsync(IProgress<Phase1Progress>? progress = null)
         {
             LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
             LoggerService.LogInformation("║         ConsentSync - Phase 1: Search Client IDs       ║");
@@ -173,7 +178,7 @@ namespace Orchestrator.Phase1
 
                 // ── Step 5: PHIS search (primaries only) ──────────────────────
                 LoggerService.LogInformation("\n📋 Step 4: Searching for Client IDs...");
-                await ProcessStudentsAsync(unprocessedStudents, result);
+                await ProcessStudentsAsync(unprocessedStudents, result, progress);
 
                 // ── Step 6: Save primaries ────────────────────────────────────
                 LoggerService.LogInformation("\n💾 Saving primary results...");
@@ -250,7 +255,7 @@ namespace Orchestrator.Phase1
         /// <summary>
         /// Process all unprocessed students
         /// </summary>
-        private async Task ProcessStudentsAsync(List<StudentRecord> students, Phase1Result result)
+        private async Task ProcessStudentsAsync(List<StudentRecord> students, Phase1Result result, IProgress<Phase1Progress>? progress = null)
         {
             // ── Batch limit ───────────────────────────────────────────────────
             // Process at most BatchSize records per run so the user can verify
@@ -281,26 +286,19 @@ namespace Orchestrator.Phase1
 
             for (int i = 0; i < batch.Count; i++)
             {
-                if (_shutdownRequested)
-                {
-                    LoggerService.LogInformation("\n⚠️  Shutdown requested — saving progress...");
-                    break;
-                }
+                if (_shutdownRequested) break;
 
                 var student = batch[i];
-
-                // Session status every 10 records
-                if (i > 0 && i % 10 == 0)
-                    DisplaySessionStatus();
+                if (i > 0 && i % 10 == 0) DisplaySessionStatus();
 
                 LoggerService.LogInformation(
                     $"\n[{i + 1}/{batch.Count}] Processing: {student.FirstName} {student.LastName}");
 
+                bool found = false;
                 try
                 {
-                    await ProcessSingleStudentAsync(student, result);
+                    found = await ProcessSingleStudentAsync(student, result);
 
-                    // Periodic save
                     if ((i + 1) % _phase1Config.SaveProgressEveryNRecords == 0)
                     {
                         LoggerService.LogInformation($"\n💾 Saving progress ({i + 1}/{batch.Count} processed)...");
@@ -316,6 +314,13 @@ namespace Orchestrator.Phase1
                     student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
                     result.ErrorCount++;
                 }
+
+                // ✅ Report progress after every record
+                progress?.Report(new Phase1Progress(
+                    Current: i + 1,
+                    Total: batch.Count,
+                    StudentName: $"{student.FirstName} {student.LastName}",
+                    IsFound: found));
             }
 
             // ── Batch completion message ──────────────────────────────────────

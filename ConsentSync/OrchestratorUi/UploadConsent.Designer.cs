@@ -1,4 +1,5 @@
-﻿namespace OrchestratorUi
+﻿
+namespace OrchestratorUi
 {
     partial class UploadConsent
     {
@@ -41,8 +42,12 @@
             btn_ProcessCsv = new Button();
             gb_Phase1 = new GroupBox();
             bt_SearchClientId = new Button();
+            pb_Phase1 = new ProgressBar();           // ✅ instantiated
+            lbl_Phase1Progress = new Label();        // ✅ instantiated
             gb_PreUpload = new GroupBox();
             gb_UploadPhis = new GroupBox();
+            pb_Phase3 = new ProgressBar();           // ✅ instantiated
+            lbl_Phase3Progress = new Label();        // ✅ instantiated
             grpConfig.SuspendLayout();
             gb_Normalise.SuspendLayout();
             gb_Phase1.SuspendLayout();
@@ -82,14 +87,14 @@
             bt_GenerateCsv.UseVisualStyleBackColor = false;
             bt_GenerateCsv.Click += bt_GenerateCsv_Click;
             // 
-            // bt_Upload
+            // bt_Upload  ✅ moved to top of group so pb + label fit below
             // 
             bt_Upload.BackColor = Color.FromArgb(140, 30, 30);
             bt_Upload.FlatAppearance.BorderColor = Color.FromArgb(100, 20, 20);
             bt_Upload.FlatStyle = FlatStyle.Flat;
             bt_Upload.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             bt_Upload.ForeColor = Color.White;
-            bt_Upload.Location = new Point(6, 66);
+            bt_Upload.Location = new Point(6, 28);
             bt_Upload.Name = "bt_Upload";
             bt_Upload.Size = new Size(228, 48);
             bt_Upload.TabIndex = 0;
@@ -97,6 +102,28 @@
             toolTip1.SetToolTip(bt_Upload, resources.GetString("bt_Upload.ToolTip"));
             bt_Upload.UseVisualStyleBackColor = false;
             bt_Upload.Click += bt_Upload_Click;
+            // 
+            // pb_Phase3  ✅ positioned below bt_Upload
+            // 
+            pb_Phase3.Location = new Point(6, 86);
+            pb_Phase3.Name = "pb_Phase3";
+            pb_Phase3.Size = new Size(228, 14);
+            pb_Phase3.Style = ProgressBarStyle.Continuous;
+            pb_Phase3.TabIndex = 1;
+            pb_Phase3.Minimum = 0;
+            pb_Phase3.Value = 0;
+            // 
+            // lbl_Phase3Progress
+            // 
+            lbl_Phase3Progress.AutoSize = false;
+            lbl_Phase3Progress.Font = new Font("Segoe UI", 8F);
+            lbl_Phase3Progress.ForeColor = Color.FromArgb(140, 30, 30);
+            lbl_Phase3Progress.Location = new Point(6, 104);
+            lbl_Phase3Progress.Name = "lbl_Phase3Progress";
+            lbl_Phase3Progress.Size = new Size(228, 18);
+            lbl_Phase3Progress.TabIndex = 2;
+            lbl_Phase3Progress.Text = "";
+            lbl_Phase3Progress.TextAlign = ContentAlignment.MiddleCenter;
             // 
             // bt_AppendFileRose
             // 
@@ -292,6 +319,8 @@
             // gb_Phase1
             // 
             gb_Phase1.Controls.Add(bt_SearchClientId);
+            gb_Phase1.Controls.Add(pb_Phase1);
+            gb_Phase1.Controls.Add(lbl_Phase1Progress);
             gb_Phase1.Location = new Point(765, 12);
             gb_Phase1.Name = "gb_Phase1";
             gb_Phase1.Size = new Size(254, 120);
@@ -306,13 +335,35 @@
             bt_SearchClientId.FlatStyle = FlatStyle.Flat;
             bt_SearchClientId.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             bt_SearchClientId.ForeColor = Color.White;
-            bt_SearchClientId.Location = new Point(12, 30);
+            bt_SearchClientId.Location = new Point(12, 28);
             bt_SearchClientId.Name = "bt_SearchClientId";
             bt_SearchClientId.Size = new Size(228, 38);
             bt_SearchClientId.TabIndex = 0;
             bt_SearchClientId.Text = "🔍 Search Client IDs on PHIS";
             bt_SearchClientId.UseVisualStyleBackColor = false;
             bt_SearchClientId.Click += bt_SearchClientId_Click;
+            // 
+            // pb_Phase1
+            // 
+            pb_Phase1.Location = new Point(12, 76);
+            pb_Phase1.Name = "pb_Phase1";
+            pb_Phase1.Size = new Size(228, 14);
+            pb_Phase1.Style = ProgressBarStyle.Continuous;
+            pb_Phase1.TabIndex = 1;
+            pb_Phase1.Minimum = 0;
+            pb_Phase1.Value = 0;
+            // 
+            // lbl_Phase1Progress
+            // 
+            lbl_Phase1Progress.AutoSize = false;
+            lbl_Phase1Progress.Font = new Font("Segoe UI", 8F);
+            lbl_Phase1Progress.ForeColor = Color.FromArgb(0, 90, 160);
+            lbl_Phase1Progress.Location = new Point(12, 94);
+            lbl_Phase1Progress.Name = "lbl_Phase1Progress";
+            lbl_Phase1Progress.Size = new Size(228, 18);
+            lbl_Phase1Progress.TabIndex = 2;
+            lbl_Phase1Progress.Text = "";
+            lbl_Phase1Progress.TextAlign = ContentAlignment.MiddleCenter;
             // 
             // gb_PreUpload
             // 
@@ -329,6 +380,8 @@
             // gb_UploadPhis
             // 
             gb_UploadPhis.Controls.Add(bt_Upload);
+            gb_UploadPhis.Controls.Add(pb_Phase3);
+            gb_UploadPhis.Controls.Add(lbl_Phase3Progress);
             gb_UploadPhis.Location = new Point(765, 140);
             gb_UploadPhis.Name = "gb_UploadPhis";
             gb_UploadPhis.Size = new Size(254, 167);
@@ -375,11 +428,12 @@
         private RichTextBox rtxt_Log;
         private FolderBrowserDialog folderBrowserDialog1;
         private GroupBox gb_Normalise;
-
         private Button btn_ExtractBulk;
         private Button btn_ProcessCsv;
         private GroupBox gb_Phase1;
         private Button bt_SearchClientId;
+        private ProgressBar pb_Phase1;
+        private Label lbl_Phase1Progress;
         private GroupBox gb_PreUpload;
         private Button bt_ValidatePdf;
         private Button bt_GenerateCsv;
@@ -387,5 +441,7 @@
         private GroupBox gb_UploadPhis;
         private Button bt_Upload;
         private Button bt_AppendFileRose;
+        private ProgressBar pb_Phase3;
+        private Label lbl_Phase3Progress;
     }
 }

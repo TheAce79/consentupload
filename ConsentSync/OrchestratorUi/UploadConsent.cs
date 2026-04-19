@@ -13,6 +13,8 @@ using Orchestrator.PrePhase3;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using static Orchestrator.BulkPdfExtraction;
+using static Orchestrator.Phase1.Phase1Orchestrator;
+using static Orchestrator.Phase3.Phase3Orchestrator;
 using Keys = System.Windows.Forms.Keys;
 // ✅ Resolve ambiguous references explicitly
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
@@ -91,16 +93,31 @@ namespace OrchestratorUi
 
 
         // ── Phase 1: Search Client IDs on PHIS ───────────────────────
+
+
+
+
+        // ── Phase 1: Search Client IDs on PHIS ───────────────────────
         private async void bt_SearchClientId_Click(object sender, EventArgs e)
         {
             bt_SearchClientId.Enabled = false;
             bt_SearchClientId.Text = "⏳ Searching…";
 
+            // ── Reset progress bar ────────────────────────────────────
+            var phisConfig = ConfigurationService.GetPhisConfig();
+            pb_Phase1.Maximum = phisConfig.BatchSize > 0 ? phisConfig.BatchSize : 100;
+            pb_Phase1.Value = 0;
+            lbl_Phase1Progress.Text = "Initialising…";
+            lbl_Phase1Progress.ForeColor = Color.FromArgb(0, 90, 160);
+
             try
             {
-                // ── Pre-flight checks before opening Chrome ───────────────
                 if (!PreFlightChecks())
+                {
+                    lbl_Phase1Progress.Text = "";   // ✅ clear on early exit
+                    lbl_Phase1Progress.ForeColor = Color.FromArgb(0, 90, 160);
                     return;
+                }
 
                 IConfiguration config = ConfigurationService.GetConfiguration();
 
@@ -108,21 +125,35 @@ namespace OrchestratorUi
                 LoggerService.LogInformation("🔍 PHASE 1: Search Client IDs on PHIS");
                 LoggerService.LogInformation(new string('═', 60));
 
+                // ── Progress callback — UI thread safe ────────────────
+                var progress = new Progress<Phase1Progress>(p =>
+                {
+                    this.InvokeIfRequired(() =>
+                    {
+                        pb_Phase1.Maximum = p.Total;
+                        pb_Phase1.Value = Math.Min(p.Current, p.Total);
+
+                        lbl_Phase1Progress.Text = $"{p.Current} / {p.Total}  —  {p.StudentName}";
+                        lbl_Phase1Progress.ForeColor = p.IsFound
+                            ? Color.DarkGreen
+                            : Color.DarkOrange;
+                    });
+                });
+
                 (Phase1Result phase1Result,
                  IWebDriver? phase1Driver,
                  PhisSessionManager? phase1SessionMgr,
-                 PhisSearchService? phase1SearchSvc) = await RunPhase1Async(config);
+                 PhisSearchService? phase1SearchSvc) = await RunPhase1Async(config, progress);
 
-                // ── Store session for reuse in Phase 3 ───────────────────
+                // ── Store session for reuse in Phase 3 ───────────────
                 _driver = phase1Driver;
                 _sessionManager = phase1SessionMgr;
                 _phisSearchService = phase1SearchSvc;
 
-                // ── Handle critical failure ───────────────────────────────
+                // ── Handle critical failure ───────────────────────────
                 if (phase1Result.HasErrors)
                 {
                     LoggerService.LogError("❌ Phase 1 failed with a critical error.");
-
                     MessageBox.Show(
                         "❌ Phase 1 encountered a critical error and could not complete.\n\n" +
                         "Possible causes:\n" +
@@ -136,11 +167,10 @@ namespace OrchestratorUi
                     return;
                 }
 
-                // ── Nothing left to process ───────────────────────────────
+                // ── Nothing left to process ───────────────────────────
                 if (phase1Result.ToProcessCount == 0 && phase1Result.TotalStudents > 0)
                 {
                     LoggerService.LogInformation("ℹ️  All students already processed.");
-
                     MessageBox.Show(
                         "ℹ️  All students have already been processed.\n\n" +
                         $"  📋 Total students        : {phase1Result.TotalStudents}\n" +
@@ -153,11 +183,10 @@ namespace OrchestratorUi
                     return;
                 }
 
-                // ── Batch limit reached — more records remain ─────────────
+                // ── Batch limit reached ───────────────────────────────
                 if (phase1Result.BatchLimitReached)
                 {
                     int remaining = phase1Result.ToProcessCount - phase1Result.TotalProcessed;
-
                     LoggerService.LogInformation($"⏸️  Batch limit reached — {remaining} record(s) remaining.");
 
                     var answer = MessageBox.Show(
@@ -165,14 +194,13 @@ namespace OrchestratorUi
                         $"  ✅ Found in this batch     : {phase1Result.FoundCount}\n" +
                         $"  ⚠️  Manual review needed   : {phase1Result.ManualReviewCount}\n" +
                         $"  📋 Remaining unprocessed   : {remaining}\n\n" +
-                        $"Click 'Search' again to process the next batch.\n\n" +
-                        $"Do you want to run the next batch now?",
+                        "Click 'Search' again to process the next batch.\n\n" +
+                        "Do you want to run the next batch now?",
                         "Batch Complete — More Records Remain",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Information);
 
                     if (answer == DialogResult.Yes)
                     {
-                        // Recursively trigger next batch
                         bt_SearchClientId.Enabled = true;
                         bt_SearchClientId.Text = "🔍 Search Client IDs on PHIS";
                         bt_SearchClientId_Click(sender, e);
@@ -180,7 +208,7 @@ namespace OrchestratorUi
                     }
                 }
 
-                // ── Manual review required ────────────────────────────────
+                // ── Manual review required ────────────────────────────
                 if (phase1Result.ManualReviewCount > 0)
                 {
                     LoggerService.LogWarning($"⚠️  {phase1Result.ManualReviewCount} student(s) need manual review.");
@@ -193,7 +221,7 @@ namespace OrchestratorUi
                         $"  ❌ Search errors          : {phase1Result.ErrorCount}\n\n" +
                         "Next steps:\n" +
                         "  1. Open the processed CSV file.\n" +
-                        "  2. Search for rows where ClientIdStatus = NeedsManualReview.\n" +
+                        "  2. Find rows where ClientIdStatus = NeedsManualReview.\n" +
                         "  3. Use the BestMatch column as a hint.\n" +
                         "  4. Fill in the ClientId manually.\n\n" +
                         "Continue to Phase 2 without resolving these records?",
@@ -202,17 +230,14 @@ namespace OrchestratorUi
 
                     if (answer == DialogResult.No)
                     {
-                        LoggerService.LogInformation("ℹ️  User chose to resolve manual review items before continuing.");
+                        LoggerService.LogInformation("ℹ️  User chose to resolve manual review items first.");
                         return;
                     }
-
-                    LoggerService.LogWarning("⚠️  Continuing to Phase 2 with unresolved manual review items.");
                 }
                 else
                 {
-                    // ── Full success ──────────────────────────────────────
+                    // ── Full success ──────────────────────────────────
                     LoggerService.LogInformation("✅ Phase 1 completed successfully — all Client IDs found.");
-
                     MessageBox.Show(
                         $"✅ Phase 1 completed successfully.\n\n" +
                         $"  ✅ Client IDs found       : {phase1Result.FoundCount}\n" +
@@ -225,11 +250,10 @@ namespace OrchestratorUi
             }
             catch (InvalidOperationException ex)
             {
-                // ChromeDriver / browser-level failure
                 LoggerService.LogError($"❌ Browser error: {ex.Message}", ex);
                 MessageBox.Show(
                     $"❌ A browser error occurred.\n\n{ex.Message}\n\n" +
-                    "Ensure Portable Chrome is installed and the ChromeDriver version matches.\n" +
+                    "Ensure Portable Chrome is installed and ChromeDriver version matches.\n" +
                     "Use the '🌐 Download Portable Chrome' button to re-install if needed.",
                     "Browser Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
@@ -245,10 +269,24 @@ namespace OrchestratorUi
             {
                 bt_SearchClientId.Enabled = true;
                 bt_SearchClientId.Text = "🔍 Search Client IDs on PHIS";
+
+                // ✅ Correct final label state
+                this.InvokeIfRequired(() =>
+                {
+                    if (pb_Phase1.Value > 0 && pb_Phase1.Value == pb_Phase1.Maximum)
+                    {
+                        lbl_Phase1Progress.Text = $"✅ Batch complete — {pb_Phase1.Maximum} / {pb_Phase1.Maximum}";
+                        lbl_Phase1Progress.ForeColor = Color.DarkGreen;
+                    }
+                    else if (pb_Phase1.Value == 0)
+                    {
+                        lbl_Phase1Progress.Text = "";
+                        lbl_Phase1Progress.ForeColor = Color.FromArgb(0, 90, 160);
+                    }
+                    // else: keep last student name shown (mid-batch stop)
+                });
             }
         }
-
-
 
         // ── Phase 1 runner ────────────────────────────────────────────
         private static async Task<(Phase1Result, IWebDriver?, PhisSessionManager?, PhisSearchService?)>
@@ -258,6 +296,29 @@ namespace OrchestratorUi
             {
                 using var orchestrator = new Phase1Orchestrator(config);
                 var result = await orchestrator.RunAsync();
+                var driver = orchestrator.GetDriver();
+                var sessionMgr = orchestrator.GetSessionManager();
+                var searchSvc = orchestrator.GetSearchService();
+                return (result, driver, sessionMgr, searchSvc);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError($"❌ Phase 1 error: {ex.Message}", ex);
+                return (new Phase1Result { HasErrors = true }, null, null, null);
+            }
+        }
+
+
+
+
+        // ── Phase 1 runner (with progress) — single overload ─────────
+        private static async Task<(Phase1Result, IWebDriver?, PhisSessionManager?, PhisSearchService?)>
+            RunPhase1Async(IConfiguration config, IProgress<Phase1Progress>? progress = null)
+        {
+            try
+            {
+                using var orchestrator = new Phase1Orchestrator(config);
+                var result = await orchestrator.RunAsync(progress);
                 var driver = orchestrator.GetDriver();
                 var sessionMgr = orchestrator.GetSessionManager();
                 var searchSvc = orchestrator.GetSearchService();
@@ -898,15 +959,26 @@ namespace OrchestratorUi
 
 
         // ── Phase 3: Upload Consent & FileRose to PHIS ────────────────
+        // ── Phase 3: Upload Consent & FileRose to PHIS ────────────────
         private async void bt_Upload_Click(object sender, EventArgs e)
         {
             bt_Upload.Enabled = false;
             bt_Upload.Text = "⏳ Uploading…";
 
+            // ── Reset progress bar ────────────────────────────────────
+            var phisConfig = ConfigurationService.GetPhisConfig();
+            pb_Phase3.Maximum = phisConfig.BatchSize > 0 ? phisConfig.BatchSize : 100;
+            pb_Phase3.Value = 0;
+            lbl_Phase3Progress.Text = "Initialising…";
+            lbl_Phase3Progress.ForeColor = Color.FromArgb(140, 30, 30);
+
             try
             {
-                // ── Pre-flight ────────────────────────────────────────
-                if (!PreFlightChecks()) return;
+                if (!PreFlightChecks())
+                {
+                    lbl_Phase3Progress.Text = "";
+                    return;
+                }
 
                 var config = ConfigurationService.GetConfiguration();
 
@@ -943,13 +1015,31 @@ namespace OrchestratorUi
                     LoggerService.LogInformation("✅ Reusing active PHIS session from Phase 1.");
                 }
 
+                // ── Progress callback ─────────────────────────────────
+                var progress = new Progress<Phase3Progress>(p =>
+                {
+                    this.InvokeIfRequired(() =>
+                    {
+                        pb_Phase3.Maximum = p.Total;
+                        pb_Phase3.Value = Math.Min(p.Current, p.Total);
+
+                        string icon = p.IsFeuilleRose ? "🌹" : "📋";
+                        lbl_Phase3Progress.Text =
+                            $"{p.Current} / {p.Total}  {icon}  {p.StudentName}";
+
+                        lbl_Phase3Progress.ForeColor = p.IsSuccess
+                            ? Color.DarkGreen
+                            : Color.DarkOrange;
+                    });
+                });
+
                 // ── Run Phase 3 ───────────────────────────────────────
                 Phase3Result phase3Result = null!;
                 await Task.Run(async () =>
                 {
                     var orchestrator = new Orchestrator.Phase3.Phase3Orchestrator(
                         config, _driver!, _phisSearchService!, _sessionManager!);
-                    phase3Result = await orchestrator.RunAsync();
+                    phase3Result = await orchestrator.RunAsync(progress);   // ✅ pass progress
                 });
 
                 // ── Summary ───────────────────────────────────────────
@@ -969,8 +1059,7 @@ namespace OrchestratorUi
                         $"⏸️  Batch limit reached — upload paused.\n\n" +
                         $"  ✅ Uploaded this batch : {phase3Result.SuccessfulUploads}\n" +
                         $"  📋 Total records      : {phase3Result.TotalRecords}\n\n" +
-                        "Progress has been saved. Click Upload again to continue\n" +
-                        "with the remaining records.\n\n" +
+                        "Progress has been saved. Click Upload again to continue.\n\n" +
                         "Do you want to run the next batch now?",
                         "Batch Complete — More Records Remain",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Information);
@@ -1023,9 +1112,22 @@ namespace OrchestratorUi
             {
                 bt_Upload.Enabled = true;
                 bt_Upload.Text = "⬆️  Upload Consent & FileRose to PHIS";
+
+                this.InvokeIfRequired(() =>
+                {
+                    if (pb_Phase3.Value > 0 && pb_Phase3.Value == pb_Phase3.Maximum)
+                    {
+                        lbl_Phase3Progress.Text = $"✅ Batch complete — {pb_Phase3.Maximum} / {pb_Phase3.Maximum}";
+                        lbl_Phase3Progress.ForeColor = Color.DarkGreen;
+                    }
+                    else if (pb_Phase3.Value == 0)
+                    {
+                        lbl_Phase3Progress.Text = "";
+                    }
+                    // else: keep last student shown (mid-batch stop)
+                });
             }
         }
-
 
 
         private void txtBox_BatchSize_KeyPress(object sender, KeyPressEventArgs e)
