@@ -217,18 +217,27 @@ namespace CsvProcessing
                 // ── Detect duplicates: same normalised FirstName + LastName + DOB ──
                 LoggerService.LogInformation("\n🔍 Detecting duplicates (FirstName + LastName + DOB)...");
 
-                var seenKeys = new Dictionary<string, int>();
-                int duplicateCount = 0;
-
-                for (int i = 0; i < records.Count; i++)
+                // Pass 1: count occurrences of each key
+                var keyCounts = new Dictionary<string, int>();
+                foreach (var r in records)
                 {
-                    var r = records[i];
+                    string fn = NormalizeDuplicateKey(r.Properties.GetValueOrDefault(_firstNameColumn, string.Empty));
+                    string ln = NormalizeDuplicateKey(r.Properties.GetValueOrDefault(_lastNameColumn, string.Empty));
+                    string dob = r.Properties.GetValueOrDefault(_dateOfBirthColumn, string.Empty).Trim();
+                    string key = $"{ln}_{fn}_{dob}";
+                    keyCounts[key] = keyCounts.GetValueOrDefault(key, 0) + 1;
+                }
+
+                // Pass 2: flag ALL rows that belong to a duplicate group
+                int duplicateCount = 0;
+                foreach (var r in records)
+                {
                     string fn = NormalizeDuplicateKey(r.Properties.GetValueOrDefault(_firstNameColumn, string.Empty));
                     string ln = NormalizeDuplicateKey(r.Properties.GetValueOrDefault(_lastNameColumn, string.Empty));
                     string dob = r.Properties.GetValueOrDefault(_dateOfBirthColumn, string.Empty).Trim();
                     string key = $"{ln}_{fn}_{dob}";
 
-                    if (seenKeys.TryGetValue(key, out _))
+                    if (keyCounts[key] > 1)
                     {
                         r["IsDuplicate"] = "true";
                         duplicateCount++;
@@ -237,12 +246,10 @@ namespace CsvProcessing
                     else
                     {
                         r["IsDuplicate"] = "false";
-                        seenKeys[key] = i;
                     }
                 }
 
                 LoggerService.LogInformation($"   ✅ {duplicateCount} duplicate row(s) flagged");
-
                 // Transform Date of Birth column
                 TransformDates(records);
 

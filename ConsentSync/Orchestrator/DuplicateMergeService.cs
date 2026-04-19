@@ -20,12 +20,12 @@ namespace Orchestrator.Services
     ///   1. User reviews PDFs in  5_Duplicate\{LastName}_{FirstName}\
     ///      and deletes the copies they do NOT want to keep.
     ///   2. User sets  DuplicateResolved = true  in immunizations_processed.csv
-    ///      for the duplicate row(s) of that student.
+    ///      on ALL rows for that student (every row in the duplicate group).
     ///   3. This service runs automatically before Pre-Phase 3:
     ///      - Merges all remaining PDFs in the subfolder into one PDF.
     ///      - Moves the merged PDF to 3_Output_Ready.
     ///      - Updates Validation_Results.csv so Pre-Phase 3 picks up the merged PDF.
-    ///      - Skips groups where any duplicate still has DuplicateResolved = false.
+    ///      - Skips groups where ANY row still has DuplicateResolved = false.
     /// </summary>
     public class DuplicateMergeService
     {
@@ -42,6 +42,7 @@ namespace Orchestrator.Services
         }
 
         // ── Public entry point ────────────────────────────────────────────────
+
 
         public int MergeResolvedDuplicates()
         {
@@ -73,21 +74,22 @@ namespace Orchestrator.Services
             {
                 var members = group.ToList();
 
-                // ── ANY row in the group having DuplicateResolved=true is enough ──
-                // The user only needs to set it once (on any row) to signal approval.
-                bool isResolved = members.Any(s => s.DuplicateResolved);
+                // ── ALL rows in the group must have DuplicateResolved = true ──
+                // The user must explicitly acknowledge every row before merge proceeds.
+                bool isResolved = members.All(s => s.DuplicateResolved);
 
                 var rep = members.First();
                 string lastName = rep.LastName;
                 string firstName = rep.FirstName;
 
                 int duplicateCount = members.Count(s => s.IsDuplicate);
+                int resolvedCount = members.Count(s => s.DuplicateResolved);
 
                 if (!isResolved)
                 {
                     pendingCount++;
                     LoggerService.LogInformation($"   ⏳ PENDING — {lastName} {firstName} " +
-                        $"({duplicateCount} duplicate row(s)): set DuplicateResolved = true on any row when ready");
+                        $"({resolvedCount}/{members.Count} row(s) resolved): set DuplicateResolved = true on ALL rows when ready");
                     continue;
                 }
 
@@ -127,7 +129,7 @@ namespace Orchestrator.Services
                 LoggerService.LogInformation($"\n   💡 To resolve pending duplicates:");
                 LoggerService.LogInformation($"      1. Review PDFs in: {_bulkConfig.GetDuplicateClientPath()}\\{{LastName}}_{{FirstName}}\\");
                 LoggerService.LogInformation($"      2. Delete the copies you do NOT want to keep.");
-                LoggerService.LogInformation($"      3. Set DuplicateResolved = true on ANY ONE row for that student.");
+                LoggerService.LogInformation($"      3. Set DuplicateResolved = true on ALL rows for that student.");
                 LoggerService.LogInformation($"      4. Re-run Pre-Phase 3.");
             }
 

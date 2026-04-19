@@ -736,6 +736,9 @@ namespace OrchestratorUi
 
 
         // ── Phase 2: Validate PDFs against student records ────────────
+
+
+        // ── Phase 2: Validate PDFs against student records ────────────
         private async void bt_ValidatePdf_Click(object sender, EventArgs e)
         {
             bt_ValidatePdf.Enabled = false;
@@ -743,6 +746,10 @@ namespace OrchestratorUi
 
             try
             {
+                // ── Duplicate pre-check ───────────────────────────────
+                if (!await CheckUnresolvedDuplicatesAsync("PDF Validation"))
+                    return;
+
                 var config = ConfigurationService.GetConfiguration();
                 var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
                 var errorFolder = bulkConfig.GetErrorPath();
@@ -767,7 +774,6 @@ namespace OrchestratorUi
                     return;
                 }
 
-                // ── Validation summary ────────────────────────────────
                 LoggerService.LogInformation("\n" + new string('═', 60));
                 LoggerService.LogInformation("📊 VALIDATION SUMMARY");
                 LoggerService.LogInformation(new string('═', 60));
@@ -817,6 +823,9 @@ namespace OrchestratorUi
 
 
 
+
+
+
         // ── PrePhase 3: Generate Upload_to_PHIS.csv ───────────────────
         private async void bt_GenerateCsv_Click(object sender, EventArgs e)
         {
@@ -825,6 +834,10 @@ namespace OrchestratorUi
 
             try
             {
+                // ── Duplicate pre-check ───────────────────────────────
+                if (!await CheckUnresolvedDuplicatesAsync("Generate Upload CSV"))
+                    return;
+
                 var config = ConfigurationService.GetConfiguration();
 
                 LoggerService.LogInformation("\n" + new string('═', 60));
@@ -854,15 +867,15 @@ namespace OrchestratorUi
                 LoggerService.LogInformation("\n" + new string('═', 60));
                 LoggerService.LogInformation("📊 UPLOAD CSV SUMMARY");
                 LoggerService.LogInformation(new string('═', 60));
-                LoggerService.LogInformation($"   ✅ Upload records created : {prePhase3Result.UploadRecordsCreated}");
+                LoggerService.LogInformation($"   ✅ New rows appended      : {prePhase3Result.UploadRecordsCreated}");
                 LoggerService.LogInformation($"   📋 FileRose records       : {prePhase3Result.FileRoseRecordsCreated}");
                 LoggerService.LogInformation($"   ⚠️  Skipped (no PDF)      : {prePhase3Result.SkippedMissingPdf}");
                 LoggerService.LogInformation($"   ℹ️  Total records          : {prePhase3Result.TotalRecords}");
                 LoggerService.LogInformation(new string('═', 60));
 
                 MessageBox.Show(
-                    $"✅ Upload CSV generated successfully.\n\n" +
-                    $"  ✅ Upload records created : {prePhase3Result.UploadRecordsCreated}\n" +
+                    $"✅ Upload CSV updated successfully.\n\n" +
+                    $"  ✅ New rows appended      : {prePhase3Result.UploadRecordsCreated}\n" +
                     $"  📋 FileRose records       : {prePhase3Result.FileRoseRecordsCreated}\n" +
                     $"  ⚠️  Skipped (no PDF)      : {prePhase3Result.SkippedMissingPdf}\n\n" +
                     "You may now proceed to Phase 3 — Upload to PHIS.",
@@ -881,6 +894,7 @@ namespace OrchestratorUi
                 bt_GenerateCsv.Text = "📄 Generate Upload CSV";
             }
         }
+
 
 
 
@@ -956,16 +970,12 @@ namespace OrchestratorUi
 
 
 
-
-
-        // ── Phase 3: Upload Consent & FileRose to PHIS ────────────────
         // ── Phase 3: Upload Consent & FileRose to PHIS ────────────────
         private async void bt_Upload_Click(object sender, EventArgs e)
         {
             bt_Upload.Enabled = false;
             bt_Upload.Text = "⏳ Uploading…";
 
-            // ── Reset progress bar ────────────────────────────────────
             var phisConfig = ConfigurationService.GetPhisConfig();
             pb_Phase3.Maximum = phisConfig.BatchSize > 0 ? phisConfig.BatchSize : 100;
             pb_Phase3.Value = 0;
@@ -974,6 +984,13 @@ namespace OrchestratorUi
 
             try
             {
+                // ── Duplicate pre-check ───────────────────────────────
+                if (!await CheckUnresolvedDuplicatesAsync("Upload to PHIS"))
+                {
+                    lbl_Phase3Progress.Text = "";
+                    return;
+                }
+
                 if (!PreFlightChecks())
                 {
                     lbl_Phase3Progress.Text = "";
@@ -986,7 +1003,6 @@ namespace OrchestratorUi
                 LoggerService.LogInformation("⬆️  PHASE 3 — Upload Consent & FileRose to PHIS");
                 LoggerService.LogInformation(new string('═', 60));
 
-                // ── Reuse existing PHIS session from Phase 1 if available ─
                 if (_driver == null || _sessionManager == null || _phisSearchService == null)
                 {
                     LoggerService.LogInformation("🌐 No active PHIS session — initializing Chrome...");
@@ -1015,34 +1031,26 @@ namespace OrchestratorUi
                     LoggerService.LogInformation("✅ Reusing active PHIS session from Phase 1.");
                 }
 
-                // ── Progress callback ─────────────────────────────────
                 var progress = new Progress<Phase3Progress>(p =>
                 {
                     this.InvokeIfRequired(() =>
                     {
                         pb_Phase3.Maximum = p.Total;
                         pb_Phase3.Value = Math.Min(p.Current, p.Total);
-
                         string icon = p.IsFeuilleRose ? "🌹" : "📋";
-                        lbl_Phase3Progress.Text =
-                            $"{p.Current} / {p.Total}  {icon}  {p.StudentName}";
-
-                        lbl_Phase3Progress.ForeColor = p.IsSuccess
-                            ? Color.DarkGreen
-                            : Color.DarkOrange;
+                        lbl_Phase3Progress.Text = $"{p.Current} / {p.Total}  {icon}  {p.StudentName}";
+                        lbl_Phase3Progress.ForeColor = p.IsSuccess ? Color.DarkGreen : Color.DarkOrange;
                     });
                 });
 
-                // ── Run Phase 3 ───────────────────────────────────────
                 Phase3Result phase3Result = null!;
                 await Task.Run(async () =>
                 {
                     var orchestrator = new Orchestrator.Phase3.Phase3Orchestrator(
                         config, _driver!, _phisSearchService!, _sessionManager!);
-                    phase3Result = await orchestrator.RunAsync(progress);   // ✅ pass progress
+                    phase3Result = await orchestrator.RunAsync(progress);
                 });
 
-                // ── Summary ───────────────────────────────────────────
                 LoggerService.LogInformation("\n" + new string('═', 60));
                 LoggerService.LogInformation("📊 UPLOAD SUMMARY");
                 LoggerService.LogInformation(new string('═', 60));
@@ -1124,7 +1132,6 @@ namespace OrchestratorUi
                     {
                         lbl_Phase3Progress.Text = "";
                     }
-                    // else: keep last student shown (mid-batch stop)
                 });
             }
         }
@@ -1155,6 +1162,89 @@ namespace OrchestratorUi
             LoggerService.LogMessage -= OnLogMessage;
             base.OnFormClosing(e);
         }
+
+
+
+        // ── Shared duplicate pre-check — call before Validate, Generate CSV, Upload ──
+        /// <summary>
+        /// Reads the processed CSV, finds all duplicate groups that are not fully
+        /// resolved, logs a detailed summary and shows a warning MessageBox.
+        /// Returns <c>true</c> if the caller should proceed, <c>false</c> to abort.
+        /// </summary>
+        private async Task<bool> CheckUnresolvedDuplicatesAsync(string callerLabel)
+        {
+            try
+            {
+                var config = ConfigurationService.GetConfiguration();
+                var repo = new StudentCsvRepository(config);
+                var allStudents = await Task.Run(() => repo.ReadAll());
+
+                var unresolvedGroups = allStudents
+                    .GroupBy(s => $"{s.LastName.Trim().ToUpperInvariant()}_{s.FirstName.Trim().ToUpperInvariant()}_{s.DateOfBirth.Trim()}")
+                    .Where(g => g.Any(s => s.IsDuplicate) && !g.All(s => s.DuplicateResolved))
+                    .ToList();
+
+                if (unresolvedGroups.Count == 0)
+                    return true;    // ✅ all clear
+
+                // ── Log full detail ───────────────────────────────────
+                LoggerService.LogWarning($"\n⚠️  UNRESOLVED DUPLICATES — blocked {callerLabel}");
+                LoggerService.LogWarning(new string('─', 60));
+                foreach (var g in unresolvedGroups)
+                {
+                    var rep = g.First();
+                    int resolved = g.Count(s => s.DuplicateResolved);
+                    LoggerService.LogWarning(
+                        $"   • {rep.LastName}, {rep.FirstName}  (DOB: {rep.DateOfBirth})  " +
+                        $"— {resolved}/{g.Count()} row(s) resolved");
+                }
+                LoggerService.LogWarning(new string('─', 60));
+                LoggerService.LogWarning("   Set DuplicateResolved = true on ALL rows per student, then retry.");
+
+                // ── Message box (capped at 10 rows) ──────────────────
+                var lines = unresolvedGroups.Take(10).Select(g =>
+                {
+                    var rep = g.First();
+                    int resolved = g.Count(s => s.DuplicateResolved);
+                    return $"  • {rep.LastName}, {rep.FirstName}  ({rep.DateOfBirth})  [{resolved}/{g.Count()} resolved]";
+                }).ToList();
+
+                if (unresolvedGroups.Count > 10)
+                    lines.Add($"  … and {unresolvedGroups.Count - 10} more — see log panel");
+
+                var answer = MessageBox.Show(
+                    $"⚠️  {unresolvedGroups.Count} duplicate group(s) have NOT been fully resolved.\n\n" +
+                    string.Join(Environment.NewLine, lines) +
+                    "\n\n" +
+                    "Next steps:\n" +
+                    "  1. Open  immunizations_processed.csv\n" +
+                    "  2. Review PDFs in  5_Duplicate\\{LastName}_{FirstName}\\\n" +
+                    "  3. Set  DuplicateResolved = true  on ALL rows for each student.\n" +
+                    "  4. Retry.\n\n" +
+                    $"⚠️  Proceeding without resolving duplicates may cause\n" +
+                    $"   incorrect PDFs to be uploaded to PHIS.\n\n" +
+                    "Continue anyway?",
+                    "Unresolved Duplicates — Action Required",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+
+                if (answer == DialogResult.No)
+                {
+                    LoggerService.LogInformation($"ℹ️  {callerLabel} cancelled — user chose to resolve duplicates first.");
+                    return false;
+                }
+
+                LoggerService.LogWarning($"⚠️  User chose to continue {callerLabel} despite unresolved duplicates.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal — if CSV is unreadable, let the main flow handle it
+                LoggerService.LogWarning($"⚠️  Could not check for unresolved duplicates: {ex.Message}");
+                return true;
+            }
+        }
+
     }
 
     internal static class ControlExtensions

@@ -42,12 +42,12 @@ namespace OrchestratorUi
             btn_ProcessCsv = new Button();
             gb_Phase1 = new GroupBox();
             bt_SearchClientId = new Button();
-            pb_Phase1 = new ProgressBar();           // ✅ instantiated
-            lbl_Phase1Progress = new Label();        // ✅ instantiated
+            pb_Phase1 = new ProgressBar();
+            lbl_Phase1Progress = new Label();
             gb_PreUpload = new GroupBox();
             gb_UploadPhis = new GroupBox();
-            pb_Phase3 = new ProgressBar();           // ✅ instantiated
-            lbl_Phase3Progress = new Label();        // ✅ instantiated
+            pb_Phase3 = new ProgressBar();
+            lbl_Phase3Progress = new Label();
             grpConfig.SuspendLayout();
             gb_Normalise.SuspendLayout();
             gb_Phase1.SuspendLayout();
@@ -64,7 +64,7 @@ namespace OrchestratorUi
             bt_ValidatePdf.ForeColor = Color.White;
             bt_ValidatePdf.Location = new Point(12, 28);
             bt_ValidatePdf.Name = "bt_ValidatePdf";
-            bt_ValidatePdf.Size = new Size(254, 38);
+            bt_ValidatePdf.Size = new Size(270, 38);
             bt_ValidatePdf.TabIndex = 0;
             bt_ValidatePdf.Text = "🔍 Validate PDFs Against Student Records";
             toolTip1.SetToolTip(bt_ValidatePdf, resources.GetString("bt_ValidatePdf.ToolTip"));
@@ -80,14 +80,14 @@ namespace OrchestratorUi
             bt_GenerateCsv.ForeColor = Color.White;
             bt_GenerateCsv.Location = new Point(12, 76);
             bt_GenerateCsv.Name = "bt_GenerateCsv";
-            bt_GenerateCsv.Size = new Size(254, 38);
+            bt_GenerateCsv.Size = new Size(270, 38);
             bt_GenerateCsv.TabIndex = 1;
             bt_GenerateCsv.Text = "📄 Generate Upload CSV";
             toolTip1.SetToolTip(bt_GenerateCsv, resources.GetString("bt_GenerateCsv.ToolTip"));
             bt_GenerateCsv.UseVisualStyleBackColor = false;
             bt_GenerateCsv.Click += bt_GenerateCsv_Click;
             // 
-            // bt_Upload  ✅ moved to top of group so pb + label fit below
+            // bt_Upload
             // 
             bt_Upload.BackColor = Color.FromArgb(140, 30, 30);
             bt_Upload.FlatAppearance.BorderColor = Color.FromArgb(100, 20, 20);
@@ -103,28 +103,6 @@ namespace OrchestratorUi
             bt_Upload.UseVisualStyleBackColor = false;
             bt_Upload.Click += bt_Upload_Click;
             // 
-            // pb_Phase3  ✅ positioned below bt_Upload
-            // 
-            pb_Phase3.Location = new Point(6, 86);
-            pb_Phase3.Name = "pb_Phase3";
-            pb_Phase3.Size = new Size(228, 14);
-            pb_Phase3.Style = ProgressBarStyle.Continuous;
-            pb_Phase3.TabIndex = 1;
-            pb_Phase3.Minimum = 0;
-            pb_Phase3.Value = 0;
-            // 
-            // lbl_Phase3Progress
-            // 
-            lbl_Phase3Progress.AutoSize = false;
-            lbl_Phase3Progress.Font = new Font("Segoe UI", 8F);
-            lbl_Phase3Progress.ForeColor = Color.FromArgb(140, 30, 30);
-            lbl_Phase3Progress.Location = new Point(6, 104);
-            lbl_Phase3Progress.Name = "lbl_Phase3Progress";
-            lbl_Phase3Progress.Size = new Size(228, 18);
-            lbl_Phase3Progress.TabIndex = 2;
-            lbl_Phase3Progress.Text = "";
-            lbl_Phase3Progress.TextAlign = ContentAlignment.MiddleCenter;
-            // 
             // bt_AppendFileRose
             // 
             bt_AppendFileRose.BackColor = Color.FromArgb(130, 60, 160);
@@ -134,7 +112,7 @@ namespace OrchestratorUi
             bt_AppendFileRose.ForeColor = Color.White;
             bt_AppendFileRose.Location = new Point(12, 124);
             bt_AppendFileRose.Name = "bt_AppendFileRose";
-            bt_AppendFileRose.Size = new Size(254, 38);
+            bt_AppendFileRose.Size = new Size(270, 38);
             bt_AppendFileRose.TabIndex = 2;
             bt_AppendFileRose.Text = "🌹 Append FileRose Rows to CSV";
             toolTip1.SetToolTip(bt_AppendFileRose, resources.GetString("bt_AppendFileRose.ToolTip"));
@@ -156,7 +134,7 @@ namespace OrchestratorUi
             grpConfig.Controls.Add(btn_PortableChrome);
             grpConfig.Location = new Point(12, 12);
             grpConfig.Name = "grpConfig";
-            grpConfig.Size = new Size(440, 295);
+            grpConfig.Size = new Size(440, 303);
             grpConfig.TabIndex = 0;
             grpConfig.TabStop = false;
             grpConfig.Text = "Configuration";
@@ -285,7 +263,7 @@ namespace OrchestratorUi
             gb_Normalise.Controls.Add(btn_ProcessCsv);
             gb_Normalise.Location = new Point(468, 12);
             gb_Normalise.Name = "gb_Normalise";
-            gb_Normalise.Size = new Size(280, 120);
+            gb_Normalise.Size = new Size(300, 120);
             gb_Normalise.TabIndex = 2;
             gb_Normalise.TabStop = false;
             gb_Normalise.Text = "Phase 0 — Pre-Processing";
@@ -321,7 +299,7 @@ namespace OrchestratorUi
             gb_Phase1.Controls.Add(bt_SearchClientId);
             gb_Phase1.Controls.Add(pb_Phase1);
             gb_Phase1.Controls.Add(lbl_Phase1Progress);
-            gb_Phase1.Location = new Point(765, 12);
+            gb_Phase1.Location = new Point(790, 12);
             gb_Phase1.Name = "gb_Phase1";
             gb_Phase1.Size = new Size(254, 120);
             gb_Phase1.TabIndex = 3;
@@ -350,19 +328,15 @@ namespace OrchestratorUi
             pb_Phase1.Size = new Size(228, 14);
             pb_Phase1.Style = ProgressBarStyle.Continuous;
             pb_Phase1.TabIndex = 1;
-            pb_Phase1.Minimum = 0;
-            pb_Phase1.Value = 0;
             // 
             // lbl_Phase1Progress
             // 
-            lbl_Phase1Progress.AutoSize = false;
             lbl_Phase1Progress.Font = new Font("Segoe UI", 8F);
             lbl_Phase1Progress.ForeColor = Color.FromArgb(0, 90, 160);
             lbl_Phase1Progress.Location = new Point(12, 94);
             lbl_Phase1Progress.Name = "lbl_Phase1Progress";
             lbl_Phase1Progress.Size = new Size(228, 18);
             lbl_Phase1Progress.TabIndex = 2;
-            lbl_Phase1Progress.Text = "";
             lbl_Phase1Progress.TextAlign = ContentAlignment.MiddleCenter;
             // 
             // gb_PreUpload
@@ -372,7 +346,7 @@ namespace OrchestratorUi
             gb_PreUpload.Controls.Add(bt_GenerateCsv);
             gb_PreUpload.Location = new Point(468, 140);
             gb_PreUpload.Name = "gb_PreUpload";
-            gb_PreUpload.Size = new Size(280, 167);
+            gb_PreUpload.Size = new Size(300, 175);
             gb_PreUpload.TabIndex = 3;
             gb_PreUpload.TabStop = false;
             gb_PreUpload.Text = "Phase 2 — PDF Validation & Upload Preparation";
@@ -382,12 +356,30 @@ namespace OrchestratorUi
             gb_UploadPhis.Controls.Add(bt_Upload);
             gb_UploadPhis.Controls.Add(pb_Phase3);
             gb_UploadPhis.Controls.Add(lbl_Phase3Progress);
-            gb_UploadPhis.Location = new Point(765, 140);
+            gb_UploadPhis.Location = new Point(790, 140);
             gb_UploadPhis.Name = "gb_UploadPhis";
-            gb_UploadPhis.Size = new Size(254, 167);
+            gb_UploadPhis.Size = new Size(254, 175);
             gb_UploadPhis.TabIndex = 4;
             gb_UploadPhis.TabStop = false;
             gb_UploadPhis.Text = "Phase 3 — PHIS Document Upload";
+            // 
+            // pb_Phase3
+            // 
+            pb_Phase3.Location = new Point(6, 86);
+            pb_Phase3.Name = "pb_Phase3";
+            pb_Phase3.Size = new Size(228, 14);
+            pb_Phase3.Style = ProgressBarStyle.Continuous;
+            pb_Phase3.TabIndex = 1;
+            // 
+            // lbl_Phase3Progress
+            // 
+            lbl_Phase3Progress.Font = new Font("Segoe UI", 8F);
+            lbl_Phase3Progress.ForeColor = Color.FromArgb(140, 30, 30);
+            lbl_Phase3Progress.Location = new Point(6, 104);
+            lbl_Phase3Progress.Name = "lbl_Phase3Progress";
+            lbl_Phase3Progress.Size = new Size(228, 18);
+            lbl_Phase3Progress.TabIndex = 2;
+            lbl_Phase3Progress.TextAlign = ContentAlignment.MiddleCenter;
             // 
             // UploadConsent
             // 
