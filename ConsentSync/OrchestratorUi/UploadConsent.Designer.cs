@@ -129,7 +129,7 @@
             grpConfig.Controls.Add(btn_PortableChrome);
             grpConfig.Location = new Point(12, 12);
             grpConfig.Name = "grpConfig";
-            grpConfig.Size = new Size(440, 307);
+            grpConfig.Size = new Size(440, 295);
             grpConfig.TabIndex = 0;
             grpConfig.TabStop = false;
             grpConfig.Text = "Configuration";
@@ -256,7 +256,7 @@
             // 
             gb_Normalise.Controls.Add(btn_ExtractBulk);
             gb_Normalise.Controls.Add(btn_ProcessCsv);
-            gb_Normalise.Location = new Point(468, 26);
+            gb_Normalise.Location = new Point(468, 12);
             gb_Normalise.Name = "gb_Normalise";
             gb_Normalise.Size = new Size(280, 120);
             gb_Normalise.TabIndex = 2;
@@ -292,7 +292,7 @@
             // gb_Phase1
             // 
             gb_Phase1.Controls.Add(bt_SearchClientId);
-            gb_Phase1.Location = new Point(765, 26);
+            gb_Phase1.Location = new Point(765, 12);
             gb_Phase1.Name = "gb_Phase1";
             gb_Phase1.Size = new Size(254, 120);
             gb_Phase1.TabIndex = 3;
@@ -319,7 +319,7 @@
             gb_PreUpload.Controls.Add(bt_AppendFileRose);
             gb_PreUpload.Controls.Add(bt_ValidatePdf);
             gb_PreUpload.Controls.Add(bt_GenerateCsv);
-            gb_PreUpload.Location = new Point(468, 152);
+            gb_PreUpload.Location = new Point(468, 140);
             gb_PreUpload.Name = "gb_PreUpload";
             gb_PreUpload.Size = new Size(280, 167);
             gb_PreUpload.TabIndex = 3;
@@ -329,7 +329,7 @@
             // gb_UploadPhis
             // 
             gb_UploadPhis.Controls.Add(bt_Upload);
-            gb_UploadPhis.Location = new Point(765, 152);
+            gb_UploadPhis.Location = new Point(765, 140);
             gb_UploadPhis.Name = "gb_UploadPhis";
             gb_UploadPhis.Size = new Size(254, 167);
             gb_UploadPhis.TabIndex = 4;
@@ -348,7 +348,7 @@
             Controls.Add(grpConfig);
             Controls.Add(rtxt_Log);
             Name = "UploadConsent";
-            Text = "ConsentSync";
+            Text = "ConsentSync — Immunization Consent & Document Upload Manager";
             grpConfig.ResumeLayout(false);
             grpConfig.PerformLayout();
             gb_Normalise.ResumeLayout(false);
