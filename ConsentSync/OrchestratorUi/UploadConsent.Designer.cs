@@ -15,6 +15,7 @@
 
         private void InitializeComponent()
         {
+            toolTip1 = new ToolTip();      
             grpConfig = new GroupBox();
             lb_Dir = new Label();
             txt_BaseDir = new TextBox();
@@ -34,9 +35,13 @@
             btn_ProcessCsv = new Button();
             gb_Phase1 = new GroupBox();
             bt_SearchClientId = new Button();
+            gb_PreUpload = new GroupBox();
+            bt_GenerateCsv = new Button();
+            bt_ValidatePdf = new Button();
             grpConfig.SuspendLayout();
             gb_Normalise.SuspendLayout();
             gb_Phase1.SuspendLayout();
+            gb_PreUpload.SuspendLayout();
             SuspendLayout();
             // 
             // grpConfig
@@ -54,7 +59,7 @@
             grpConfig.Controls.Add(btn_PortableChrome);
             grpConfig.Location = new Point(12, 12);
             grpConfig.Name = "grpConfig";
-            grpConfig.Size = new Size(440, 242);
+            grpConfig.Size = new Size(440, 268);
             grpConfig.TabIndex = 0;
             grpConfig.TabStop = false;
             grpConfig.Text = "Configuration";
@@ -169,11 +174,11 @@
             rtxt_Log.BackColor = Color.Black;
             rtxt_Log.Font = new Font("Consolas", 9F);
             rtxt_Log.ForeColor = Color.LimeGreen;
-            rtxt_Log.Location = new Point(12, 305);
+            rtxt_Log.Location = new Point(42, 301);
             rtxt_Log.Name = "rtxt_Log";
             rtxt_Log.ReadOnly = true;
             rtxt_Log.ScrollBars = RichTextBoxScrollBars.Vertical;
-            rtxt_Log.Size = new Size(1007, 272);
+            rtxt_Log.Size = new Size(977, 276);
             rtxt_Log.TabIndex = 1;
             rtxt_Log.Text = "";
             // 
@@ -238,12 +243,72 @@
             bt_SearchClientId.Text = "🔍 Search Client IDs on PHIS";
             bt_SearchClientId.UseVisualStyleBackColor = false;
             bt_SearchClientId.Click += bt_SearchClientId_Click;
+
+            // 
+            // gb_PreUpload
+            // 
+            gb_PreUpload.Controls.Add(bt_ValidatePdf);
+            gb_PreUpload.Controls.Add(bt_GenerateCsv);
+            gb_PreUpload.Location = new Point(468, 152);
+            gb_PreUpload.Name = "gb_PreUpload";
+            gb_PreUpload.Size = new Size(280, 147);
+            gb_PreUpload.TabIndex = 3;
+            gb_PreUpload.TabStop = false;
+            gb_PreUpload.Text = "Phase 2 — PDF Validation & Upload Preparation";
+            // 
+            // bt_ValidatePdf
+            // 
+            bt_ValidatePdf.BackColor = Color.FromArgb(30, 110, 180);
+            bt_ValidatePdf.FlatAppearance.BorderColor = Color.FromArgb(20, 80, 140);
+            bt_ValidatePdf.FlatStyle = FlatStyle.Flat;
+            bt_ValidatePdf.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            bt_ValidatePdf.ForeColor = Color.White;
+            bt_ValidatePdf.Location = new Point(12, 28);
+            bt_ValidatePdf.Name = "bt_ValidatePdf";
+            bt_ValidatePdf.Size = new Size(254, 38);
+            bt_ValidatePdf.TabIndex = 0;
+            bt_ValidatePdf.Text = "🔍 Validate PDFs Against Student Records";
+            bt_ValidatePdf.UseVisualStyleBackColor = false;
+            bt_ValidatePdf.Click += bt_ValidatePdf_Click;
+            toolTip1.SetToolTip(bt_ValidatePdf,
+                "Scans all PDFs in the Output Ready folder and matches\r\n" +
+                "each one to a student record using name + fuzzy matching.\r\n\r\n" +
+                "✅  Matched PDFs  → ready for upload\r\n" +
+                "⚠️  Unmatched PDFs → copied to 6_Error for manual review\r\n\r\n" +
+                "Produces Validation_Results.csv — review it before\r\n" +
+                "generating the Upload CSV.");
+            // 
+            // bt_GenerateCsv
+            // 
+            bt_GenerateCsv.BackColor = Color.FromArgb(0, 130, 100);
+            bt_GenerateCsv.FlatAppearance.BorderColor = Color.FromArgb(0, 100, 75);
+            bt_GenerateCsv.FlatStyle = FlatStyle.Flat;
+            bt_GenerateCsv.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            bt_GenerateCsv.ForeColor = Color.White;
+            bt_GenerateCsv.Location = new Point(12, 76);
+            bt_GenerateCsv.Name = "bt_GenerateCsv";
+            bt_GenerateCsv.Size = new Size(254, 38);
+            bt_GenerateCsv.TabIndex = 1;
+            bt_GenerateCsv.Text = "📄 Generate Upload CSV";
+            bt_GenerateCsv.UseVisualStyleBackColor = false;
+            bt_GenerateCsv.Click += bt_GenerateCsv_Click;
+            toolTip1.SetToolTip(bt_GenerateCsv,
+                "Reads Validation_Results.csv (produced by Validate PDFs)\r\n" +
+                "and generates Upload_to_PHIS.csv for Phase 3.\r\n\r\n" +
+                "✅  Validated records  → added to Upload CSV\r\n" +
+                "⚠️  Missing PDFs       → skipped and logged\r\n" +
+                "📋  FileRose records   → appended automatically\r\n\r\n" +
+                "Run 'Validate PDFs' first, review errors,\r\n" +
+                "then click this button to prepare the upload.");
+
+
             // 
             // UploadConsent
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(1065, 589);
+            Controls.Add(gb_PreUpload);
             Controls.Add(gb_Phase1);
             Controls.Add(gb_Normalise);
             Controls.Add(grpConfig);
@@ -254,6 +319,7 @@
             grpConfig.PerformLayout();
             gb_Normalise.ResumeLayout(false);
             gb_Phase1.ResumeLayout(false);
+            gb_PreUpload.ResumeLayout(false);
             ResumeLayout(false);
         }
 
@@ -279,5 +345,9 @@
         private Button btn_ProcessCsv;
         private GroupBox gb_Phase1;
         private Button bt_SearchClientId;
+        private GroupBox gb_PreUpload;
+        private Button bt_ValidatePdf;
+        private Button bt_GenerateCsv;
+        private ToolTip toolTip1;
     }
 }

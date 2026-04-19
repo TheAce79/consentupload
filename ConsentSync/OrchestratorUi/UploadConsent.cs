@@ -7,6 +7,8 @@ using Microsoft.Extensions.Configuration;
 using OpenQA.Selenium;
 using Orchestrator;
 using Orchestrator.Phase1;
+using Orchestrator.Phase2;
+using Orchestrator.PrePhase3;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using static Orchestrator.BulkPdfExtraction;
@@ -668,6 +670,156 @@ namespace OrchestratorUi
             }
             catch (Exception ex) { MessageBox.Show($"❌ Failed to save:\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
+
+
+
+        // ── Phase 2: Validate PDFs against student records ────────────
+        private async void bt_ValidatePdf_Click(object sender, EventArgs e)
+        {
+            bt_ValidatePdf.Enabled = false;
+            bt_ValidatePdf.Text = "⏳ Validating…";
+
+            try
+            {
+                var config = ConfigurationService.GetConfiguration();
+                var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+                var errorFolder = bulkConfig.GetErrorPath();
+
+                LoggerService.LogInformation("\n" + new string('═', 60));
+                LoggerService.LogInformation("🔍 PHASE 2 — PDF Validation");
+                LoggerService.LogInformation(new string('═', 60));
+
+                var phase2Result = await Task.Run(async () =>
+                {
+                    var orchestrator = new Phase2Orchestrator(config);
+                    return await orchestrator.RunAsync();
+                });
+
+                if (phase2Result.HasErrors)
+                {
+                    LoggerService.LogError("❌ Phase 2 completed with errors.");
+                    MessageBox.Show(
+                        "❌ PDF Validation encountered errors and could not complete.\n\n" +
+                        "Please check the log panel for details.",
+                        "Validation Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                // ── Validation summary ────────────────────────────────
+                LoggerService.LogInformation("\n" + new string('═', 60));
+                LoggerService.LogInformation("📊 VALIDATION SUMMARY");
+                LoggerService.LogInformation(new string('═', 60));
+                LoggerService.LogInformation($"   📄 Total PDFs found      : {phase2Result.TotalPdfs}");
+                LoggerService.LogInformation($"   ✅ Matched to student    : {phase2Result.SuccessfullyProcessed}");
+                LoggerService.LogInformation($"   ⚠️  Unmatched (errors)   : {phase2Result.FailedToMatch}");
+
+                if (phase2Result.FailedToMatch > 0)
+                {
+                    LoggerService.LogWarning($"\n   ⚠️  {phase2Result.FailedToMatch} unmatched PDF(s) copied to:");
+                    LoggerService.LogWarning($"       {errorFolder}");
+                    LoggerService.LogWarning("   Review the error folder, correct filenames if needed,");
+                    LoggerService.LogWarning("   then re-run validation before generating the Upload CSV.");
+
+                    foreach (var err in phase2Result.ErrorMessages)
+                        LoggerService.LogWarning($"      • {err}");
+                }
+
+                LoggerService.LogInformation(new string('═', 60));
+
+                var hasUnmatched = phase2Result.FailedToMatch > 0;
+                MessageBox.Show(
+                    $"🔍 PDF Validation complete.\n\n" +
+                    $"  📄 Total PDFs          : {phase2Result.TotalPdfs}\n" +
+                    $"  ✅ Matched             : {phase2Result.SuccessfullyProcessed}\n" +
+                    $"  ⚠️  Unmatched (errors) : {phase2Result.FailedToMatch}\n" +
+                    (hasUnmatched
+                        ? $"\n⚠️  Unmatched PDFs have been copied to:\n  {errorFolder}\n\nReview and correct them, then re-run validation."
+                        : "\n✅ All PDFs matched — you may now click\n   📄 Generate Upload CSV."),
+                    hasUnmatched ? "Validation — Review Required" : "Validation Successful",
+                    MessageBoxButtons.OK,
+                    hasUnmatched ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError($"❌ Unexpected error during validation: {ex.Message}", ex);
+                MessageBox.Show(
+                    $"❌ An unexpected error occurred:\n\n{ex.Message}\n\nCheck the log panel for details.",
+                    "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                bt_ValidatePdf.Enabled = true;
+                bt_ValidatePdf.Text = "🔍 Validate PDFs Against Student Records";
+            }
+        }
+
+
+
+        // ── PrePhase 3: Generate Upload_to_PHIS.csv ───────────────────
+        private async void bt_GenerateCsv_Click(object sender, EventArgs e)
+        {
+            bt_GenerateCsv.Enabled = false;
+            bt_GenerateCsv.Text = "⏳ Generating…";
+
+            try
+            {
+                var config = ConfigurationService.GetConfiguration();
+
+                LoggerService.LogInformation("\n" + new string('═', 60));
+                LoggerService.LogInformation("📄 PRE-PHASE 3 — Generate Upload CSV");
+                LoggerService.LogInformation(new string('═', 60));
+
+                var prePhase3Result = await Task.Run(async () =>
+                {
+                    var orchestrator = new PrePhase3Orchestrator(config);
+                    return await orchestrator.RunAsync();
+                });
+
+                if (prePhase3Result.HasErrors)
+                {
+                    LoggerService.LogError("❌ Pre-Phase 3 completed with errors.");
+                    MessageBox.Show(
+                        "❌ Upload CSV generation encountered errors.\n\n" +
+                        "Review Validation_Results.csv for records with missing PDFs,\n" +
+                        "then retry.",
+                        "Generation Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (prePhase3Result.SkippedMissingPdf > 0)
+                    LoggerService.LogWarning($"⚠️  {prePhase3Result.SkippedMissingPdf} record(s) skipped — PDF not found.");
+
+                LoggerService.LogInformation("\n" + new string('═', 60));
+                LoggerService.LogInformation("📊 UPLOAD CSV SUMMARY");
+                LoggerService.LogInformation(new string('═', 60));
+                LoggerService.LogInformation($"   ✅ Upload records created : {prePhase3Result.UploadRecordsCreated}");
+                LoggerService.LogInformation($"   📋 FileRose records       : {prePhase3Result.FileRoseRecordsCreated}");
+                LoggerService.LogInformation($"   ⚠️  Skipped (no PDF)      : {prePhase3Result.SkippedMissingPdf}");
+                LoggerService.LogInformation($"   ℹ️  Total records          : {prePhase3Result.TotalRecords}");
+                LoggerService.LogInformation(new string('═', 60));
+
+                MessageBox.Show(
+                    $"✅ Upload CSV generated successfully.\n\n" +
+                    $"  ✅ Upload records created : {prePhase3Result.UploadRecordsCreated}\n" +
+                    $"  📋 FileRose records       : {prePhase3Result.FileRoseRecordsCreated}\n" +
+                    $"  ⚠️  Skipped (no PDF)      : {prePhase3Result.SkippedMissingPdf}\n\n" +
+                    "You may now proceed to Phase 3 — Upload to PHIS.",
+                    "Upload CSV Ready", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError($"❌ Unexpected error generating Upload CSV: {ex.Message}", ex);
+                MessageBox.Show(
+                    $"❌ An unexpected error occurred:\n\n{ex.Message}\n\nCheck the log panel for details.",
+                    "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                bt_GenerateCsv.Enabled = true;
+                bt_GenerateCsv.Text = "📄 Generate Upload CSV";
+            }
+        }
+
 
 
         /// <summary>
