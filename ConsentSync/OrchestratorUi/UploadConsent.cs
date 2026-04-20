@@ -854,7 +854,6 @@ namespace OrchestratorUi
 
             try
             {
-                // ── Duplicate pre-check ───────────────────────────────
                 if (!await CheckUnresolvedDuplicatesAsync("Generate Upload CSV"))
                     return;
 
@@ -881,8 +880,27 @@ namespace OrchestratorUi
                     return;
                 }
 
+                // ── Already processed — nothing new to do ─────────────
+                if (prePhase3Result.AlreadyProcessed)
+                {
+                    var pdfSourcePath = ConfigurationService.GetBulkPdfExtractionConfig().GetOutputReadyPath();
+                    LoggerService.LogInformation("ℹ️  Already processed — nothing new to generate.");
+                    MessageBox.Show(
+                        "ℹ️  Everything is already processed.\n\n" +
+                        "  • The Upload CSV already exists.\n" +
+                        "  • 3_Output_Ready is empty.\n\n" +
+                        "If you still have unmatched PDFs to fix:\n" +
+                        "  1. Rename each file to  {ClientId}.pdf\n" +
+                        $"  2. Drop it into:\n     {pdfSourcePath}\n" +
+                        "  3. Click Generate Upload CSV again.",
+                        "Already Processed", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                // ── Log summary ───────────────────────────────────────
                 if (prePhase3Result.SkippedMissingPdf > 0)
-                    LoggerService.LogWarning($"⚠️  {prePhase3Result.SkippedMissingPdf} record(s) skipped — PDF not found.");
+                    LoggerService.LogWarning(
+                        $"⚠️  {prePhase3Result.SkippedMissingPdf} record(s) skipped — PDF not found.");
 
                 LoggerService.LogInformation("\n" + new string('═', 60));
                 LoggerService.LogInformation("📊 UPLOAD CSV SUMMARY");
@@ -893,13 +911,60 @@ namespace OrchestratorUi
                 LoggerService.LogInformation($"   ℹ️  Total records          : {prePhase3Result.TotalRecords}");
                 LoggerService.LogInformation(new string('═', 60));
 
+                // ── Build unmatched PDF warning ────────────────────────
+                bool hasUnmatched = prePhase3Result.RemainingUnmatchedPdfs.Count > 0;
+                bool hasMissing = prePhase3Result.SkippedMissingPdf > 0;
+                var pdfReadyPath = ConfigurationService.GetBulkPdfExtractionConfig().GetOutputReadyPath();
+
+                string unmatchedSection = string.Empty;
+                if (hasUnmatched)
+                {
+                    // Show up to 10 filenames inline; tell user how many more in the log
+                    var shown = prePhase3Result.RemainingUnmatchedPdfs.Take(10).ToList();
+                    int extra = prePhase3Result.RemainingUnmatchedPdfs.Count - shown.Count;
+
+                    var lines = string.Join("\n", shown.Select(f => $"    • {f}"));
+                    if (extra > 0) lines += $"\n    … and {extra} more — see log panel";
+
+                    unmatchedSection =
+                        $"\n\n⚠️  {prePhase3Result.RemainingUnmatchedPdfs.Count} PDF(s) could NOT be matched " +
+                        $"and are still in 3_Output_Ready:\n" +
+                        lines +
+                        $"\n\nTo fix each one:\n" +
+                        $"  1. Look up the student's ClientId in Validation_Results.csv\n" +
+                        $"  2. Rename the PDF to   {{ClientId}}.pdf   (e.g. 3678.pdf)\n" +
+                        $"  3. Drop it into:\n     {pdfReadyPath}\n" +
+                        $"  4. Click Generate Upload CSV again.";
+                }
+
+                string missingSection = string.Empty;
+                if (hasMissing)
+                {
+                    missingSection =
+                        $"\n\n⚠️  {prePhase3Result.SkippedMissingPdf} validated student(s) have no PDF at all.\n" +
+                        "   Find the consent form, rename it to {ClientId}.pdf and re-run.";
+                }
+
+                string icon = hasUnmatched || hasMissing ? "⚠️" : "✅";
+                string title = hasUnmatched || hasMissing
+                    ? "Upload CSV Ready — Action Required"
+                    : "Upload CSV Ready";
+                MessageBoxIcon msgIcon = hasUnmatched || hasMissing
+                    ? MessageBoxIcon.Warning
+                    : MessageBoxIcon.Information;
+
                 MessageBox.Show(
-                    $"✅ Upload CSV updated successfully.\n\n" +
+                    $"{icon} Upload CSV updated.\n\n" +
                     $"  ✅ New rows appended      : {prePhase3Result.UploadRecordsCreated}\n" +
                     $"  📋 FileRose records       : {prePhase3Result.FileRoseRecordsCreated}\n" +
-                    $"  ⚠️  Skipped (no PDF)      : {prePhase3Result.SkippedMissingPdf}\n\n" +
-                    "You may now proceed to Phase 3 — Upload to PHIS.",
-                    "Upload CSV Ready", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    $"  ⚠️  Skipped (no PDF)      : {prePhase3Result.SkippedMissingPdf}\n" +
+                    $"  📄 Unmatched in folder    : {prePhase3Result.RemainingUnmatchedPdfs.Count}" +
+                    unmatchedSection +
+                    missingSection +
+                    (hasUnmatched || hasMissing
+                        ? "\n\nYou may proceed to Phase 3, but these students will NOT be uploaded."
+                        : "\n\nYou may now proceed to Phase 3 — Upload to PHIS."),
+                    title, MessageBoxButtons.OK, msgIcon);
             }
             catch (Exception ex)
             {
@@ -914,9 +979,6 @@ namespace OrchestratorUi
                 bt_GenerateCsv.Text = "📄 Generate Upload CSV";
             }
         }
-
-
-
 
 
         // ── Append FileRose rows to Upload_to_PHIS.csv ────────────────
@@ -1191,6 +1253,7 @@ namespace OrchestratorUi
         /// resolved, logs a detailed summary and shows a warning MessageBox.
         /// Returns <c>true</c> if the caller should proceed, <c>false</c> to abort.
         /// </summary>
+        /// 
         private async Task<bool> CheckUnresolvedDuplicatesAsync(string callerLabel)
         {
             try
@@ -1198,51 +1261,201 @@ namespace OrchestratorUi
                 var config = ConfigurationService.GetConfiguration();
                 var repo = new StudentCsvRepository(config);
                 var allStudents = await Task.Run(() => repo.ReadAll());
+                var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
 
-                var unresolvedGroups = allStudents
-                    .GroupBy(s => $"{s.LastName.Trim().ToUpperInvariant()}_{s.FirstName.Trim().ToUpperInvariant()}_{s.DateOfBirth.Trim()}")
+                bool csvDirty = false;
+
+                // ── Pass 1: same ClientId, different names ────────────────────
+                // Only relevant when the NAMES are different across rows.
+                // If a name-based folder already exists for a member, this ClientId
+                // group is already handled — do NOT create a redundant ClientId folder.
+                var clientIdGroups = allStudents
+                    .Where(s => !string.IsNullOrWhiteSpace(s.ClientId))
+                    .GroupBy(s => s.ClientId.Trim())
+                    .Where(g => g.Count() > 1)
+                    .ToList();
+
+                foreach (var g in clientIdGroups)
+                {
+                    var clientId = g.Key;
+                    var members = g.ToList();
+
+                    // ── Check if a name-based folder already covers this group ──
+                    // If ANY member already has a  5_Duplicate\{LastName}_{FirstName}\
+                    // folder, this is a name-based duplicate — skip the ClientId folder.
+                    bool nameBasedFolderExists = members.Any(s =>
+                    {
+                        string nameFolder = Path.Combine(
+                            bulkConfig.GetDuplicateClientPath(),
+                            SanitizeFolderName($"{s.LastName}_{s.FirstName}"));
+                        return Directory.Exists(nameFolder);
+                    });
+
+                    if (nameBasedFolderExists)
+                    {
+                        LoggerService.LogInformation(
+                            $"   ⏭️  ClientId {clientId} — name-based folder already exists, skipping ClientId folder.");
+                        continue;
+                    }
+
+                    // ── Also skip if all members share exactly the same name ───
+                    // (true name-based duplicate — already handled by Pass 2)
+                    bool allSameName = members
+                        .Select(s => $"{s.LastName.Trim().ToUpperInvariant()}_{s.FirstName.Trim().ToUpperInvariant()}")
+                        .Distinct()
+                        .Count() == 1;
+
+                    if (allSameName)
+                    {
+                        LoggerService.LogInformation(
+                            $"   ⏭️  ClientId {clientId} — all rows have same name, handled by name-based duplicate logic.");
+                        continue;
+                    }
+
+                    // ── Genuinely different names sharing a ClientId ───────────
+                    // Auto-create 5_Duplicate\{ClientId}\ with a README
+                    var clientIdFolder = Path.Combine(
+                        bulkConfig.GetDuplicateClientPath(), clientId);
+
+                    if (!Directory.Exists(clientIdFolder))
+                    {
+                        Directory.CreateDirectory(clientIdFolder);
+                        LoggerService.LogInformation(
+                            $"   📁 Created: 5_Duplicate\\{clientId}\\");
+
+                        File.WriteAllText(
+                            Path.Combine(clientIdFolder, "README.txt"),
+                            $"DUPLICATE ClientId — {clientId}\n" +
+                            $"{new string('=', 42)}\n\n" +
+                            $"These rows share the same ClientId but have different names\n" +
+                            $"(likely a typo or OCR error in the source CSV):\n\n" +
+                            string.Join("\n", members.Select(s =>
+                                $"  • {s.LastName}, {s.FirstName}  (DOB: {s.DateOfBirth})")) +
+                            $"\n\nWhat to do:\n" +
+                            $"  1. Find the consent PDF(s) for this student.\n" +
+                            $"  2. Place them in THIS folder:\n" +
+                            $"     {clientIdFolder}\\\n" +
+                            $"  3. Open immunizations_processed.csv.\n" +
+                            $"  4. Set DuplicateResolved = true on ALL rows for ClientId {clientId}.\n" +
+                            $"  5. Click Generate Upload CSV — PDFs will be merged automatically\n" +
+                            $"     into {clientId}.pdf and processed.\n");
+                    }
+
+                    // Flag rows if not already flagged
+                    foreach (var s in members.Where(s => !s.IsDuplicate))
+                    {
+                        s.IsDuplicate = true;
+                        s.DuplicateResolved = false;
+                        csvDirty = true;
+                        LoggerService.LogWarning(
+                            $"   🆕 ClientId duplicate flagged: [{clientId}] " +
+                            $"{s.LastName}, {s.FirstName}");
+                    }
+                }
+
+                if (csvDirty)
+                {
+                    await Task.Run(() => repo.SaveAll(allStudents));
+                    LoggerService.LogWarning(
+                        "   💾 immunizations_processed.csv updated with new duplicate flags.");
+                }
+
+                // ── Pass 2: same Name+DOB groups ──────────────────────────────
+                var nameGroups = allStudents
+                    .GroupBy(s =>
+                        $"{s.LastName.Trim().ToUpperInvariant()}_" +
+                        $"{s.FirstName.Trim().ToUpperInvariant()}_" +
+                        $"{s.DateOfBirth.Trim()}")
                     .Where(g => g.Any(s => s.IsDuplicate) && !g.All(s => s.DuplicateResolved))
                     .ToList();
 
-                if (unresolvedGroups.Count == 0)
+                // ── Pass 3: ClientId groups not yet fully resolved ─────────────
+                var unresolvedClientIdGroups = clientIdGroups
+                    .Where(g =>
+                    {
+                        var members = g.ToList();
+                        // Only include if it was NOT skipped above
+                        bool nameBasedFolderExists = members.Any(s =>
+                        {
+                            string nameFolder = Path.Combine(
+                                bulkConfig.GetDuplicateClientPath(),
+                                SanitizeFolderName($"{s.LastName}_{s.FirstName}"));
+                            return Directory.Exists(nameFolder);
+                        });
+                        bool allSameName = members
+                            .Select(s => $"{s.LastName.Trim().ToUpperInvariant()}_{s.FirstName.Trim().ToUpperInvariant()}")
+                            .Distinct().Count() == 1;
+
+                        return !nameBasedFolderExists && !allSameName &&
+                               members.Any(s => !s.DuplicateResolved);
+                    })
+                    .ToList();
+
+                // Merge both sets — deduplicate by key
+                var shownKeys = new HashSet<string>();
+                var displayLines = new List<string>();
+
+                foreach (var g in nameGroups)
+                {
+                    var rep = g.First();
+                    int resolved = g.Count(s => s.DuplicateResolved);
+                    if (shownKeys.Add($"NAME_{rep.LastName}_{rep.FirstName}_{rep.DateOfBirth}"))
+                        displayLines.Add(
+                            $"  • {rep.LastName}, {rep.FirstName}  ({rep.DateOfBirth})" +
+                            $"  [{resolved}/{g.Count()} resolved]");
+                }
+
+                foreach (var g in unresolvedClientIdGroups)
+                {
+                    var clientId = g.Key;
+                    var members = g.ToList();
+                    int resolved = members.Count(s => s.DuplicateResolved);
+                    var clientIdFolder = Path.Combine(bulkConfig.GetDuplicateClientPath(), clientId);
+                    if (shownKeys.Add($"CID_{clientId}"))
+                        displayLines.Add(
+                            $"  • ClientId {clientId}  — " +
+                            string.Join(" / ", members.Select(s => $"{s.LastName}, {s.FirstName}")) +
+                            $"  [{resolved}/{members.Count} resolved]\n" +
+                            $"    📁 Drop PDFs into: {clientIdFolder}\\");
+                }
+
+                if (displayLines.Count == 0)
                     return true;    // ✅ all clear
 
-                // ── Log full detail ───────────────────────────────────
+                // ── Log ───────────────────────────────────────────────────────
                 LoggerService.LogWarning($"\n⚠️  UNRESOLVED DUPLICATES — blocked {callerLabel}");
                 LoggerService.LogWarning(new string('─', 60));
-                foreach (var g in unresolvedGroups)
-                {
-                    var rep = g.First();
-                    int resolved = g.Count(s => s.DuplicateResolved);
-                    LoggerService.LogWarning(
-                        $"   • {rep.LastName}, {rep.FirstName}  (DOB: {rep.DateOfBirth})  " +
-                        $"— {resolved}/{g.Count()} row(s) resolved");
-                }
+                foreach (var line in displayLines)
+                    LoggerService.LogWarning($"   {line}");
                 LoggerService.LogWarning(new string('─', 60));
-                LoggerService.LogWarning("   Set DuplicateResolved = true on ALL rows per student, then retry.");
 
-                // ── Message box (capped at 10 rows) ──────────────────
-                var lines = unresolvedGroups.Take(10).Select(g =>
-                {
-                    var rep = g.First();
-                    int resolved = g.Count(s => s.DuplicateResolved);
-                    return $"  • {rep.LastName}, {rep.FirstName}  ({rep.DateOfBirth})  [{resolved}/{g.Count()} resolved]";
-                }).ToList();
+                // ── Message box ───────────────────────────────────────────────
+                var shown = displayLines.Take(10).ToList();
+                if (displayLines.Count > 10)
+                    shown.Add($"  … and {displayLines.Count - 10} more — see log panel");
 
-                if (unresolvedGroups.Count > 10)
-                    lines.Add($"  … and {unresolvedGroups.Count - 10} more — see log panel");
+                bool hasClientIdDups = unresolvedClientIdGroups.Count > 0;
+
+                string fixSteps = hasClientIdDups
+                    ? "For ClientId duplicates (folder already created ✅):\n" +
+                      "  1. Drop the consent PDF(s) into the folder shown above.\n" +
+                      "  2. Set DuplicateResolved = true on ALL rows for that ClientId.\n" +
+                      "  3. Click Generate Upload CSV — PDFs are merged automatically.\n\n" +
+                      "For name duplicates:\n" +
+                      "  1. Review PDFs in  5_Duplicate\\{LastName}_{FirstName}\\\n" +
+                      "  2. Set DuplicateResolved = true on ALL rows, then retry."
+                    : "Next steps:\n" +
+                      "  1. Open  immunizations_processed.csv\n" +
+                      "  2. Review PDFs in  5_Duplicate\\{LastName}_{FirstName}\\\n" +
+                      "  3. Set DuplicateResolved = true on ALL rows for each student.\n" +
+                      "  4. Retry.";
 
                 var answer = MessageBox.Show(
-                    $"⚠️  {unresolvedGroups.Count} duplicate group(s) have NOT been fully resolved.\n\n" +
-                    string.Join(Environment.NewLine, lines) +
+                    $"⚠️  {displayLines.Count} duplicate group(s) have NOT been fully resolved.\n\n" +
+                    string.Join(Environment.NewLine, shown) +
                     "\n\n" +
-                    "Next steps:\n" +
-                    "  1. Open  immunizations_processed.csv\n" +
-                    "  2. Review PDFs in  5_Duplicate\\{LastName}_{FirstName}\\\n" +
-                    "  3. Set  DuplicateResolved = true  on ALL rows for each student.\n" +
-                    "  4. Retry.\n\n" +
-                    $"⚠️  Proceeding without resolving duplicates may cause\n" +
-                    $"   incorrect PDFs to be uploaded to PHIS.\n\n" +
+                    fixSteps +
+                    "\n\n⚠️  Proceeding without resolving may cause incorrect PDFs to be uploaded.\n\n" +
                     "Continue anyway?",
                     "Unresolved Duplicates — Action Required",
                     MessageBoxButtons.YesNo,
@@ -1250,20 +1463,31 @@ namespace OrchestratorUi
 
                 if (answer == DialogResult.No)
                 {
-                    LoggerService.LogInformation($"ℹ️  {callerLabel} cancelled — user chose to resolve duplicates first.");
+                    LoggerService.LogInformation(
+                        $"ℹ️  {callerLabel} cancelled — user chose to resolve duplicates first.");
                     return false;
                 }
 
-                LoggerService.LogWarning($"⚠️  User chose to continue {callerLabel} despite unresolved duplicates.");
+                LoggerService.LogWarning(
+                    $"⚠️  User chose to continue {callerLabel} despite unresolved duplicates.");
                 return true;
             }
             catch (Exception ex)
             {
-                // Non-fatal — if CSV is unreadable, let the main flow handle it
-                LoggerService.LogWarning($"⚠️  Could not check for unresolved duplicates: {ex.Message}");
+                LoggerService.LogWarning(
+                    $"⚠️  Could not check for unresolved duplicates: {ex.Message}");
                 return true;
             }
         }
+
+        /// <summary>Strips invalid filename chars — mirrors MakeSafeFileName in DuplicateMergeService.</summary>
+        private static string SanitizeFolderName(string name)
+        {
+            foreach (char c in Path.GetInvalidFileNameChars())
+                name = name.Replace(c, '_');
+            return name.Trim();
+        }
+
 
     }
 

@@ -15,6 +15,7 @@ namespace ConsentSyncCore.Services.Configuration
         {
             var config = GetConfiguration();
             var csv = GetCsvWorkspaceConfig();
+            var phis = GetPhisWorkspaceConfig();
 
             var uploadCsvPath = csv.GetUploadCsvPath(); // Csv\2_Output Csv\2 Upload Csv
 
@@ -23,9 +24,15 @@ namespace ConsentSyncCore.Services.Configuration
                 Enabled = config.GetValue<bool>("PrePhase3:Enabled", false),
                 Description = config["PrePhase3:Description"] ?? "Process validated PDFs and generate Upload_to_PHIS.csv",
 
-                // ✅ Both read and write from Upload Csv folder
+                // ✅ CSVs: Validation_Results.csv + Upload_to_PHIS.csv  →  UploadCsvSubFolder
                 ValidationCsvPath = uploadCsvPath,
                 OutputPath = uploadCsvPath,
+
+                // ✅ PDFs: renamed consent files  →  Phis\1_To_Upload\1 Consent Upload
+                ConsentPdfOutputPath = phis.GetConsentUploadPath(),
+
+
+
                 ValidationCsvFileName = config["PrePhase3:ValidationCsvFileName"] ?? "Validation_Results.csv",
                 MinMatchScoreToAutoAccept = config.GetValue<double>("PrePhase3:MinMatchScoreToAutoAccept", 90.0),
 

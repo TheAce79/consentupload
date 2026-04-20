@@ -735,23 +735,16 @@ namespace ConsentSyncCore.Services.Pdf
                     ? _bulkConfig.GetArchiveBulkPath()
                     : _bulkConfig.GetArchiveScannedPath();
 
-                // Add timestamp to avoid conflicts
-                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                string fileNameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-                string extension = Path.GetExtension(fileName);
-                string archivedFileName = $"{fileNameWithoutExt}_{timestamp}{extension}";
-
-                string destinationPath = Path.Combine(archivePath, archivedFileName);
+                string destinationPath = Path.Combine(archivePath, fileName);
 
                 File.Move(sourcePath, destinationPath, overwrite: true);
-                 LoggerService.LogInformation($"   📦 Archived to 5_Archive/{sourceType}: {archivedFileName}");
+                LoggerService.LogInformation($"   📦 Archived to 7_Archive/{sourceType}: {fileName}");
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"   ⚠️  Could not archive file: {ex.Message}");
+                LoggerService.LogInformation($"   ⚠️  Could not archive file: {ex.Message}");
             }
         }
-
 
 
         /// <summary>

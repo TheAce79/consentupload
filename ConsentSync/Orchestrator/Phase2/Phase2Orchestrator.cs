@@ -148,6 +148,7 @@ namespace Orchestrator.Phase2
             return sessionErrorDir;
         }
 
+
         public async Task<Phase2Result> RunAsync()
         {
             _logger.LogInformation("═══════════════════════════════════════════════════════");
@@ -158,7 +159,7 @@ namespace Orchestrator.Phase2
 
             var result = new Phase2Result();
 
-            // ── Session-scoped error subfolder (created lazily on first error) ──
+            // ── Session-scoped error subfolder (created eagerly so it is visible immediately) ──
             string? sessionErrorDir = null;
 
             try
@@ -223,6 +224,9 @@ namespace Orchestrator.Phase2
                     LoggerService.LogInformation("   ⚠️  No PDFs found in OutputReady folder.");
                     LoggerService.LogInformation("   💡 Place PDFs in the OutputReady folder before running Phase 2.");
                 }
+
+                // Create the error subfolder eagerly so it appears in Explorer before any errors occur
+                ResolveSessionErrorDir(ref sessionErrorDir);
 
                 foreach (var pdfPath in pdfFiles)
                 {
@@ -387,10 +391,10 @@ namespace Orchestrator.Phase2
                 GenerateValidationCsv(validationRecords);
 
                 // Step 6: Display summary
-                result.SessionErrorDir = sessionErrorDir;   // ← expose to UI
+                result.SessionErrorDir = sessionErrorDir;
                 DisplaySummary(result, validationRecords, sessionErrorDir);
 
-                return result; ;
+                return result;
             }
             catch (Exception ex)
             {
@@ -401,18 +405,32 @@ namespace Orchestrator.Phase2
             }
         }
 
+
+
         // ─────────────────────────────────────────────────────────────────────
         // Filename helpers
         // ─────────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// Returns <c>true</c> when the filename is a user-corrected PDF renamed to
-        /// just <c>{ClientId}.pdf</c> — no underscores AND the stem is not purely numeric.
+        /// just <c>{ClientId}.pdf</c>.
+        /// Rules:
+        ///   - No underscores (bulk-extracted files always have underscores)
+        ///   - If purely numeric, must be ≥ 4 digits.
+        ///     Bulk page-index stubs (1, 13, 108 …) are at most 3 digits.
+        ///     PHIS ClientIds start at 4 digits (e.g. 3678).
         /// </summary>
         private static bool IsClientIdOnlyFilename(string fileName)
         {
-            var stem = Path.GetFileNameWithoutExtension(fileName);
-            return !stem.Contains('_') && !long.TryParse(stem, out _);
+            var stem = Path.GetFileNameWithoutExtension(fileName).Trim();
+
+            if (stem.Contains('_'))
+                return false;
+
+            if (long.TryParse(stem, out _))
+                return stem.Length >= 4;
+
+            return true;
         }
 
         /// <summary>
@@ -455,10 +473,11 @@ namespace Orchestrator.Phase2
         // Name matching
         // ─────────────────────────────────────────────────────────────────────
 
+
         private (ValidationRecord? record, double score) FindBestMatchingValidationRecord(
-            string pdfFirstName,
-            string pdfLastName,
-            List<ValidationRecord> records)
+    string pdfFirstName,
+    string pdfLastName,
+    List<ValidationRecord> records)
         {
             // Pass 1: exact match — normal order
             var exactMatch = records.FirstOrDefault(r =>
@@ -501,24 +520,59 @@ namespace Orchestrator.Phase2
             .OrderByDescending(m => m.Score)
             .ToList();
 
-            if (candidates.Count == 0)
+            if (candidates.Count > 0)
             {
+                var best = candidates.First();
                 LoggerService.LogInformation(
-                    "         No match found (even at 60% threshold, both orderings tried)");
-                return (null, 0.0);
+                    $"         Fuzzy match: {best.Record.FirstName} {best.Record.LastName} " +
+                    $"(score: {best.Score:F1}%{(best.WasSwapped ? ", names were reversed" : "")})");
+                return (best.Record, best.Score);
             }
 
-            var best = candidates.First();
+            // Pass 4: compound / double-barrel surname
+            // The PDF filename encodes a compound surname as two underscore-separated tokens
+            // (e.g. "Puente_Delgadillo"), making lastName="Puente" firstName="Delgadillo".
+            // Try reassembling both orderings and check whether either is fully contained
+            // within a student's normalised full name in the CSV.
             LoggerService.LogInformation(
-                $"         Fuzzy match: {best.Record.FirstName} {best.Record.LastName} " +
-                $"(score: {best.Score:F1}%{(best.WasSwapped ? ", names were reversed" : "")})");
+                "         Trying compound-surname pass (double-barrel names)...");
 
-            return (best.Record, best.Score);
+            string normExtractedA = RemoveAccents($"{pdfLastName}{pdfFirstName}".ToUpperInvariant());   // PuenteDelgadillo
+            string normExtractedB = RemoveAccents($"{pdfFirstName}{pdfLastName}".ToUpperInvariant());   // DelgadilloPuente
+
+            var compoundMatch = records
+                .Select(r =>
+                {
+                    // Collapse the student's full name to a single accent-free uppercase string
+                    string normCsv = RemoveAccents(
+                        $"{r.FirstName}{r.LastName}".ToUpperInvariant().Replace(" ", "").Replace("-", ""));
+
+                    // Both extracted tokens must appear inside the CSV full name (order-independent)
+                    string normPart1 = RemoveAccents(pdfLastName.ToUpperInvariant());
+                    string normPart2 = RemoveAccents(pdfFirstName.ToUpperInvariant());
+
+                    bool containsBoth = normCsv.Contains(normPart1) && normCsv.Contains(normPart2);
+
+                    // Score: 90 for an exact compound hit, so it stays above the 85 threshold
+                    double score = containsBoth ? 90.0 : 0.0;
+                    return new { Record = r, Score = score };
+                })
+                .Where(m => m.Score > 0)
+                .OrderByDescending(m => m.Score)
+                .FirstOrDefault();
+
+            if (compoundMatch != null)
+            {
+                LoggerService.LogInformation(
+                    $"         Compound-name match: {compoundMatch.Record.FirstName} " +
+                    $"{compoundMatch.Record.LastName} (both name tokens found in full name)");
+                return (compoundMatch.Record, compoundMatch.Score);
+            }
+
+            LoggerService.LogInformation(
+                "         No match found (exact, fuzzy, and compound passes all failed)");
+            return (null, 0.0);
         }
-
-        // ─────────────────────────────────────────────────────────────────────
-        // Output
-        // ─────────────────────────────────────────────────────────────────────
 
         private void DisplaySummary(Phase2Result result, List<ValidationRecord> validationRecords,
             string? sessionErrorDir)
@@ -555,7 +609,9 @@ namespace Orchestrator.Phase2
 
         private void GenerateValidationCsv(List<ValidationRecord> records)
         {
-            var outputPath = Path.Combine(_phase2Config.RenamedPath, _phase2Config.ValidationResultsCsv);
+            // ✅ Always write to Csv\2_Output Csv\2 Upload Csv\ — never into the Phis folder
+            Directory.CreateDirectory(_phase2Config.ValidationCsvPath);
+            var outputPath = Path.Combine(_phase2Config.ValidationCsvPath, _phase2Config.ValidationResultsCsv);
 
             using (var writer = new StreamWriter(outputPath, false, Encoding.UTF8))
             using (var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture)))

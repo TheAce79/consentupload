@@ -7,10 +7,11 @@
 		<Nullable>enable</Nullable>
 	</PropertyGroup>
 
-	<!-- ✅ Exclude the console entry point — OrchestratorUi is now the host -->
 	<ItemGroup>
-		<Compile Remove="Program.cs" />
+	  <Compile Remove="Program.cs" />
 	</ItemGroup>
+
+	<!-- ✅ Exclude the console entry point — OrchestratorUi is now the host -->
 
 	<ItemGroup>
 		<PackageReference Include="Docnet.Core" Version="2.6.0" />

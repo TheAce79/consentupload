@@ -17,6 +17,11 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         public string ValidationCsvPath { get; set; } = string.Empty;
         public string ValidationCsvFileName { get; set; } = string.Empty;
         public string OutputPath { get; set; } = string.Empty;
+
+        /// <summary>Phis\1_To_Upload\1 Consent Upload — where renamed consent PDFs are staged.</summary>
+        public string ConsentPdfOutputPath { get; set; } = string.Empty;
+
+
         public double MinMatchScoreToAutoAccept { get; set; } = 90.0;
 
         /// <summary>

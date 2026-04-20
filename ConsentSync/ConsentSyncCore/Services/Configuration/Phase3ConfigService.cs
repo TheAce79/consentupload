@@ -24,10 +24,10 @@ namespace ConsentSyncCore.Services.Configuration
                 Enabled = phase3Section.GetValue<bool>("Enabled"),
                 Description = phase3Section.GetValue<string>("Description") ?? string.Empty,
 
-                // ✅ Input paths derived entirely from PhisWorkspace — nothing hardcoded
+                // ✅ CSV lives in CsvWorkspace; PDFs live in PhisWorkspace
                 Input = new Phase3InputConfig
                 {
-                    UploadCsvPath = ws.GetCsvPath(),
+                    UploadCsvPath = GetCsvWorkspaceConfig().GetUploadCsvPath(),   // ← was ws.GetCsvPath()
                     UploadCsvFileName = phase3Section.GetValue<string>("Input:UploadCsvFileName") ?? "Upload_to_PHIS.csv",
                     ConsentPath = ws.GetConsentUploadPath(),
                     FileRosePath = ws.GetFileRoseUploadPath(),

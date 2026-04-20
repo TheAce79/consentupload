@@ -82,7 +82,7 @@ namespace OrchestratorUi
             bt_GenerateCsv.Name = "bt_GenerateCsv";
             bt_GenerateCsv.Size = new Size(270, 38);
             bt_GenerateCsv.TabIndex = 1;
-            bt_GenerateCsv.Text = "📄 Generate Upload CSV";
+            bt_GenerateCsv.Text = "📄 Generate Upload PDF && CSV ";
             toolTip1.SetToolTip(bt_GenerateCsv, resources.GetString("bt_GenerateCsv.ToolTip"));
             bt_GenerateCsv.UseVisualStyleBackColor = false;
             bt_GenerateCsv.Click += bt_GenerateCsv_Click;

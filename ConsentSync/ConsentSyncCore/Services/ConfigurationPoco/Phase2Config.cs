@@ -54,9 +54,16 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         /// </summary>
         public string ErrorOutputDir { get; set; } = string.Empty;
 
-        // Output
+       
+        // ── Output ────────────────────────────────────────────────────────────
         public string ValidationResultsCsv { get; set; } = string.Empty;
         public string UploadCsv { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Canonical folder for both Validation_Results.csv and Upload_to_PHIS.csv.
+        /// Resolved from CsvWorkspace → 2_Output Csv → 2 Upload Csv.
+        /// </summary>
+        public string ValidationCsvPath { get; set; } = string.Empty;
     }
 
 }

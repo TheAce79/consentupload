@@ -23,7 +23,10 @@ namespace ConsentSyncCore.Services.Configuration
                 Description = config["Phase2:Description"] ?? "Validate extracted PDFs against student CSV",
 
                 RenamedPath = phis.GetConsentUploadPath(),  // Phis\1_To_Upload\1 Consent Upload
-                ErrorOutputDir = phis.GetErrorPath(),          // Phis\2_Error
+                ErrorOutputDir = phis.GetErrorPath(),
+
+                // ✅ Both CSVs always land in the single canonical CSV output folder
+                ValidationCsvPath = csv.GetUploadCsvPath(),  // Csv\2_Output Csv\2 Upload Csv
 
                 VitaliteLoginUrl = config["Phase2:VitaliteWebsite:LoginUrl"] ?? "",
                 VitaliteSearchUrl = config["Phase2:VitaliteWebsite:SearchUrl"] ?? "",
