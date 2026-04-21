@@ -701,10 +701,11 @@ namespace ConsentSyncCore.Services.Pdf
                 Directory.CreateDirectory(_bulkConfig.GetInputScannedPath());
                 Directory.CreateDirectory(_bulkConfig.GetOutputReadyPath());
 
-                // 4 FileRose Extraction — parent + two subfolders
+                // 4 FileRose Extraction — parent + scan subfolder only
+                // (2_Output_Ready_FileRose removed — extracted files go to Phis\1_To_Upload\2 File Rose Upload)
                 Directory.CreateDirectory(_bulkConfig.GetFileRosePath());
                 Directory.CreateDirectory(_bulkConfig.GetFileRoseScanPath());
-                Directory.CreateDirectory(_bulkConfig.GetFileRoseOutputReadyPath());
+                Directory.CreateDirectory(_bulkConfig.GetFileRoseErrorPath());
 
                 Directory.CreateDirectory(_bulkConfig.GetDuplicateClientPath());
                 Directory.CreateDirectory(_bulkConfig.GetErrorPath());
@@ -719,7 +720,7 @@ namespace ConsentSyncCore.Services.Pdf
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"⚠️  Warning: Could not create folder structure: {ex.Message}");
+                LoggerService.LogInformation($"⚠️  Warning: Could not create folder structure: {ex.Message}");
             }
         }
 
@@ -951,20 +952,16 @@ Examples:
   - 1_Smith_John_consent.pdf
   - 2_Leblanc_Marie_consent.pdf
 
-⚠️  Files with 'Unknown' in the name require manual identification:
-   - Rename manually if you know the student
-   - Or move to 6_Error if the student cannot be identified
-
 ✅ Phase 3 will use these files to upload to PHIS.
    Do not delete or move files from here manually!
 ");
 
-                // ── 4 FileRose Extraction / 1 Scan File Rose ────────────────────────────
+                // ── 4 FileRose Extraction / 1_Scan_FileRose ─────────────────────────────
                 var fileRoseScanReadme = Path.Combine(_bulkConfig.GetFileRoseScanPath(), "README.txt");
                 if (!File.Exists(fileRoseScanReadme))
                     File.WriteAllText(fileRoseScanReadme,
-@"📁 1 SCAN FILE ROSE - Place File Rose Scans Here
-=================================================
+@"📁 1_Scan_FileRose - Place File Rose Scans Here
+================================================
 
 Place all scanned File Rose (feuille rose) documents in this folder.
 
@@ -974,33 +971,33 @@ Naming convention:
 
 The system will:
 ✓ Read the Client ID from the filename
-✓ Extract and validate the File Rose content
-✓ Output the processed file to:  2_Output_Ready_FileRose\<ClientID>.pdf
-✓ Move the original scan to 7_Archive\FileRose after successful processing
+✓ Match it to a validated record in Validation_Results.csv
+✓ Rename to: <ClientID>_suiviscolaire_<SchoolYear>.pdf
+✓ Move the renamed file directly to:
+    Phis\1_To_Upload\2 File Rose Upload\
+✓ Set IsFileRoseDefault=True and IsFileRoseExtracted=True in Validation_Results.csv
 
 Requirements:
   - One PDF per client
   - Filename must be exactly the Client ID (digits only), e.g. 106467.pdf
-  - PDF should be a clear scan (300 DPI recommended)
+  - The ClientId must exist in Validation_Results.csv with ClientIdStatus=Found
 
-Note: Files whose names are not valid Client IDs will be skipped.
+Files with invalid names → left in this folder with an error summary written to:
+    3_Error_FileRose_Extraction\_extraction_errors.txt
 ");
 
-                // ── 4 FileRose Extraction / 2_Output_Ready_FileRose ─────────────────────
-                var fileRoseOutputReadme = Path.Combine(_bulkConfig.GetFileRoseOutputReadyPath(), "README.txt");
-                if (!File.Exists(fileRoseOutputReadme))
-                    File.WriteAllText(fileRoseOutputReadme,
-@"📁 2_OUTPUT_READY_FILEROSE - Extracted File Rose PDFs
-======================================================
+                // ── 4 FileRose Extraction / 3_Error_FileRose_Extraction ─────────────────
+                var fileRoseErrorReadme = Path.Combine(_bulkConfig.GetFileRoseErrorPath(), "README.txt");
+                if (!File.Exists(fileRoseErrorReadme))
+                    File.WriteAllText(fileRoseErrorReadme,
+@"📁 3_Error_FileRose_Extraction - FileRose Error Summary
+========================================================
 
-File Rose documents will be extracted here after processing scans from
-the '1 Scan File Rose' folder.
+This folder contains only the error summary text file.
+No PDFs are moved here — files with errors stay in 1_Scan_FileRose.
 
-File naming format: <ClientID>.pdf
-Example: 106467.pdf
-
-✅ These files are ready to be attached to the corresponding PHIS client record.
-   Do not rename or move files from here manually!
+Review _extraction_errors.txt, fix each filename in 1_Scan_FileRose,
+then click 'Generate Upload CSV' again.
 ");
 
                 // ── 5_Duplicate ─────────────────────────────────────────────────────────
@@ -1010,24 +1007,13 @@ Example: 106467.pdf
 @"📁 5_DUPLICATE - Duplicate Client ID PDFs
 ==========================================
 
-This folder contains PDFs where the same Client ID appeared more than once
+This folder contains PDFs where the same student name appeared more than once
 during bulk extraction.
 
-Common reasons:
-⚠️  Student submitted the consent form multiple times
-⚠️  Two students share the same extracted name (rare)
-⚠️  Data-entry error in the source bulk PDF
-
 What to do:
-1. Review each file and its matching *_ERROR_*.txt log
-2. If it is a true duplicate (same student, submitted twice):
-   - Keep the better-quality copy in 3_Output_Ready
-   - Delete this duplicate
-3. If two DIFFERENT students share the same name:
-   - Add a middle initial or number suffix to distinguish them
-     Example: {ID}_Smith_John_2_consent.pdf
-   - Move the corrected file to 3_Output_Ready
-4. Files here will NOT be uploaded to PHIS until moved to 3_Output_Ready.
+1. Review each subfolder and its HOW_TO_MERGE.txt instructions.
+2. Keep the best copy and move it to 3_Output_Ready.
+3. Files here will NOT be uploaded to PHIS until moved to 3_Output_Ready.
 ");
 
                 // ── 6_Error ─────────────────────────────────────────────────────────────
@@ -1039,25 +1025,11 @@ What to do:
 
 This folder contains PDFs that failed processing or could not be identified.
 
-Common reasons:
-❌ Could not extract student names (scanned quality too poor)
-❌ PDF format not supported
-❌ File corruption
-❌ Processing error
-
 What to do:
-1. Review the error log files (*_ERROR_*.txt) for details
-2. Try to identify students manually
-3. For scanned PDFs with poor quality:
-   - Re-scan at higher resolution (300 DPI minimum)
-   - Ensure the form is properly aligned
-   - Drop the new scan in 2_Input_Scanned
-4. For unidentifiable students:
-   - Contact school/nursing office for clarification
-   - Rename manually if you can identify them
-   - Move back to the appropriate input folder for reprocessing
-
-Note: Files here will NOT be processed in Phase 3 until moved elsewhere.
+1. Review the error log files (*_ERROR_*.txt) for details.
+2. Re-scan at higher resolution (300 DPI) if quality is poor.
+3. Rename manually if you can identify the student, then move to the
+   appropriate input folder for reprocessing.
 ");
 
                 // ── 7_Archive ───────────────────────────────────────────────────────────
@@ -1067,20 +1039,10 @@ Note: Files here will NOT be processed in Phase 3 until moved elsewhere.
 @"📁 7_ARCHIVE - Successfully Processed Original Files
 =====================================================
 
-This folder contains the original source files after successful processing.
-
 Structure:
   📂 Bulk\      - Original bulk PDF files from Vitalite
   📂 Scanned\   - Original scanned consent forms
   📂 FileRose\  - Original scanned File Rose (feuille rose) documents
-
-Files are timestamped to prevent conflicts:
-Example: BulkConsent_20250114_143022.pdf
-
-Why keep archives?
-✓ Backup in case reprocessing is needed
-✓ Audit trail for compliance
-✓ Reference if questions arise about specific students
 
 You can safely delete old archives after Phase 3 is complete and verified.
 Recommended: Keep for at least one school year.
@@ -1089,10 +1051,9 @@ Recommended: Keep for at least one school year.
             catch (Exception ex)
             {
                 // Silently fail — README files are nice-to-have, not critical
-                 LoggerService.LogInformation($"⚠️  Could not create README files: {ex.Message}");
+                LoggerService.LogInformation($"⚠️  Could not create README files: {ex.Message}");
             }
         }
-
 
 
 

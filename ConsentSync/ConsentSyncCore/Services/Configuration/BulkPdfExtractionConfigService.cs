@@ -32,8 +32,7 @@ namespace ConsentSyncCore.Services.Configuration
                 ErrorFolder = section.GetValue<string>("ErrorFolder") ?? "6_Error",
                 ArchiveFolder = section.GetValue<string>("ArchiveFolder") ?? "7_Archive",
 
-                FileRoseScanSubFolder = section.GetValue<string>("FileRoseScanSubFolder") ?? "1 Scan File Rose",
-                FileRoseOutputReadySubFolder = section.GetValue<string>("FileRoseOutputReadySubFolder") ?? "2_Output_Ready_FileRose",
+                FileRoseScanSubFolder = section.GetValue<string>("FileRoseScanSubFolder") ?? "1_Scan_FileRose",
                 FileRoseErrorSubFolder = section.GetValue<string>("FileRoseErrorSubFolder") ?? "3_Error_FileRose_Extraction",
 
                 RoseSuffix = section.GetValue<string>("FileNaming:RoseSuffix") ?? "suiviscolaire",

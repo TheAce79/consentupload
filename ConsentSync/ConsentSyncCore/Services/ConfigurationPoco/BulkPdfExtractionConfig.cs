@@ -13,8 +13,7 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
     ///   2_Input_Scanned
     ///   3_Output_Ready
     ///   4 FileRose Extraction/
-    ///     ├── 1 Scan File Rose/
-    ///     ├── 2_Output_Ready_FileRose/
+    ///     ├── 1_Scan_FileRose/          ← users drop {ClientId}.pdf here
     ///     └── 3_Error_FileRose_Extraction/
     ///   5_Duplicate
     ///   6_Error
@@ -22,6 +21,9 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
     ///     ├── Bulk/
     ///     ├── Scanned/
     ///     └── FileRose/
+    ///
+    /// Successfully extracted files go directly to:
+    ///   Phis\1_To_Upload\2 File Rose Upload\   (PhisWorkspace)
     /// </summary>
     public class BulkPdfExtractionConfig
     {
@@ -41,8 +43,8 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         public string ArchiveFolder { get; set; } = "7_Archive";
 
         // Subfolder names inside FileRoseFolder
-        public string FileRoseScanSubFolder { get; set; } = "1 Scan File Rose";
-        public string FileRoseOutputReadySubFolder { get; set; } = "2_Output_Ready_FileRose";
+        /// <summary>Users drop {ClientId}.pdf files here to be extracted.</summary>
+        public string FileRoseScanSubFolder { get; set; } = "1_Scan_FileRose";
 
         /// <summary>
         /// Folder for FileRose files that could not be matched (wrong/invalid ClientId filename).
@@ -71,10 +73,13 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         public string GetInputScannedPath() => Path.Combine(BasePdfPath, InputScannedFolder);
         public string GetOutputReadyPath() => Path.Combine(BasePdfPath, OutputReadyFolder);
 
-        // FileRose parent + its three subfolders
+        // FileRose parent + its subfolders
         public string GetFileRosePath() => Path.Combine(BasePdfPath, FileRoseFolder);
+
+        /// <summary>Users drop {ClientId}.pdf files here.</summary>
         public string GetFileRoseScanPath() => Path.Combine(GetFileRosePath(), FileRoseScanSubFolder);
-        public string GetFileRoseOutputReadyPath() => Path.Combine(GetFileRosePath(), FileRoseOutputReadySubFolder);
+
+        /// <summary>Error summary text file is written here — no PDFs are moved here.</summary>
         public string GetFileRoseErrorPath() => Path.Combine(GetFileRosePath(), FileRoseErrorSubFolder);
 
         public string GetDuplicateClientPath() => Path.Combine(BasePdfPath, DuplicateClientFolder);
