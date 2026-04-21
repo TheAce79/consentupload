@@ -368,23 +368,19 @@ namespace Orchestrator.Phase3
 
             // ── B: Resolve & validate PDF path ───────────────────────────────
             LoggerService.LogInformation("\n🌹 STEP B: Resolving FileRose PDF...");
-
             var pdfPath = Path.Combine(
                 _phase3Config.Input.FileRosePath,
                 $"{record.DocumentTitle}.pdf");
 
             LoggerService.LogInformation($"   PDF: {pdfPath}");
-
             if (!File.Exists(pdfPath))
             {
                 SetFailure(record, $"FileRose PDF not found at: {pdfPath}");
                 return false;
             }
-
             LoggerService.LogInformation("   ✅ PDF found on disk");
 
             // ── C: Navigate to Context Documents ─────────────────────────────
-            LoggerService.LogInformation("\n📂 STEP C: Navigating to Context Documents...");
             if (!await _phisSearchService.NavigateToContextDocumentsAsync())
             {
                 SetFailure(record, "Could not navigate to Context Documents page");
@@ -392,12 +388,23 @@ namespace Orchestrator.Phase3
             }
             LoggerService.LogInformation("   ✅ On Context Documents page");
 
+            // ── D: Check if document already exists ───────────────────────────
+            if (await _phisSearchService.CheckIfContextDocumentExistsAsync(record.DocumentTitle))
+            {
+                LoggerService.LogInformation(
+                    "   ✅ Document already exists on PHIS — marking Success");
+                record.VerifStatus = UploadVerificationStatus.Success;
+                record.FailureReason = string.Empty;
+                await _phisSearchService.NavigateBackToSearchPagesAsync();
+                return true;
+            }
+
             // ── Upload not yet enabled ────────────────────────────────────────
-            // Steps D–F (check existing → Add New → upload) are next.
-            // Keeping NotProcessed until navigation is confirmed working.
+            // Step E (Add New → upload) is next once D is confirmed working.
             LoggerService.LogInformation(
                 "   ℹ️  Upload step not yet enabled — " +
-                $"leaving VerifStatus = NotProcessed for {record.ClientID} ({record.DocumentTitle})");
+                $"leaving VerifStatus = NotProcessed for " +
+                $"{record.ClientID} ({record.DocumentTitle})");
 
             record.VerifStatus = UploadVerificationStatus.NotProcessed;
             record.FailureReason = string.Empty;
@@ -405,9 +412,6 @@ namespace Orchestrator.Phase3
             await _phisSearchService.NavigateBackToSearchPagesAsync();
             return false;
         }
-
-
-
 
 
 
