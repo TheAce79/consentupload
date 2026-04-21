@@ -50,6 +50,8 @@ namespace Orchestrator.Phase3
             _logger = LoggerService.GetLogger<Phase3Orchestrator>();
         }
 
+
+
         public async Task<Phase3Result> RunAsync(IProgress<Phase3Progress>? progress = null)
         {
             LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
@@ -60,11 +62,12 @@ namespace Orchestrator.Phase3
 
             try
             {
-                // Step 1: Load Upload_to_PHIS.csv
+                // ── Step 1: Load Upload_to_PHIS.csv ───────────────────────────
                 LoggerService.LogInformation("📋 Step 1: Loading Upload_to_PHIS.csv...");
                 var uploadRecords = LoadUploadCsv();
                 result.TotalRecords = uploadRecords.Count;
-                LoggerService.LogInformation($"   ✅ Loaded {uploadRecords.Count} upload records " +
+                LoggerService.LogInformation(
+                    $"   ✅ Loaded {uploadRecords.Count} upload records " +
                     $"({uploadRecords.Count(r => !r.IsFeuilleRose)} consent, " +
                     $"{uploadRecords.Count(r => r.IsFeuilleRose)} FileRose)");
 
@@ -74,8 +77,7 @@ namespace Orchestrator.Phase3
                     return result;
                 }
 
-
-                // Step 2: Filter records to process (skip already successful)
+                // ── Step 2: Filter records to process ─────────────────────────
                 LoggerService.LogInformation("\n📋 Step 2: Filtering records to process...");
 
                 var pending = uploadRecords
@@ -85,7 +87,6 @@ namespace Orchestrator.Phase3
 
                 int alreadyVerified = uploadRecords.Count - pending.Count;
 
-                // ── Batch limit ───────────────────────────────────────────────
                 var phisConfig = ConfigurationService.GetPhisConfig();
                 int batchSize = phisConfig.BatchSize > 0 ? phisConfig.BatchSize : int.MaxValue;
                 var recordsToProcess = pending.Take(batchSize).ToList();
@@ -100,7 +101,7 @@ namespace Orchestrator.Phase3
                         $"   ⚙️  Batch mode      : processing {recordsToProcess.Count} of {pending.Count} " +
                         $"(BatchSize = {phisConfig.BatchSize})");
                     LoggerService.LogInformation(
-                        $"   ℹ️  Re-run Phase 3 to continue with the next batch.");
+                        "   ℹ️  Re-run Phase 3 to continue with the next batch.");
                 }
 
                 if (recordsToProcess.Count == 0)
@@ -109,17 +110,17 @@ namespace Orchestrator.Phase3
                     return result;
                 }
 
-                // Step 3: Verify PHIS session
+                // ── Step 3: Verify PHIS session ───────────────────────────────
                 LoggerService.LogInformation("\n📋 Step 3: Verifying PHIS session...");
                 if (!_sessionManager.EnsureSessionValid())
                 {
-                    LoggerService.LogInformation("   ❌ PHIS session is not valid!");
+                    LoggerService.LogError("   ❌ PHIS session is not valid!");
                     result.HasErrors = true;
                     return result;
                 }
                 LoggerService.LogInformation("   ✅ PHIS session is active");
 
-                // Step 4: Process each record row-by-row
+                // ── Step 4: Process each record ───────────────────────────────
                 LoggerService.LogInformation(
                     $"\n📋 Step 4: Processing {recordsToProcess.Count} documents...\n");
 
@@ -128,103 +129,112 @@ namespace Orchestrator.Phase3
                 int failureCount = 0;
                 int processedCount = 0;
 
-                foreach (var record in recordsToProcess)
+                try
                 {
-                    processedCount++;
-
-                    LoggerService.LogInformation($"\n{new string('═', 70)}");
-                    LoggerService.LogInformation(
-                        $"📄 DOCUMENT {processedCount}/{recordsToProcess.Count}  " +
-                        $"[{(record.IsFeuilleRose ? "🌹 FileRose" : "📋 Consent")}]");
-                    LoggerService.LogInformation($"{new string('═', 70)}");
-                    LoggerService.LogInformation($"Client     : {record.FirstName} {record.LastName}  ({record.ClientID})");
-                    LoggerService.LogInformation($"Document   : {record.DocumentTitle}");
-                    LoggerService.LogInformation($"Description: {record.Description}");
-                    LoggerService.LogInformation($"VerifStatus: {record.VerifStatus}");
-                    LoggerService.LogInformation($"{new string('─', 70)}");
-
-                    bool success = false;
-                    try
+                    foreach (var record in recordsToProcess)
                     {
-                       
+                        processedCount++;
 
-                        if (record.IsFeuilleRose)
-                        {
-                            // ── FileRose upload (stub — will be implemented later) ──
-                            success = await ProcessFileRoseUploadAsync(record);
-                        }
-                        else
-                        {
-                            // ── Standard consent upload ────────────────────────────
-                            success = await ProcessConsentUploadAsync(record);
-                        }
+                        LoggerService.LogInformation($"\n{new string('═', 70)}");
+                        LoggerService.LogInformation(
+                            $"📄 DOCUMENT {processedCount}/{recordsToProcess.Count}  " +
+                            $"[{(record.IsFeuilleRose ? "🌹 FileRose" : "📋 Consent")}]");
+                        LoggerService.LogInformation($"{new string('═', 70)}");
+                        LoggerService.LogInformation($"Client     : {record.FirstName} {record.LastName}  ({record.ClientID})");
+                        LoggerService.LogInformation($"Document   : {record.DocumentTitle}");
+                        LoggerService.LogInformation($"Description: {record.Description}");
+                        LoggerService.LogInformation($"VerifStatus: {record.VerifStatus}");
+                        LoggerService.LogInformation($"{new string('─', 70)}");
 
-                        if (success)
+                        bool success = false;
+                        try
                         {
-                            successCount++;
-                            result.SuccessfulUploads++;
+                            success = record.IsFeuilleRose
+                                ? await ProcessFileRoseUploadAsync(record)
+                                : await ProcessConsentUploadAsync(record);
+
+                            if (success)
+                            {
+                                successCount++;
+                                result.SuccessfulUploads++;
+                            }
+                            else if (record.VerifStatus == UploadVerificationStatus.Success)
+                            {
+                                // Already existed on PHIS — counted as skip, not failure
+                                skipCount++;
+                                result.SuccessfulUploads++;
+                            }
+                            else
+                            {
+                                failureCount++;
+                            }
                         }
-                        else
+                        catch (Exception ex)
                         {
+                            LoggerService.LogError($"\n❌ ERROR processing {record.DocumentTitle}: {ex.Message}");
+                            SetFailure(record, $"Unhandled exception: {ex.Message}");
                             failureCount++;
+                            result.ErrorMessages.Add(
+                                $"{record.ClientID} - {record.Description}: {ex.Message}");
+                            try { await _phisSearchService.NavigateBackToSearchPagesAsync(); } catch { }
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        LoggerService.LogInformation($"\n❌ ERROR: {ex.Message}");
-                        SetFailure(record, $"Unhandled exception: {ex.Message}");
-                        failureCount++;
-                        result.ErrorMessages.Add($"{record.ClientID} - {record.Description}: {ex.Message}");
-                        try { await _phisSearchService.NavigateBackToSearchPagesAsync(); } catch { }
-                    }
 
+                        // ── Report progress ───────────────────────────────────
+                        progress?.Report(new Phase3Progress(
+                            Current: processedCount,
+                            Total: recordsToProcess.Count,
+                            ClientId: record.ClientID,
+                            StudentName: $"{record.FirstName} {record.LastName}",
+                            DocumentTitle: record.DocumentTitle,
+                            IsFeuilleRose: record.IsFeuilleRose,
+                            IsSuccess: success));
 
-                    // ✅ Report progress after every document
-                    progress?.Report(new Phase3Progress(
-                        Current: processedCount,
-                        Total: recordsToProcess.Count,
-                        ClientId: record.ClientID,
-                        StudentName: $"{record.FirstName} {record.LastName}",
-                        DocumentTitle: record.DocumentTitle,
-                        IsFeuilleRose: record.IsFeuilleRose,
-                        IsSuccess: success));
+                        // ── Persist after every document ──────────────────────
+                        SaveUploadCsv(uploadRecords);
 
-                    // Always persist after each document
-                    SaveUploadCsv(uploadRecords);
-
-                    // Session heartbeat every 10 documents
-                    if (processedCount % 10 == 0)
-                    {
-                        LoggerService.LogInformation($"\n🔄 Session check ({processedCount} docs processed)...");
-                        if (!_sessionManager.EnsureSessionValid())
+                        // ── Session heartbeat every 10 documents ──────────────
+                        if (processedCount % 10 == 0)
                         {
-                            LoggerService.LogInformation("   ⚠️  Session expired!");
-                            result.HasErrors = true;
-                            break;
+                            LoggerService.LogInformation(
+                                $"\n🔄 Session check ({processedCount} docs processed)...");
+                            if (!_sessionManager.EnsureSessionValid())
+                            {
+                                LoggerService.LogWarning("   ⚠️  Session expired — stopping batch.");
+                                result.HasErrors = true;
+                                break;
+                            }
+                            LoggerService.LogInformation("   ✅ Session still active");
                         }
-                        LoggerService.LogInformation("   ✅ Session still active");
-                    }
 
-                    await Task.Delay(_phase3Config.Upload.DelayBetweenUploadsMs);
+                        await Task.Delay(_phase3Config.Upload.DelayBetweenUploadsMs);
+                    }
+                }
+                finally
+                {
+                    // ── Guaranteed flush — fires even on fatal exception or session break ──
+                    LoggerService.LogInformation("\n💾 Final CSV flush...");
+                    SaveUploadCsv(uploadRecords);
                 }
 
-                // Batch-complete notic
+                // ── Batch-complete notice ─────────────────────────────────────
                 if (batchTruncated)
                 {
-                    LoggerService.LogInformation($"⏸️  Batch of {recordsToProcess.Count} done. {pending.Count - recordsToProcess.Count} remaining — re-run Phase 3 to continue.");
+                    int remaining = pending.Count - recordsToProcess.Count;
+                    LoggerService.LogInformation(
+                        $"⏸️  Batch of {recordsToProcess.Count} done. " +
+                        $"{remaining} remaining — re-run Phase 3 to continue.");
                     result.BatchLimitReached = true;
                 }
 
-                // Step 5: Display summary
+                // ── Step 5: Summary ───────────────────────────────────────────
                 DisplaySummary(result, successCount, skipCount, failureCount,
                     uploadRecords.Count, alreadyVerified);
-
 
                 return result;
             }
             catch (Exception ex)
             {
-                LoggerService.LogInformation($"\n❌ FATAL ERROR: {ex.Message}");
+                LoggerService.LogError($"\n❌ FATAL ERROR: {ex.Message}", ex);
                 result.HasErrors = true;
                 return result;
             }
@@ -426,63 +436,210 @@ namespace Orchestrator.Phase3
             return records;
         }
 
+        // ── One-at-a-time CSV write guard ─────────────────────────────────────
+        // Prevents two concurrent Phase 3 windows from interleaving reads/writes.
+        private static readonly SemaphoreSlim _csvLock = new(1, 1);
+
+
+
+
         private void SaveUploadCsv(List<UploadRecord> processedRecords)
         {
+            if (!_csvLock.Wait(TimeSpan.FromSeconds(15)))
+            {
+                LoggerService.LogWarning(
+                    "      ⚠️  CSV save skipped — lock timeout " +
+                    "(is Phase 3 running in two windows simultaneously?)");
+                return;
+            }
             try
             {
-                var csvPath = Path.Combine(
-                    _phase3Config.Input.UploadCsvPath,
-                    _phase3Config.Input.UploadCsvFileName);
+                SaveUploadCsvCore(processedRecords);
+            }
+            finally
+            {
+                _csvLock.Release();
+            }
+        }
 
-                var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
-                {
-                    MissingFieldFound = null,
-                    HeaderValidated = null,
-                    TrimOptions = TrimOptions.Trim,
-                    PrepareHeaderForMatch = args => args.Header.ToLower().Replace(" ", "")
-                };
+        private void SaveUploadCsvCore(List<UploadRecord> processedRecords)
+        {
+            var csvPath = Path.Combine(
+                _phase3Config.Input.UploadCsvPath,
+                _phase3Config.Input.UploadCsvFileName);
 
-                List<UploadRecord> allRecords;
-                using (var reader = new StreamReader(csvPath, Encoding.UTF8))
-                using (var csvReader = new CsvReader(reader, csvConfig))
-                {
-                    csvReader.Context.RegisterClassMap<UploadRecordMap>();
-                    allRecords = csvReader.GetRecords<UploadRecord>().ToList();
-                }
+            var tmpPath = csvPath + ".tmp";
+            var bakPath = csvPath + ".bak";
 
-                // Update VerifStatus + FailureReason by DocumentTitle (unique key)
-                var updatedLookup = processedRecords
-                    .ToDictionary(r => r.DocumentTitle, r => (r.VerifStatus, r.FailureReason));
+            var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
+            {
+                MissingFieldFound = null,
+                HeaderValidated = null,
+                TrimOptions = TrimOptions.Trim,
+                PrepareHeaderForMatch = args => args.Header.ToLower().Replace(" ", "")
+            };
 
-                int updatedCount = 0;
-                foreach (var record in allRecords)
-                {
-                    if (updatedLookup.TryGetValue(record.DocumentTitle, out var upd))
-                    {
-                        if (record.VerifStatus != upd.VerifStatus ||
-                            record.FailureReason != upd.FailureReason)
-                        {
-                            record.VerifStatus = upd.VerifStatus;
-                            record.FailureReason = upd.FailureReason;
-                            updatedCount++;
-                        }
-                    }
-                }
+            // ── Step 1: Read current CSV from disk ────────────────────────────
+            List<UploadRecord> allRecords;
+            try
+            {
+                using var reader = new StreamReader(csvPath, Encoding.UTF8);
+                using var csvReader = new CsvReader(reader, csvConfig);
+                csvReader.Context.RegisterClassMap<UploadRecordMap>();
+                allRecords = csvReader.GetRecords<UploadRecord>().ToList();
 
-                using var writer = new StreamWriter(csvPath, false, Encoding.UTF8);
-                using var csvWriter = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture));
-                csvWriter.Context.RegisterClassMap<UploadRecordMap>();
-                csvWriter.WriteRecords(allRecords);
-
-                if (updatedCount > 0)
-                    LoggerService.LogInformation(
-                        $"      💾 CSV saved — {updatedCount} record(s) updated");
+                LoggerService.LogDebug(
+                    $"      📂 CSV read OK — {allRecords.Count} raw row(s) from disk");
             }
             catch (Exception ex)
             {
-                LoggerService.LogWarning($"      ⚠️  Could not save CSV: {ex.Message}");
+                // Never write after a failed read — would erase all progress
+                LoggerService.LogError(
+                    $"      ❌ CSV read failed — save aborted to protect existing data.\n" +
+                    $"         Path : {csvPath}\n" +
+                    $"         Error: {ex.Message}");
+                return;
+            }
+
+            // ── Step 2: Deduplicate on-disk rows by DocumentTitle ─────────────
+            // Root cause: both GenerateCsv + AppendFileRose can write the same
+            // FileRose row. Keep the row with the highest VerifStatus (most progress).
+            var grouped = allRecords
+                .GroupBy(r => r.DocumentTitle.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var duplicateGroups = grouped.Where(g => g.Count() > 1).ToList();
+            if (duplicateGroups.Count > 0)
+            {
+                LoggerService.LogWarning(
+                    $"      ⚠️  {duplicateGroups.Count} duplicate DocumentTitle(s) collapsed " +
+                    "(keeping highest VerifStatus):");
+                foreach (var g in duplicateGroups)
+                    LoggerService.LogWarning(
+                        $"         • \"{g.Key}\"  ({g.Count()} rows → kept status " +
+                        $"{g.Max(r => (int)r.VerifStatus)})");
+            }
+
+            allRecords = grouped
+                .Select(g => g.OrderByDescending(r => (int)r.VerifStatus).First())
+                .ToList();
+
+            // ── Step 3: Apply in-memory updates ───────────────────────────────
+            var updatedLookup = processedRecords
+                .GroupBy(r => r.DocumentTitle.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(r => (int)r.VerifStatus).First(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            int updatedCount = 0;
+            var notFound = new List<string>();
+
+            foreach (var record in allRecords)
+            {
+                if (!updatedLookup.TryGetValue(record.DocumentTitle.Trim(), out var upd))
+                    continue;
+
+                if (record.VerifStatus != upd.VerifStatus ||
+                    record.FailureReason != upd.FailureReason)
+                {
+                    LoggerService.LogDebug(
+                        $"      ✏️  [{record.ClientID}] {record.DocumentTitle}: " +
+                        $"{record.VerifStatus} → {upd.VerifStatus}" +
+                        (string.IsNullOrWhiteSpace(upd.FailureReason)
+                            ? string.Empty
+                            : $"  ({upd.FailureReason})"));
+
+                    record.VerifStatus = upd.VerifStatus;
+                    record.FailureReason = upd.FailureReason;
+                    updatedCount++;
+                }
+            }
+
+            // Warn about processed records missing from the on-disk CSV
+            foreach (var key in updatedLookup.Keys)
+            {
+                if (!allRecords.Any(r =>
+                        r.DocumentTitle.Trim().Equals(key, StringComparison.OrdinalIgnoreCase)))
+                    notFound.Add(key);
+            }
+            if (notFound.Count > 0)
+            {
+                LoggerService.LogWarning(
+                    $"      ⚠️  {notFound.Count} processed record(s) not found in on-disk CSV " +
+                    "(progress NOT saved for these titles):");
+                foreach (var t in notFound)
+                    LoggerService.LogWarning($"         • \"{t}\"");
+            }
+
+            if (updatedCount == 0 && duplicateGroups.Count == 0)
+            {
+                LoggerService.LogDebug("      ℹ️  CSV unchanged — skipping write");
+                return;
+            }
+
+            // ── Step 4: Backup ────────────────────────────────────────────────
+            try { File.Copy(csvPath, bakPath, overwrite: true); }
+            catch (Exception ex)
+            {
+                // Non-fatal — .tmp write is still atomic
+                LoggerService.LogWarning(
+                    $"      ⚠️  Could not create backup ({bakPath}): {ex.Message}");
+            }
+
+            // ── Step 5: Write .tmp ────────────────────────────────────────────
+            try
+            {
+                using (var writer = new StreamWriter(tmpPath, false, Encoding.UTF8))
+                using (var csvWriter = new CsvWriter(writer,
+                           new CsvConfiguration(CultureInfo.InvariantCulture)))
+                {
+                    csvWriter.Context.RegisterClassMap<UploadRecordMap>();
+                    csvWriter.WriteRecords(allRecords);
+                }
+
+                // ── Step 6: Row-count validation before committing ────────────
+                // A truncated write (disk full, process kill) looks like success
+                // without this check.
+                int writtenRows;
+                try { writtenRows = File.ReadLines(tmpPath).Count() - 1; } // minus header
+                catch (Exception ex)
+                {
+                    LoggerService.LogError(
+                        $"      ❌ Cannot verify .tmp row count — aborting commit: {ex.Message}");
+                    try { File.Delete(tmpPath); } catch { }
+                    return;
+                }
+
+                if (writtenRows < allRecords.Count)
+                {
+                    LoggerService.LogError(
+                        $"      ❌ Row-count mismatch — expected {allRecords.Count}, " +
+                        $".tmp has {writtenRows}. Aborting commit; backup intact at: {bakPath}");
+                    try { File.Delete(tmpPath); } catch { }
+                    return;
+                }
+
+                // ── Step 7: Atomic swap ───────────────────────────────────────
+                File.Move(tmpPath, csvPath, overwrite: true);
+
+                LoggerService.LogInformation(
+                    $"      💾 CSV saved — {updatedCount} status update(s), " +
+                    $"{allRecords.Count} total row(s)" +
+                    (duplicateGroups.Count > 0
+                        ? $", {duplicateGroups.Count} duplicate(s) removed"
+                        : string.Empty));
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError(
+                    $"      ❌ CSV write failed — original file is intact (backup: {bakPath}).\n" +
+                    $"         Error: {ex.Message}");
+                try { if (File.Exists(tmpPath)) File.Delete(tmpPath); } catch { }
             }
         }
+
+
 
         private void DisplaySummary(Phase3Result result, int successCount, int skipCount,
             int failureCount, int totalRecords, int alreadyVerified)
