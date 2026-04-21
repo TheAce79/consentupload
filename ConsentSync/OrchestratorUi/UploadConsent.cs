@@ -981,42 +981,178 @@ namespace OrchestratorUi
         }
 
 
+
         // ── Append FileRose rows to Upload_to_PHIS.csv ────────────────
-        private void bt_AppendFileRose_Click(object sender, EventArgs e)
+        private async void bt_AppendFileRose_Click(object sender, EventArgs e)
         {
             bt_AppendFileRose.Enabled = false;
-            bt_AppendFileRose.Text = "⏳ Appending…";
+            bt_AppendFileRose.Text = "⏳ Extracting FileRose…";
 
             try
             {
-                var svc = new Orchestrator.Services.FileRoseAppendService();
-                var result = svc.AppendFileRoseRows();
+                // ── Step 1: Extract (move) FileRose PDFs ──────────────────────
+                LoggerService.LogInformation("\n" + new string('═', 60));
+                LoggerService.LogInformation("🌹 STEP 1 — FileRose Extraction");
+                LoggerService.LogInformation(new string('═', 60));
 
-                if (result.HasErrors)
+                var extractionResult = await Task.Run(() =>
+                {
+                    var svc = new ConsentSyncCore.Services.FileRoseExtractionService();
+                    return svc.ExtractFileRose();
+                });
+
+                // ── Gate: hard block on ANY extraction error ──────────────────
+                // Files with errors remain in the scan folder for the user to fix.
+                // We NEVER append FileRose rows to the Upload CSV when errors exist.
+                if (extractionResult.Errors > 0)
+                {
+                    var errorLines = extractionResult.ErrorFiles
+                        .Take(8)
+                        .Select(ef => $"  • {ef.FileName}\n      → {ef.Reason}");
+
+                    string pendingSection = string.Empty;
+                    if (extractionResult.PendingFileRoseRows.Count > 0)
+                    {
+                        var pendingLines = extractionResult.PendingFileRoseRows
+                            .Take(8)
+                            .Select(p => $"  • ClientId {p.ClientId}  — {p.LastName}, {p.FirstName}");
+                        int extra = extractionResult.PendingFileRoseRows.Count - 8;
+
+                        pendingSection =
+                            $"\n\n⚠️  Students with IsFileRoseDefault=True but NOT yet extracted " +
+                            $"(IsFileRoseExtracted=False):\n" +
+                            string.Join("\n", pendingLines) +
+                            (extra > 0 ? $"\n  … and {extra} more — see log panel" : "") +
+                            "\n\nThese students will be MISSING from the FileRose upload until fixed.";
+                    }
+
+                    LoggerService.LogError(
+                        $"❌ FileRose extraction blocked — {extractionResult.Errors} error(s). " +
+                        "Upload CSV will NOT be updated.");
+
+                    MessageBox.Show(
+                        $"❌ FileRose extraction encountered {extractionResult.Errors} error(s).\n\n" +
+                        "Files with errors have been LEFT in the scan folder for you to fix:\n\n" +
+                        string.Join("\n", errorLines) +
+                        (extractionResult.Errors > 8
+                            ? $"\n  … and {extractionResult.Errors - 8} more — see log panel" : "") +
+                        pendingSection +
+                        "\n\nThe Upload CSV has NOT been updated.\n\n" +
+                        "How to fix:\n" +
+                        "  1. Rename each problem file to {ClientId}.pdf  (e.g. 12345.pdf)\n" +
+                        "  2. Ensure that ClientId appears in Validation_Results.csv\n" +
+                        "     with ClientIdStatus=Found and IsFileRoseDefault=True\n" +
+                        $"  3. Leave the corrected file in the scan folder:\n" +
+                        $"     {ConsentSyncCore.Services.Configuration.ConfigurationService
+                              .GetBulkPdfExtractionConfig().GetFileRoseScanPath()}\n" +
+                        "  4. Click this button again.",
+                        "FileRose Extraction Failed — Upload CSV NOT Updated",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                // ── Summary: warn if pending rows remain (IsFileRoseDefault=True, not extracted) ─
+                if (extractionResult.PendingFileRoseRows.Count > 0)
+                {
+                    var pendingLines = extractionResult.PendingFileRoseRows
+                        .Take(8)
+                        .Select(p => $"  • ClientId {p.ClientId}  — {p.LastName}, {p.FirstName}");
+                    int extra = extractionResult.PendingFileRoseRows.Count - 8;
+
+                    var answer = MessageBox.Show(
+                        $"⚠️  {extractionResult.PendingFileRoseRows.Count} student(s) have " +
+                        "IsFileRoseDefault=True but no PDF was found in the scan folder " +
+                        "(IsFileRoseExtracted=False):\n\n" +
+                        string.Join("\n", pendingLines) +
+                        (extra > 0 ? $"\n  … and {extra} more — see log panel" : "") +
+                        "\n\nThese students will be MISSING from the FileRose upload.\n\n" +
+                        "Continue appending for the successfully extracted files?",
+                        "Pending FileRose Records",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+
+                    if (answer == DialogResult.No)
+                    {
+                        LoggerService.LogInformation(
+                            "ℹ️  User chose to fix pending FileRose records before appending.");
+                        return;
+                    }
+                }
+
+                // ── Nothing extracted and nothing already in output folder ─────
+                var phisWs = ConsentSyncCore.Services.Configuration.ConfigurationService
+                    .GetPhisWorkspaceConfig();
+                var outputDir = phisWs.GetFileRoseUploadPath();
+                bool hasReadyPdfs = Directory.Exists(outputDir) &&
+                                    Directory.GetFiles(outputDir, "*.pdf").Length > 0;
+
+                if (!hasReadyPdfs)
+                {
+                    LoggerService.LogInformation(
+                        "ℹ️  No FileRose PDFs in the output folder — nothing to append.");
+                    MessageBox.Show(
+                        "ℹ️  No FileRose PDFs are ready for upload.\n\n" +
+                        "Ensure the scan folder contains files named {ClientId}.pdf and that\n" +
+                        "those ClientIds appear in Validation_Results.csv with\n" +
+                        "ClientIdStatus=Found and IsFileRoseDefault=True.\n\n" +
+                        $"Scan folder:\n" +
+                        $"{ConsentSyncCore.Services.Configuration.ConfigurationService
+                              .GetBulkPdfExtractionConfig().GetFileRoseScanPath()}",
+                        "Nothing to Append",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                LoggerService.LogInformation(
+                    $"   ✅ Extracted (moved) : {extractionResult.Extracted}  |  " +
+                    $"Already done : {extractionResult.AlreadyExtracted}");
+
+                // ── Step 2: Append rows to Upload_to_PHIS.csv ─────────────────
+                bt_AppendFileRose.Text = "⏳ Appending…";
+                LoggerService.LogInformation("\n" + new string('═', 60));
+                LoggerService.LogInformation("🌹 STEP 2 — Append FileRose Rows to Upload CSV");
+                LoggerService.LogInformation(new string('═', 60));
+
+                var appendResult = await Task.Run(() =>
+                {
+                    var svc = new Orchestrator.Services.FileRoseAppendService();
+                    return svc.AppendFileRoseRows();
+                });
+
+                if (appendResult.HasErrors)
                 {
                     MessageBox.Show(
                         "❌ FileRose append encountered errors.\n\n" +
-                        string.Join("\n", result.Messages.Take(5)) +
+                        string.Join("\n", appendResult.Messages.Take(5)) +
                         "\n\nCheck the log panel for details.",
                         "Append Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
 
+                // ── Final summary ─────────────────────────────────────────────
+                string pendingWarn = extractionResult.PendingFileRoseRows.Count > 0
+                    ? $"\n\n⚠️  {extractionResult.PendingFileRoseRows.Count} student(s) with " +
+                      "IsFileRoseDefault=True still not extracted — see log panel."
+                    : string.Empty;
+
                 MessageBox.Show(
-                    $"🌹 FileRose rows appended to Upload_to_PHIS.csv\n\n" +
-                    $"  ✅ Appended        : {result.Appended}\n" +
-                    $"  ⏭️  Already exist  : {result.AlreadyExist}\n" +
-                    $"  ⚠️  No ClientId    : {result.NoClientId}\n\n" +
-                    (result.Appended > 0
-                        ? "You may now proceed to Phase 3 — Upload to PHIS."
-                        : "All FileRose rows were already present — nothing to add."),
-                    result.Appended > 0 ? "Append Complete" : "Nothing to Append",
-                    MessageBoxButtons.OK,
-                    result.Appended > 0 ? MessageBoxIcon.Information : MessageBoxIcon.Information);
+                    $"🌹 FileRose — Extraction & Append complete.\n\n" +
+                    $"  Extraction:\n" +
+                    $"    ✅ Moved to upload folder : {extractionResult.Extracted}\n" +
+                    $"    ⏭️  Already extracted      : {extractionResult.AlreadyExtracted}\n\n" +
+                    $"  Upload CSV:\n" +
+                    $"    ✅ Appended               : {appendResult.Appended}\n" +
+                    $"    ⏭️  Already exist          : {appendResult.AlreadyExist}\n" +
+                    $"    ⚠️  No ClientId            : {appendResult.NoClientId}" +
+                    pendingWarn +
+                    (appendResult.Appended > 0
+                        ? "\n\nYou may now proceed to Phase 3 — Upload to PHIS."
+                        : "\n\nAll FileRose rows were already present — nothing new added."),
+                    appendResult.Appended > 0 ? "FileRose Ready" : "Nothing New to Append",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                LoggerService.LogError($"❌ Unexpected error appending FileRose rows: {ex.Message}", ex);
+                LoggerService.LogError($"❌ Unexpected error in FileRose append: {ex.Message}", ex);
                 MessageBox.Show($"❌ Unexpected error:\n\n{ex.Message}",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
@@ -1026,6 +1162,7 @@ namespace OrchestratorUi
                 bt_AppendFileRose.Text = "🌹 Append FileRose Rows to Upload CSV";
             }
         }
+
 
 
         /// <summary>

@@ -23,6 +23,9 @@ namespace Orchestrator.PrePhase3
         private readonly BulkPdfExtractionConfig _bulkPdfConfig;
         private readonly ILogger<PrePhase3Orchestrator> _logger;
 
+        // Add this field alongside the others:
+        private readonly PhisWorkspaceConfig _phisWs;
+
         public PrePhase3Orchestrator(IConfiguration? config = null)
         {
             _config = config ?? ConfigurationService.GetConfiguration();
@@ -30,6 +33,7 @@ namespace Orchestrator.PrePhase3
             _phase2Config = ConfigurationService.GetPhase2Config();
             _schoolContext = ConfigurationService.GetSchoolContextConfig();
             _bulkPdfConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+            _phisWs = ConfigurationService.GetPhisWorkspaceConfig();
             _logger = LoggerService.GetLogger<PrePhase3Orchestrator>();
         }
 
@@ -66,17 +70,41 @@ namespace Orchestrator.PrePhase3
                     ? $"   ✅ {rescanned} record(s) updated from ClientId-renamed PDFs"
                     : "   ℹ️  No ClientId-renamed PDFs found");
 
-                // ── Early-exit: nothing left to do ────────────────────────────
+                // ── Shared paths used by both early-exit guards ───────────────
                 var pdfSourcePath = _bulkPdfConfig.GetOutputReadyPath();
                 var uploadCsvPath = Path.Combine(_prePhase3Config.OutputPath, _phase2Config.UploadCsv);
+                var frScanPath = _bulkPdfConfig.GetFileRoseScanPath();
+                var frUploadPath = _phisWs.GetFileRoseUploadPath();
+                var frSuffix = _bulkPdfConfig.RoseSuffix;
+                var frYear = _schoolContext.SchoolYear;
+
                 bool outputReadyIsEmpty = !Directory.Exists(pdfSourcePath) ||
-                                          Directory.GetFiles(pdfSourcePath, "*.pdf").Length == 0;
+                                           Directory.GetFiles(pdfSourcePath, "*.pdf").Length == 0;
                 bool uploadCsvExists = File.Exists(uploadCsvPath);
 
-                if (outputReadyIsEmpty && uploadCsvExists && rescanned == 0)
+                // TRUE when at least one {ClientId}_{suffix}_{year}.pdf exists in the
+                // FileRose upload folder for a record marked IsFileRoseDefault=True.
+                // Used by both early-exit guards to avoid skipping FileRose work.
+                bool HasFileRoseReadyToRecord() =>
+                    validationRecords.Any(r =>
+                        r.IsFileRoseDefault &&
+                        !string.IsNullOrWhiteSpace(r.ClientId) &&
+                        File.Exists(Path.Combine(
+                            frUploadPath, $"{r.ClientId}_{frSuffix}_{frYear}.pdf")));
+
+                bool hasPendingFileRoseScanFiles =
+                    Directory.Exists(frScanPath) &&
+                    Directory.GetFiles(frScanPath, "*.pdf").Length > 0;
+
+                // ── Early-exit #1: 3_Output_Ready empty + CSV exists ──────────
+                // Guard: skip ONLY when there is nothing FileRose-related pending either —
+                //   • no scan files waiting to be moved, AND
+                //   • no already-moved files whose CSV row is still missing
+                if (outputReadyIsEmpty && uploadCsvExists && rescanned == 0 &&
+                    !hasPendingFileRoseScanFiles && !HasFileRoseReadyToRecord())
                 {
                     LoggerService.LogInformation(
-                        "\n   ℹ️  3_Output_Ready is empty and Upload CSV already exists — nothing to do.");
+                        "\n   ℹ️  3_Output_Ready is empty, Upload CSV exists, and no FileRose work pending — nothing to do.");
                     LoggerService.LogInformation(
                         "   💡 To process more PDFs: rename unmatched files to {ClientId}.pdf,");
                     LoggerService.LogInformation(
@@ -100,7 +128,7 @@ namespace Orchestrator.PrePhase3
                 result.SkippedNotValidated = validationRecords.Count - validatedRecords.Count;
 
                 LoggerService.LogInformation($"   ✅ Validated records      : {validatedRecords.Count}");
-                LoggerService.LogInformation($"   ♻️  Already processed     : {alreadyDone} (skipped — already in Upload CSV)");
+                LoggerService.LogInformation($"   ♻️  Already processed     : {alreadyDone} (skipped — IsPdfSave=True)");
                 LoggerService.LogInformation($"   🆕 New records to process : {toProcess.Count}");
                 LoggerService.LogInformation($"   ⏭️  Skipped (not validated): {result.SkippedNotValidated}");
 
@@ -112,19 +140,22 @@ namespace Orchestrator.PrePhase3
                     LoggerService.LogWarning("      then click Generate Upload CSV again.");
                 }
 
-                // ── Early-exit when nothing new to process ────────────────────
+                // ── Early-exit #2: no new consent PDFs AND no FileRose work ──
+                // FIX: do NOT check the in-memory IsFileRoseExtracted flag here —
+                // that flag is loaded from disk BEFORE Step 4a runs and is always
+                // False for any file that has not yet been moved.
+                // Instead check the filesystem: scan folder has files, or the upload
+                // folder already has files whose Upload CSV row is still missing.
                 if (toProcess.Count == 0 &&
-                    !validationRecords.Any(r => r.IsFileRoseDefault && r.IsFileRoseExtracted &&
-                                               !string.IsNullOrWhiteSpace(r.ClientId)))
+                    !hasPendingFileRoseScanFiles &&
+                    !HasFileRoseReadyToRecord())
                 {
                     LoggerService.LogInformation(
-                        "\n   ℹ️  No new records to process — Upload CSV is already up to date.");
+                        "\n   ℹ️  No new consent records and no FileRose work pending — Upload CSV is already up to date.");
 
-                    // Save if rescanned records were promoted
                     if (rescanned > 0)
                         SaveValidationCsv(validationRecords);
 
-                    // ✅ Report remaining BEFORE returning so UI shows unmatched files
                     ReportRemainingPdfs(pdfSourcePath, result);
                     DisplaySummary(result);
                     return result;
@@ -159,9 +190,6 @@ namespace Orchestrator.PrePhase3
                             result.FilesGenerated += generated;
                             result.PdfsProcessed++;
                             record.IsPdfSave = true;
-
-                            // ✅ Archive source PDF from 3_Output_Ready AFTER
-                            //    successful copy to 1 Consent Upload
                             ArchiveSourcePdf(pdfPath);
                         }
                     }
@@ -172,26 +200,94 @@ namespace Orchestrator.PrePhase3
                     }
                 }
 
-                // ── Step 4b: Append FileRose rows ─────────────────────────────
-                LoggerService.LogInformation("\n📋 Step 4b: Appending FileRose rows to upload CSV...");
+                // ── Step 4a: Extract (move) FileRose PDFs ─────────────────────
+                // ExtractFileRose() updates Validation_Results.csv ON DISK.
+                // We MUST sync those changes back into the in-memory validationRecords
+                // list BEFORE Step 4b reads IsFileRoseExtracted — otherwise Step 4b
+                // sees only the stale False values that were loaded at Step 1.
+                LoggerService.LogInformation("\n📋 Step 4a: Extracting FileRose PDFs...");
+                var fileRoseExtraction = new ConsentSyncCore.Services.FileRoseExtractionService();
+                var extractionResult = fileRoseExtraction.ExtractFileRose();
+
+                if (extractionResult.Extracted > 0)
+                    LoggerService.LogInformation(
+                        $"   ✅ {extractionResult.Extracted} FileRose PDF(s) moved to upload folder");
+                if (extractionResult.AlreadyExtracted > 0)
+                    LoggerService.LogInformation(
+                        $"   ⏭️  {extractionResult.AlreadyExtracted} already in output folder — skipped");
+                if (extractionResult.Errors > 0)
+                {
+                    LoggerService.LogWarning(
+                        $"   ⚠️  {extractionResult.Errors} FileRose file(s) had errors — " +
+                        "files left in scan folder for user to fix.");
+                    LoggerService.LogWarning(
+                        "   ⚠️  FileRose rows will NOT be appended for failed files.");
+                }
+                if (extractionResult.PendingFileRoseRows.Count > 0)
+                    LoggerService.LogWarning(
+                        $"   ⚠️  {extractionResult.PendingFileRoseRows.Count} student(s) with " +
+                        "IsFileRoseDefault=True remain unextracted (IsFileRoseExtracted=False).");
+
+                // ── Step 4a-sync: Sync in-memory records with filesystem ───────
+                // For every record whose PDF physically exists in the upload folder,
+                // flip BOTH flags to True so Step 4b picks it up and SaveValidationCsv
+                // writes the correct values back to disk (not stale False values).
+                // NOTE: do NOT gate on record.IsFileRoseDefault — that flag is loaded
+                // from disk BEFORE ExtractFileRose() runs and is always False in memory
+                // for files that were just moved this run.
+                {
+                    int syncedCount = 0;
+                    foreach (var record in validationRecords)
+                    {
+                        // Skip if already fully synced in memory
+                        if (record.IsFileRoseExtracted) continue;
+                        if (string.IsNullOrWhiteSpace(record.ClientId)) continue;
+
+                        var expectedFile = Path.Combine(
+                            frUploadPath, $"{record.ClientId}_{frSuffix}_{frYear}.pdf");
+
+                        if (File.Exists(expectedFile))
+                        {
+                            record.IsFileRoseDefault = true;    // ← also set this flag
+                            record.IsFileRoseExtracted = true;
+                            syncedCount++;
+                            LoggerService.LogInformation(
+                                $"   🔄 Synced in-memory: ClientId {record.ClientId} → " +
+                                $"IsFileRoseDefault=True, IsFileRoseExtracted=True " +
+                                $"(PDF confirmed in output folder)");
+                        }
+                    }
+
+                    LoggerService.LogInformation(syncedCount > 0
+                        ? $"   ✅ {syncedCount} in-memory record(s) synced to IsFileRoseExtracted = True"
+                        : "   ℹ️  No in-memory FileRose records needed syncing");
+                }
+
+                // ── Step 4b: Stage FileRose rows into newUploadRecords ─────────
+                // validationRecords now correctly reflects IsFileRoseExtracted=True for
+                // every PDF that physically exists in the upload folder.
+                LoggerService.LogInformation("\n📋 Step 4b: Staging FileRose rows for Upload CSV...");
                 int fileRoseRowsAdded = AppendFileRoseUploadRows(validationRecords, newUploadRecords);
                 result.FileRoseRecordsCreated = fileRoseRowsAdded;
                 LoggerService.LogInformation(fileRoseRowsAdded > 0
-                    ? $"   ✅ {fileRoseRowsAdded} FileRose row(s) added"
-                    : "   ℹ️  No eligible FileRose records");
+                    ? $"   ✅ {fileRoseRowsAdded} FileRose row(s) staged"
+                    : "   ℹ️  No eligible FileRose records (IsFileRoseDefault=True AND IsFileRoseExtracted=True AND PDF on disk)");
 
-                // ── Step 4: Merge new rows into Upload_to_PHIS.csv ────────────
-                LoggerService.LogInformation("\n📋 Step 4: Merging new rows into Upload_to_PHIS.csv...");
+                // ── Step 4c: Write ALL new rows to Upload_to_PHIS.csv ─────────
+                LoggerService.LogInformation("\n📋 Step 4c: Writing new rows to Upload_to_PHIS.csv...");
+                LoggerService.LogInformation(
+                    $"   📂 Output : {uploadCsvPath}");
                 int appended = MergeUploadCsv(newUploadRecords);
                 result.UploadRecordsCreated = appended;
+                LoggerService.LogInformation(appended > 0
+                    ? $"   ✅ {appended} row(s) written to Upload_to_PHIS.csv"
+                    : "   ℹ️  No new rows — Upload CSV already up to date");
 
                 // ── Step 5: Update Validation CSV ─────────────────────────────
                 LoggerService.LogInformation("\n📋 Step 5: Updating Validation_Results.csv...");
                 SaveValidationCsv(validationRecords);
 
-                // ── Step 6: Report remaining AFTER archiving ──────────────────
-                // ✅ Only truly unmatched files remain at this point —
-                //    all processed ones have been moved to 7_Archive\Consent\
+                // ── Step 6: Report remaining unmatched PDFs ───────────────────
                 ReportRemainingPdfs(pdfSourcePath, result);
 
                 // ── Step 7: Summary ───────────────────────────────────────────
@@ -206,7 +302,6 @@ namespace Orchestrator.PrePhase3
                 return result;
             }
         }
-
 
         // ─────────────────────────────────────────────────────────────────────
         // Step 1b — Re-scan for {ClientId}.pdf renames
@@ -522,23 +617,27 @@ namespace Orchestrator.PrePhase3
         // FileRose rows
         // ─────────────────────────────────────────────────────────────────────
 
+
+
         private int AppendFileRoseUploadRows(
-            IEnumerable<ValidationRecord> validationRecords,
-            List<UploadRecord> uploadRecords)
+    IEnumerable<ValidationRecord> validationRecords,
+    List<UploadRecord> uploadRecords)
         {
-            var fileRoseOutputPath = _bulkPdfConfig.GetFileRoseOutputReadyPath();
+            // ← Scans PhisWorkspace/1_To_Upload/2 File Rose Upload (same as FileRoseAppendService)
+            var fileRoseUploadPath = _phisWs.GetFileRoseUploadPath();
             var schoolYear = _schoolContext.SchoolYear;
             var suffix = _bulkPdfConfig.RoseSuffix;
             int added = 0;
 
             foreach (var row in validationRecords)
             {
+                // Only rows where IsFileRoseDefault=True AND IsFileRoseExtracted=True
                 if (!row.IsFileRoseDefault || !row.IsFileRoseExtracted ||
                     string.IsNullOrWhiteSpace(row.ClientId))
                     continue;
 
                 var documentTitle = $"{row.ClientId}_{suffix}_{schoolYear}";
-                var expectedPdfPath = Path.Combine(fileRoseOutputPath, $"{documentTitle}.pdf");
+                var expectedPdfPath = Path.Combine(fileRoseUploadPath, $"{documentTitle}.pdf");
 
                 if (!File.Exists(expectedPdfPath))
                 {
@@ -567,6 +666,8 @@ namespace Orchestrator.PrePhase3
 
             return added;
         }
+
+
 
         // ─────────────────────────────────────────────────────────────────────
         // Consent PDF processing
@@ -704,7 +805,6 @@ namespace Orchestrator.PrePhase3
         // ─────────────────────────────────────────────────────────────────────
         // Summary
         // ─────────────────────────────────────────────────────────────────────
-
         private void DisplaySummary(PrePhase3Result result)
         {
             LoggerService.LogInformation("\n" + new string('═', 60));
@@ -736,8 +836,14 @@ namespace Orchestrator.PrePhase3
                 LoggerService.LogInformation(
                     $"   Consent PDFs : {_prePhase3Config.ConsentPdfOutputPath}");
                 LoggerService.LogInformation(
-                    $"   FileRose PDFs: {_bulkPdfConfig.GetFileRoseOutputReadyPath()}");
+                    $"   FileRose PDFs: {_phisWs.GetFileRoseUploadPath()}");
             }
         }
+
+
+
+
+
+
     }
 }

@@ -4,27 +4,15 @@ using ConsentSyncCore.Services.ConfigurationPoco;
 using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Extensions.Configuration;
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace Orchestrator.Services
 {
-
-
     /// <summary>
-    /// Appends FileRose rows to an existing Upload_to_PHIS.csv
-    /// without touching consent rows or already-uploaded records.
-    ///
-    /// Safe to run multiple times — duplicate rows (same ClientID +
-    /// DocumentTitle) are never written twice.
-    ///
-    /// Callable from:
-    ///   • UI button (bt_AppendFileRose_Click)
-    ///   • Command line:  Orchestrator.exe --append-filerose
+    /// Appends FileRose rows to an existing Upload_to_PHIS.csv.
+    /// Scans <c>PhisWorkspace\1_To_Upload\2 File Rose Upload</c> for PDFs.
+    /// Safe to run multiple times — duplicate rows are never written.
     /// </summary>
     public class FileRoseAppendService
     {
@@ -33,6 +21,7 @@ namespace Orchestrator.Services
         private readonly Phase2Config _phase2Config;
         private readonly BulkPdfExtractionConfig _bulkConfig;
         private readonly SchoolContextConfig _schoolContext;
+        private readonly PhisWorkspaceConfig _phisWs;
 
         public FileRoseAppendService(IConfiguration? config = null)
         {
@@ -41,6 +30,7 @@ namespace Orchestrator.Services
             _phase2Config = ConfigurationService.GetPhase2Config();
             _bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
             _schoolContext = ConfigurationService.GetSchoolContextConfig();
+            _phisWs = ConfigurationService.GetPhisWorkspaceConfig();
         }
 
         // ── Result ────────────────────────────────────────────────────
@@ -67,8 +57,9 @@ namespace Orchestrator.Services
                     _prePhase3Config.OutputPath,
                     _phase2Config.UploadCsv);
 
-                var fileRoseReadyDir = _bulkConfig.GetFileRoseOutputReadyPath();
-                var suffix = _bulkConfig.RoseSuffix;   // "suiviscolaire"
+                // ← Scans PhisWorkspace/1_To_Upload/2 File Rose Upload
+                var fileRoseReadyDir = _phisWs.GetFileRoseUploadPath();
+                var suffix = _bulkConfig.RoseSuffix;
                 var schoolYear = _schoolContext.SchoolYear;
 
                 LoggerService.LogInformation("\n" + new string('═', 60));
@@ -78,7 +69,7 @@ namespace Orchestrator.Services
                 LoggerService.LogInformation($"   FileRose folder  : {fileRoseReadyDir}");
                 LoggerService.LogInformation($"   School year      : {schoolYear}");
 
-                // ── Step 1: Load existing Upload CSV (or start fresh) ─────────
+                // ── Step 1: Load existing Upload CSV ──────────────────────────
                 var existing = LoadUploadCsv(uploadCsvPath);
                 var existingKeys = existing
                     .Select(r => MakeKey(r.ClientID, r.DocumentTitle))
@@ -86,10 +77,10 @@ namespace Orchestrator.Services
 
                 LoggerService.LogInformation($"\n   Existing rows    : {existing.Count}");
 
-                // ── Step 2: Scan FileRose PDFs in 2_Output_Ready_FileRose ──────
+                // ── Step 2: Scan FileRose PDFs ────────────────────────────────
                 if (!Directory.Exists(fileRoseReadyDir))
                 {
-                    var msg = $"FileRose output folder not found: {fileRoseReadyDir}";
+                    var msg = $"FileRose upload folder not found: {fileRoseReadyDir}";
                     LoggerService.LogWarning($"   ⚠️  {msg}");
                     result.HasErrors = true;
                     result.Messages.Add(msg);
@@ -104,9 +95,9 @@ namespace Orchestrator.Services
                 foreach (var pdfPath in pdfFiles)
                 {
                     var fileName = Path.GetFileNameWithoutExtension(pdfPath);
-                    var documentTitle = fileName;  // without .pdf
+                    var documentTitle = fileName;
 
-                    // ── Parse ClientId from filename: {ClientId}_{suffix}_{year} ──
+                    // ── Parse ClientId: {ClientId}_{suffix}_{year} ────────────
                     var clientId = ExtractClientIdFromFileName(fileName, suffix);
 
                     if (string.IsNullOrWhiteSpace(clientId))
@@ -117,7 +108,7 @@ namespace Orchestrator.Services
                         continue;
                     }
 
-                    // ── Skip if already in Upload CSV ─────────────────────────
+                    // ── Skip if already in Upload CSV (no duplicates) ─────────
                     var key = MakeKey(clientId, documentTitle);
                     if (existingKeys.Contains(key))
                     {
@@ -130,14 +121,11 @@ namespace Orchestrator.Services
                     var matchingConsent = existing.FirstOrDefault(r =>
                         r.ClientID.Equals(clientId, StringComparison.OrdinalIgnoreCase));
 
-                    var lastName = matchingConsent?.LastName ?? string.Empty;
-                    var firstName = matchingConsent?.FirstName ?? string.Empty;
-
                     newRows.Add(new UploadRecord
                     {
                         ClientID = clientId,
-                        LastName = lastName,
-                        FirstName = firstName,
+                        LastName = matchingConsent?.LastName ?? string.Empty,
+                        FirstName = matchingConsent?.FirstName ?? string.Empty,
                         DocumentTitle = documentTitle,
                         Description = "Suivi scolaire",
                         PhisAntigen = string.Empty,
@@ -155,14 +143,14 @@ namespace Orchestrator.Services
                 {
                     existing.AddRange(newRows);
                     SaveUploadCsv(uploadCsvPath, existing);
-                    LoggerService.LogInformation($"\n   ✅ Appended {newRows.Count} FileRose row(s) → {uploadCsvPath}");
+                    LoggerService.LogInformation(
+                        $"\n   ✅ Appended {newRows.Count} FileRose row(s) → {uploadCsvPath}");
                 }
                 else
                 {
                     LoggerService.LogInformation("\n   ℹ️  Nothing to append — all rows already present.");
                 }
 
-                // ── Summary ───────────────────────────────────────────────────
                 LoggerService.LogInformation("\n" + new string('─', 60));
                 LoggerService.LogInformation($"   ✅ Appended      : {result.Appended}");
                 LoggerService.LogInformation($"   ⏭️  Already exist : {result.AlreadyExist}");
@@ -181,20 +169,10 @@ namespace Orchestrator.Services
 
         // ── Helpers ───────────────────────────────────────────────────
 
-        /// <summary>
-        /// Parses ClientId from a filename like
-        ///   "123456_suiviscolaire_2025-2026"  →  "123456"
-        /// </summary>
         private static string ExtractClientIdFromFileName(string nameWithoutExt, string suffix)
         {
-            // Expected pattern: {ClientId}_{suffix}_{schoolYear}
-            var idx = nameWithoutExt.IndexOf(
-                $"_{suffix}_", StringComparison.OrdinalIgnoreCase);
-
-            if (idx > 0)
-                return nameWithoutExt[..idx].Trim();
-
-            // Fallback: first segment before any underscore
+            var idx = nameWithoutExt.IndexOf($"_{suffix}_", StringComparison.OrdinalIgnoreCase);
+            if (idx > 0) return nameWithoutExt[..idx].Trim();
             var parts = nameWithoutExt.Split('_');
             return parts.Length > 0 ? parts[0].Trim() : string.Empty;
         }
@@ -209,14 +187,9 @@ namespace Orchestrator.Services
                 LoggerService.LogInformation($"   ℹ️  Upload CSV not found — will create: {path}");
                 return new List<UploadRecord>();
             }
-
             using var reader = new StreamReader(path, Encoding.UTF8);
-            using var csv = new CsvReader(
-                reader, new CsvConfiguration(CultureInfo.InvariantCulture)
-                {
-                    MissingFieldFound = null,
-                    HeaderValidated = null
-                });
+            using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
+            { MissingFieldFound = null, HeaderValidated = null });
             csv.Context.RegisterClassMap<UploadRecordMap>();
             return csv.GetRecords<UploadRecord>().ToList();
         }
@@ -225,11 +198,9 @@ namespace Orchestrator.Services
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             using var writer = new StreamWriter(path, false, Encoding.UTF8);
-            using var csv = new CsvWriter(
-                writer, new CsvConfiguration(CultureInfo.InvariantCulture));
+            using var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture));
             csv.Context.RegisterClassMap<UploadRecordMap>();
             csv.WriteRecords(records);
         }
     }
-
 }
