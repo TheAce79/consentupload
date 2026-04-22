@@ -392,15 +392,23 @@ namespace Orchestrator.Phase3
             if (await _phisSearchService.CheckIfContextDocumentExistsAsync(record.DocumentTitle))
             {
                 LoggerService.LogInformation(
-                    "   ✅ Document already exists on PHIS — marking Success:-");
+                    "   ✅ Document already exists on PHIS — marking Success");
                 record.VerifStatus = UploadVerificationStatus.Success;
                 record.FailureReason = string.Empty;
                 await _phisSearchService.NavigateBackToSearchPagesAsync();
                 return true;
             }
 
+            // ── E: Click Add New ──────────────────────────────────────────────
+            if (!await _phisSearchService.ClickContextDocumentAddNewAsync())
+            {
+                SetFailure(record, "Could not open Add New Document upload form");
+                return false;
+            }
+            LoggerService.LogInformation("   ✅ Upload form opened");
+
             // ── Upload not yet enabled ────────────────────────────────────────
-            // Step E (Add New → upload) is next once D is confirmed working.
+            // Step F (UploadDocumentAsync) is next once E is confirmed working.
             LoggerService.LogInformation(
                 "   ℹ️  Upload step not yet enabled — " +
                 $"leaving VerifStatus = NotProcessed for " +
