@@ -392,7 +392,7 @@ namespace Orchestrator.Phase3
             if (await _phisSearchService.CheckIfContextDocumentExistsAsync(record.DocumentTitle))
             {
                 LoggerService.LogInformation(
-                    "   ✅ Document already exists on PHIS — marking Success");
+                    "   ✅ Document already exists on PHIS — marking Success:-");
                 record.VerifStatus = UploadVerificationStatus.Success;
                 record.FailureReason = string.Empty;
                 await _phisSearchService.NavigateBackToSearchPagesAsync();
