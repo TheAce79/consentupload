@@ -407,22 +407,29 @@ namespace Orchestrator.Phase3
             }
             LoggerService.LogInformation("   ✅ Upload form opened");
 
-            // ── Upload not yet enabled ────────────────────────────────────────
-            // Step F (UploadDocumentAsync) is next once E is confirmed working.
-            LoggerService.LogInformation(
-                "   ℹ️  Upload step not yet enabled — " +
-                $"leaving VerifStatus = NotProcessed for " +
-                $"{record.ClientID} ({record.DocumentTitle})");
+            // ── F: Upload PDF + fill Title + Description + Submit ─────────────
+            // UploadDocumentAsync targets addNewDocumentForm — same form IDs
+            // used by both Context Documents and Consent Directives upload.
+            LoggerService.LogInformation("\n📎 STEP F: Uploading FileRose document...");
+            bool success = await _phisSearchService.UploadDocumentAsync(
+                pdfPath,
+                record.DocumentTitle,
+                record.Description);
 
-            record.VerifStatus = UploadVerificationStatus.NotProcessed;
-            record.FailureReason = string.Empty;
+            if (success)
+            {
+                record.VerifStatus = UploadVerificationStatus.Success;
+                record.FailureReason = string.Empty;
+                LoggerService.LogInformation("   ✅ FileRose uploaded successfully!");
+            }
+            else
+            {
+                SetFailure(record, "FileRose upload failed (PHIS returned an error)");
+            }
 
             await _phisSearchService.NavigateBackToSearchPagesAsync();
-            return false;
+            return success;
         }
-
-
-
 
         // ── Shared helpers ────────────────────────────────────────────────────
 
