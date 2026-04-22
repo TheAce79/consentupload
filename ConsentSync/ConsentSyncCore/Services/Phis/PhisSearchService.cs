@@ -478,51 +478,70 @@ namespace ConsentSyncCore.Services.Phis
         /// <summary>
         /// Convert date from CSV format (yyyy-MM-dd) to PHIS format (yyyy/MM/dd)
         /// </summary>
+        /// 
+        /// <summary>
+        /// Converts a date from any known CSV format to PHIS format (yyyy/MM/dd).
+        /// Handles: yyyy-MM-dd, yyyy/MM/dd, M/d/yyyy, MM/dd/yyyy, d/M/yyyy, dd/MM/yyyy, etc.
+        /// </summary>
         private string ConvertDateForPhis(string csvDate)
         {
             try
             {
-                // Handle null/empty
                 if (string.IsNullOrWhiteSpace(csvDate))
                     return string.Empty;
 
-                // If already in correct format, return as-is
-                if (csvDate.Contains("/") && csvDate.Length == 10)
-                    return csvDate;
-
-                // Parse from CSV format (yyyy-MM-dd)
-                if (DateTime.TryParseExact(csvDate, "yyyy-MM-dd",
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    System.Globalization.DateTimeStyles.None,
-                    out DateTime parsedDate))
+                // ── Try every format we may encounter in the processed CSV ────
+                // Order matters: most specific / unambiguous formats first.
+                string[] knownFormats =
                 {
-                    // Format for PHIS: yyyy/MM/dd
-                    return parsedDate.ToString("yyyy/MM/dd");
-                }
+                    // Standard output format written by StudentCsvProcessor
+                    "yyyy-MM-dd",
 
-                // Try alternative formats just in case
-                string[] alternativeFormats = { "yyyy-M-d", "yyyy/M/d", "dd/MM/yyyy", "MM/dd/yyyy" };
-                foreach (var format in alternativeFormats)
-                {
-                    if (DateTime.TryParseExact(csvDate, format,
+                    // Input CSV native format (Windows-1252 ANSI export)
+                    "yyyy/MM/dd",
+
+                    // Culture-aware fallback formats that TryParse may have written
+                    "M/d/yyyy",
+                    "MM/dd/yyyy",
+                    "d/M/yyyy",
+                    "dd/MM/yyyy",
+
+                    // Extra variants just in case
+                    "yyyy-M-d",
+                    "yyyy/M/d",
+                    "M-d-yyyy",
+                    "MM-dd-yyyy",
+                };
+
+                if (DateTime.TryParseExact(
+                        csvDate,
+                        knownFormats,
                         System.Globalization.CultureInfo.InvariantCulture,
                         System.Globalization.DateTimeStyles.None,
-                        out parsedDate))
-                    {
-                        return parsedDate.ToString("yyyy/MM/dd");
-                    }
+                        out DateTime parsed))
+                {
+                    return parsed.ToString("yyyy/MM/dd"); // PHIS calendar format
                 }
 
-                 LoggerService.LogInformation($"   ⚠️  Failed to parse date: {csvDate}");
+                // Last resort: let .NET try with invariant culture
+                if (DateTime.TryParse(csvDate,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None,
+                        out parsed))
+                {
+                    LoggerService.LogInformation($"   ⚠️  Date parsed via general fallback: '{csvDate}' → '{parsed:yyyy/MM/dd}'");
+                    return parsed.ToString("yyyy/MM/dd");
+                }
+
+                LoggerService.LogInformation($"   ⚠️  Failed to parse date: {csvDate}");
                 return string.Empty;
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"   ❌ Date conversion error: {ex.Message}");
+                LoggerService.LogInformation($"   ❌ Date conversion error: {ex.Message}");
                 return string.Empty;
             }
         }
-
 
 
         /// <summary>
