@@ -124,13 +124,13 @@ namespace CsvProcessing
         private List<EncodingConfiguration> GetDefaultEncodingConfigurations()
         {
             return new List<EncodingConfiguration>
-            {
-                new EncodingConfiguration { Name = "UTF-8", CodePage = "utf-8", UseBOM = false, Priority = 1 },
-                new EncodingConfiguration { Name = "UTF-8 with BOM", CodePage = "utf-8", UseBOM = true, Priority = 2 },
-                new EncodingConfiguration { Name = "Windows-1252 (ANSI)", CodePage = "1252", Priority = 3 },
-                new EncodingConfiguration { Name = "ISO-8859-1 (Latin-1)", CodePage = "iso-8859-1", Priority = 4 },
-                new EncodingConfiguration { Name = "System Default", CodePage = "default", Priority = 5 }
-            };
+    {
+        new EncodingConfiguration { Name = "Windows-1252 (ANSI)", CodePage = "1252", Priority = 1 },
+        new EncodingConfiguration { Name = "UTF-8", CodePage = "utf-8", UseBOM = false, Priority = 2 },
+        new EncodingConfiguration { Name = "UTF-8 with BOM", CodePage = "utf-8", UseBOM = true, Priority = 3 },
+        new EncodingConfiguration { Name = "ISO-8859-1 (Latin-1)", CodePage = "iso-8859-1", Priority = 4 },
+        new EncodingConfiguration { Name = "System Default", CodePage = "default", Priority = 5 }
+    };
         }
 
         /// <summary>

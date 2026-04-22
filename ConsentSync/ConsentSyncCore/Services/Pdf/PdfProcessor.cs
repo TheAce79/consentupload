@@ -20,11 +20,20 @@ namespace ConsentSyncCore.Services.Pdf
     {
         private readonly PdfExtractionConfig _config;
 
+
+        // ✅ Register Windows-1252 and other legacy encodings for PdfPig
+        static PdfProcessor()
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        }
+
         public PdfProcessor(IConfiguration? config = null)
         {
             var configuration = config ?? ConfigurationService.GetConfiguration();
             _config = ConfigurationService.GetPdfExtractionConfig();
         }
+
+      
 
         #region Public API
 
@@ -173,9 +182,11 @@ namespace ConsentSyncCore.Services.Pdf
         /// <summary>
         /// Extract names from PDF text words using pattern matching
         /// </summary>
+        /// 
+
         private static (string? firstName, string? lastName) ExtractNamesFromWords(
-            List<UglyToad.PdfPig.Content.Word> words,
-            PdfExtractionConfig config)
+    List<UglyToad.PdfPig.Content.Word> words,
+    PdfExtractionConfig config)
         {
             string? firstName = null;
             string? lastName = null;
@@ -184,35 +195,38 @@ namespace ConsentSyncCore.Services.Pdf
 
             try
             {
-                 LoggerService.LogInformation($"  Starting word-based extraction with {words.Count} words");
+                LoggerService.LogInformation($"  Starting word-based extraction with {words.Count} words");
 
-                // ✅ Use patterns directly from config (no need for LoadNamePatterns)
                 var lastNamePatterns = config.LastNamePatterns;
                 var firstNamePatterns = config.FirstNamePatterns;
                 var preferredNamePatterns = config.PreferredNamePatterns;
 
-
+                // ── STRATEGY 1: Pattern matching ──────────────────────────────
                 for (int i = 0; i < words.Count; i++)
                 {
-                    // Check for last name patterns
                     if (lastName == null)
                     {
                         foreach (var pattern in lastNamePatterns)
                         {
                             if (MatchesPattern(words, i, pattern.Words))
                             {
-                                 LoggerService.LogInformation($"  Found last name pattern ({pattern.Language}) at index {i}");
+                                LoggerService.LogInformation($"  Found last name pattern ({pattern.Language}) at index {i}");
                                 int startIndex = i + pattern.Words.Length;
 
                                 for (int j = startIndex; j < words.Count && j < startIndex + config.SearchRange; j++)
                                 {
-                                    string candidateWord = words[j].Text.Trim();
+                                    // ✅ FormC normalization — handles decomposed accents from PDF encoding
+                                    string candidateWord = words[j].Text
+                                        .Normalize(NormalizationForm.FormC)
+                                        .Trim();
+
+                                    LoggerService.LogInformation($"    Checking word at [{j}]: '{candidateWord}'");
 
                                     if (IsValidNameCandidate(candidateWord, config))
                                     {
                                         lastName = candidateWord;
                                         lastNameEndIndex = j;
-                                         LoggerService.LogInformation($"  ✅ Last Name: {lastName} at index {j}");
+                                        LoggerService.LogInformation($"  ✅ Last Name: {lastName} at index {j}");
                                         break;
                                     }
                                 }
@@ -222,7 +236,6 @@ namespace ConsentSyncCore.Services.Pdf
                         }
                     }
 
-                    // Check for first name patterns (exclude preferred name)
                     if (firstName == null)
                     {
                         bool isPreferredName = preferredNamePatterns.Any(p => MatchesPattern(words, i, p.Words));
@@ -233,24 +246,29 @@ namespace ConsentSyncCore.Services.Pdf
                             {
                                 if (MatchesPattern(words, i, pattern.Words))
                                 {
-                                     LoggerService.LogInformation($"  Found first name pattern ({pattern.Language}) at index {i}");
+                                    LoggerService.LogInformation($"  Found first name pattern ({pattern.Language}) at index {i}");
                                     int startIndex = i + pattern.Words.Length;
 
                                     for (int j = startIndex; j < words.Count && j < startIndex + config.SearchRange; j++)
                                     {
                                         if (j == lastNameEndIndex)
                                         {
-                                             LoggerService.LogInformation($"    Skipping index {j} - already used as last name");
+                                            LoggerService.LogInformation($"    Skipping index {j} - already used as last name");
                                             continue;
                                         }
 
-                                        string candidateWord = words[j].Text.Trim();
+                                        // ✅ FormC normalization — handles decomposed accents from PDF encoding
+                                        string candidateWord = words[j].Text
+                                            .Normalize(NormalizationForm.FormC)
+                                            .Trim();
+
+                                        LoggerService.LogInformation($"    Checking word at [{j}]: '{candidateWord}'");
 
                                         if (IsValidNameCandidate(candidateWord, config))
                                         {
                                             firstName = candidateWord;
                                             firstNameEndIndex = j;
-                                             LoggerService.LogInformation($"  ✅ First Name: {firstName} at index {j}");
+                                            LoggerService.LogInformation($"  ✅ First Name: {firstName} at index {j}");
                                             break;
                                         }
                                     }
@@ -263,33 +281,37 @@ namespace ConsentSyncCore.Services.Pdf
 
                     if (lastName != null && firstName != null)
                     {
-                         LoggerService.LogInformation($"  Both names found - stopping search");
+                        LoggerService.LogInformation($"  Both names found - stopping search");
                         break;
                     }
                 }
 
-
-
-
-                // STRATEGY 2: Fallback keyword matching
+                // ── STRATEGY 2: Fallback keyword matching ─────────────────────
                 if (lastName == null || firstName == null)
                 {
-                     LoggerService.LogInformation($"  Pattern matching incomplete, trying keyword fallback...");
+                    LoggerService.LogInformation($"  Pattern matching incomplete, trying keyword fallback...");
 
                     for (int i = 0; i < words.Count - 1; i++)
                     {
-                        string currentWord = words[i].Text;
+                        // ✅ Normalize the keyword word too for consistent comparison
+                        string currentWord = words[i].Text.Normalize(NormalizationForm.FormC);
 
                         if (lastName == null && ContainsAnyKeyword(currentWord, config.LastNameKeywords))
                         {
                             for (int j = i + 1; j < words.Count && j < i + config.SearchRange; j++)
                             {
-                                string candidateWord = words[j].Text.Trim();
+                                // ✅ FormC normalization
+                                string candidateWord = words[j].Text
+                                    .Normalize(NormalizationForm.FormC)
+                                    .Trim();
+
+                                LoggerService.LogInformation($"    Checking word at [{j}]: '{candidateWord}'");
+
                                 if (IsValidNameCandidate(candidateWord, config))
                                 {
                                     lastName = candidateWord;
                                     lastNameEndIndex = j;
-                                     LoggerService.LogInformation($"  -> Last Name: {lastName} at index {j}");
+                                    LoggerService.LogInformation($"  -> Last Name: {lastName} at index {j}");
                                     break;
                                 }
                             }
@@ -297,7 +319,9 @@ namespace ConsentSyncCore.Services.Pdf
 
                         if (firstName == null && ContainsAnyKeyword(currentWord, config.FirstNameKeywords))
                         {
-                            if (i + 1 < words.Count && ContainsAnyKeyword(words[i + 1].Text, new[] { "PRÉFÉRÉ", "PREFERRED" }))
+                            if (i + 1 < words.Count && ContainsAnyKeyword(
+                                    words[i + 1].Text.Normalize(NormalizationForm.FormC),
+                                    new[] { "PRÉFÉRÉ", "PREFERRED" }))
                             {
                                 continue;
                             }
@@ -306,11 +330,17 @@ namespace ConsentSyncCore.Services.Pdf
                             {
                                 if (j == lastNameEndIndex) continue;
 
-                                string candidateWord = words[j].Text.Trim();
+                                // ✅ FormC normalization
+                                string candidateWord = words[j].Text
+                                    .Normalize(NormalizationForm.FormC)
+                                    .Trim();
+
+                                LoggerService.LogInformation($"    Checking word at [{j}]: '{candidateWord}'");
+
                                 if (IsValidNameCandidate(candidateWord, config))
                                 {
                                     firstName = candidateWord;
-                                     LoggerService.LogInformation($"  -> First Name: {firstName} at index {j}");
+                                    LoggerService.LogInformation($"  -> First Name: {firstName} at index {j}");
                                     break;
                                 }
                             }
@@ -320,15 +350,17 @@ namespace ConsentSyncCore.Services.Pdf
                     }
                 }
 
-                 LoggerService.LogInformation($"  Extraction complete: FirstName={firstName ?? "NULL"}, LastName={lastName ?? "NULL"}");
+                LoggerService.LogInformation($"  Extraction complete: FirstName={firstName ?? "NULL"}, LastName={lastName ?? "NULL"}");
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"  ❌ ERROR: {ex.Message}");
+                LoggerService.LogInformation($"  ❌ ERROR: {ex.Message}");
             }
 
             return (firstName, lastName);
         }
+
+
 
         #endregion
 
@@ -594,6 +626,7 @@ namespace ConsentSyncCore.Services.Pdf
                 .ToList();
         }
 
+
         private static bool MatchesPattern(List<UglyToad.PdfPig.Content.Word> words, int startIndex, string[] pattern)
         {
             if (startIndex + pattern.Length > words.Count)
@@ -601,12 +634,23 @@ namespace ConsentSyncCore.Services.Pdf
 
             for (int i = 0; i < pattern.Length; i++)
             {
-                if (!words[startIndex + i].Text.Equals(pattern[i], StringComparison.OrdinalIgnoreCase))
+                // Normalize both to FormC to handle accented characters correctly
+                // e.g. "PRÉNOM" or "NOM DE FAMILLE" from PDFs like Antonine-Maillet
+                string pdfWord = words[startIndex + i].Text
+                    .Normalize(NormalizationForm.FormC)
+                    .TrimEnd(':')
+                    .Trim();
+
+                string patternWord = pattern[i].Normalize(NormalizationForm.FormC);
+
+                if (!pdfWord.Equals(patternWord, StringComparison.OrdinalIgnoreCase))
                     return false;
             }
 
             return true;
         }
+
+
 
         private static bool ContainsAnyKeyword(string text, string[] keywords)
         {
