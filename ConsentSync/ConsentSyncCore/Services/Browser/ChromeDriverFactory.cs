@@ -51,10 +51,19 @@ namespace ConsentSyncCore.Services.Browser
             }
         }
 
+        /// <summary>
+        /// Downloads a matched Portable Chrome + ChromeDriver pair (Chrome for Testing).
+        /// No admin rights required — extracts to the configured user-accessible folders.
+        /// On network failure, logs manual download links so the user can install manually.
+        /// </summary>
         public async Task<bool> DownloadPortableChromeAsync(
             Action<string>? progress = null,
             CancellationToken cancellationToken = default)
         {
+            string? version = null;
+            string? chromeUrl = null;
+            string? driverUrl = null;
+
             try
             {
                 progress?.Invoke("📡 Fetching Chrome for Testing version information...");
@@ -68,12 +77,11 @@ namespace ConsentSyncCore.Services.Browser
                 using var doc = JsonDocument.Parse(json);
                 var channels = doc.RootElement.GetProperty("channels");
                 var channel = channels.GetProperty(_chromeConfig.PortableChromeChannel);
-                var version = channel.GetProperty("version").GetString() ?? "unknown";
+                version = channel.GetProperty("version").GetString() ?? "unknown";
 
                 progress?.Invoke($"📦 Found {_chromeConfig.PortableChromeChannel} version: {version}");
 
                 var downloads = channel.GetProperty("downloads");
-                string? chromeUrl = null, driverUrl = null;
 
                 if (downloads.TryGetProperty("chrome", out var ca)) chromeUrl = GetWin64Url(ca);
                 if (downloads.TryGetProperty("chromedriver", out var da)) driverUrl = GetWin64Url(da);
@@ -84,6 +92,9 @@ namespace ConsentSyncCore.Services.Browser
                     return false;
                 }
 
+                progress?.Invoke($"⬇️  Downloading Chrome      : {chromeUrl}");
+                progress?.Invoke($"⬇️  Downloading ChromeDriver: {driverUrl}");
+
                 var chromeZip = Path.Combine(Path.GetTempPath(), $"chrome-win64-{version}.zip");
                 var driverZip = Path.Combine(Path.GetTempPath(), $"chromedriver-win64-{version}.zip");
 
@@ -91,7 +102,7 @@ namespace ConsentSyncCore.Services.Browser
                     DownloadFileAsync(http, chromeUrl, chromeZip, cancellationToken),
                     DownloadFileAsync(http, driverUrl, driverZip, cancellationToken));
 
-                progress?.Invoke($"📂 Extracting Chrome to: {_chromeConfig.PortableChromeExtractTo}");
+                progress?.Invoke($"📂 Extracting Chrome to      : {_chromeConfig.PortableChromeExtractTo}");
                 ExtractZip(chromeZip, _chromeConfig.PortableChromeExtractTo, progress);
 
                 progress?.Invoke($"📂 Extracting ChromeDriver to: {_chromeConfig.ChromeDriverExtractTo}");
@@ -107,11 +118,57 @@ namespace ConsentSyncCore.Services.Browser
                 if (detectedChrome != null)
                     progress?.Invoke($"✅ Portable Chrome ready: {detectedChrome}");
 
-                progress?.Invoke($"\n✅ Download complete! Version: {version}");
+                progress?.Invoke($"✅ Download complete! Version: {version}");
                 return true;
             }
-            catch (OperationCanceledException) { progress?.Invoke("⚠️  Download cancelled."); return false; }
-            catch (Exception ex) { progress?.Invoke($"❌ Download failed: {ex.Message}"); return false; }
+            catch (OperationCanceledException)
+            {
+                progress?.Invoke("⚠️  Download cancelled.");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                progress?.Invoke($"❌ Portable Chrome download failed: {ex.Message}");
+
+                // ── Fallback: manual download instructions (no admin rights needed) ──
+                try
+                {
+                    // If we fetched the version but download failed, use the known URLs.
+                    // Otherwise point the user to the release page to pick manually.
+                    bool hasUrls = !string.IsNullOrWhiteSpace(chromeUrl) &&
+                                   !string.IsNullOrWhiteSpace(driverUrl);
+
+                    progress?.Invoke("");
+                    progress?.Invoke("💡 MANUAL INSTALL — no admin rights needed:");
+
+                    if (!string.IsNullOrWhiteSpace(version) && version != "unknown")
+                        progress?.Invoke($"   Detected latest {_chromeConfig.PortableChromeChannel} version: {version}");
+
+                    if (hasUrls)
+                    {
+                        progress?.Invoke($"   1a. Download Portable Chrome ZIP:");
+                        progress?.Invoke($"       {chromeUrl}");
+                        progress?.Invoke($"   1b. Download ChromeDriver ZIP:");
+                        progress?.Invoke($"       {driverUrl}");
+                    }
+                    else
+                    {
+                        progress?.Invoke($"   1. Visit the Chrome for Testing release page:");
+                        progress?.Invoke($"      https://googlechromelabs.github.io/chrome-for-testing/");
+                        progress?.Invoke($"      Pick the '{_chromeConfig.PortableChromeChannel}' channel → win64");
+                        progress?.Invoke($"      Download both  chrome-win64.zip  and  chromedriver-win64.zip");
+                    }
+
+                    progress?.Invoke($"   2. Extract  chrome-win64.zip  into:");
+                    progress?.Invoke($"      {_chromeConfig.PortableChromeExtractTo}");
+                    progress?.Invoke($"   3. Extract  chromedriver-win64.zip  into:");
+                    progress?.Invoke($"      {_chromeConfig.ChromeDriverExtractTo}");
+                    progress?.Invoke($"   4. Click '🌐 Download Portable Chrome' again to verify.");
+                }
+                catch { /* non-fatal */ }
+
+                return false;
+            }
         }
 
         #endregion
@@ -377,12 +434,15 @@ namespace ConsentSyncCore.Services.Browser
         /// Downloads the chromedriver.exe that exactly matches the currently installed
         /// system Chrome version and places it in ChromeDriverPath.
         /// No admin rights required — writes only to the configured user-accessible folder.
-        /// Call this from the UI when a Chrome/driver version mismatch is detected.
+        /// On network failure, logs a manual download link so the user can install without admin rights.
         /// </summary>
         public async Task<bool> UpdateSystemChromeDriverAsync(
             Action<string>? progress = null,
             CancellationToken cancellationToken = default)
         {
+            string? chromeVersion = null;
+            string? downloadUrl = null;
+
             try
             {
                 // ── Step 1: Detect system Chrome version ─────────────────────
@@ -393,7 +453,7 @@ namespace ConsentSyncCore.Services.Browser
                     return false;
                 }
 
-                var chromeVersion = FileVersionInfo.GetVersionInfo(chromePath).FileVersion;
+                chromeVersion = FileVersionInfo.GetVersionInfo(chromePath).FileVersion;
                 if (string.IsNullOrWhiteSpace(chromeVersion))
                 {
                     progress?.Invoke("❌ Could not read system Chrome version.");
@@ -416,10 +476,10 @@ namespace ConsentSyncCore.Services.Browser
                     progress?.Invoke($"⚠️  Driver mismatch: have {currentDriver}, need {chromeVersion}");
                 }
 
-                // ── Step 3: Download matching chromedriver ────────────────────
-                var url = $"https://storage.googleapis.com/chrome-for-testing-public/{chromeVersion}/win64/chromedriver-win64.zip";
+                // ── Step 3: Build download URL & attempt download ─────────────
+                downloadUrl = $"https://storage.googleapis.com/chrome-for-testing-public/{chromeVersion}/win64/chromedriver-win64.zip";
                 progress?.Invoke($"⬇️  Downloading ChromeDriver {chromeVersion}...");
-                progress?.Invoke($"   URL: {url}");
+                progress?.Invoke($"   URL: {downloadUrl}");
 
                 using var http = new System.Net.Http.HttpClient();
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("ConsentSync/1.0");
@@ -427,16 +487,17 @@ namespace ConsentSyncCore.Services.Browser
                 byte[] bytes;
                 try
                 {
-                    bytes = await http.GetByteArrayAsync(url, cancellationToken);
+                    bytes = await http.GetByteArrayAsync(downloadUrl, cancellationToken);
                 }
                 catch (System.Net.Http.HttpRequestException ex) when (ex.Message.Contains("404"))
                 {
                     // ── Fallback: try major.minor.build.0 variant ─────────────
                     var parts = chromeVersion.Split('.');
                     var approx = $"{parts[0]}.{parts[1]}.{parts[2]}.0";
+                    downloadUrl = $"https://storage.googleapis.com/chrome-for-testing-public/{approx}/win64/chromedriver-win64.zip";
                     progress?.Invoke($"   ⚠️  Exact build not found, trying {approx}...");
-                    var fallbackUrl = $"https://storage.googleapis.com/chrome-for-testing-public/{approx}/win64/chromedriver-win64.zip";
-                    bytes = await http.GetByteArrayAsync(fallbackUrl, cancellationToken);
+                    progress?.Invoke($"   URL: {downloadUrl}");
+                    bytes = await http.GetByteArrayAsync(downloadUrl, cancellationToken);
                 }
 
                 // ── Step 4: Extract into temp folder ─────────────────────────
@@ -448,10 +509,10 @@ namespace ConsentSyncCore.Services.Browser
 
                 if (Directory.Exists(extractDir))
                     Directory.Delete(extractDir, recursive: true);
-                System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, extractDir);
+                ZipFile.ExtractToDirectory(zipPath, extractDir);
                 TryDelete(zipPath);
 
-                // ── Step 5: Locate chromedriver.exe in the extracted folder ───
+                // ── Step 5: Locate chromedriver.exe ──────────────────────────
                 var extracted = Directory.GetFiles(extractDir, "chromedriver.exe", SearchOption.AllDirectories)
                                          .FirstOrDefault();
                 if (extracted == null)
@@ -463,7 +524,7 @@ namespace ConsentSyncCore.Services.Browser
                 // ── Step 6: Kill running chromedriver & copy ──────────────────
                 try
                 {
-                    foreach (var proc in System.Diagnostics.Process.GetProcessesByName("chromedriver"))
+                    foreach (var proc in Process.GetProcessesByName("chromedriver"))
                     {
                         proc.Kill();
                         proc.WaitForExit(3_000);
@@ -473,15 +534,13 @@ namespace ConsentSyncCore.Services.Browser
 
                 Directory.CreateDirectory(_chromeConfig.ChromeDriverPath);
                 File.Copy(extracted, driverExe, overwrite: true);
+                TryDelete(extractDir);
 
                 // ── Step 7: Verify ────────────────────────────────────────────
                 var installedVersion = FileVersionInfo.GetVersionInfo(driverExe).FileVersion;
                 progress?.Invoke($"✅ ChromeDriver updated successfully!");
                 progress?.Invoke($"   Installed version : {installedVersion}");
                 progress?.Invoke($"   Location          : {driverExe}");
-
-                // Cleanup
-                TryDelete(extractDir);
 
                 return true;
             }
@@ -493,9 +552,36 @@ namespace ConsentSyncCore.Services.Browser
             catch (Exception ex)
             {
                 progress?.Invoke($"❌ ChromeDriver update failed: {ex.Message}");
+
+                // ── Fallback: manual download instructions (no admin rights needed) ──
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(chromeVersion))
+                    {
+                        var manualUrl = downloadUrl
+                            ?? $"https://storage.googleapis.com/chrome-for-testing-public/{chromeVersion}/win64/chromedriver-win64.zip";
+
+                        progress?.Invoke("");
+                        progress?.Invoke("💡 MANUAL INSTALL — no admin rights needed:");
+                        progress?.Invoke($"   Chrome version detected : {chromeVersion}");
+                        progress?.Invoke($"   1. Open this URL in your browser and download the ZIP:");
+                        progress?.Invoke($"      {manualUrl}");
+                        progress?.Invoke($"   2. Open the ZIP → go into the  chromedriver-win64  folder");
+                        progress?.Invoke($"   3. Copy  chromedriver.exe  into:");
+                        progress?.Invoke($"      {_chromeConfig.ChromeDriverPath}");
+                        progress?.Invoke($"   4. Click '🔄 Update ChromeDriver' again to verify.");
+                    }
+                }
+                catch { /* non-fatal */ }
+
                 return false;
             }
         }
+
+
+
+
+
 
         private static string? GetWin64Url(JsonElement arr)
         {
