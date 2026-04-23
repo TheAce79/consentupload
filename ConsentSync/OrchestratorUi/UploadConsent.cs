@@ -140,10 +140,14 @@ namespace OrchestratorUi
                     });
                 });
 
+
+                // ── Run Phase 1 and get results + session for reuse ───────
+
                 (Phase1Result phase1Result,
                  IWebDriver? phase1Driver,
                  PhisSessionManager? phase1SessionMgr,
                  PhisSearchService? phase1SearchSvc) = await RunPhase1Async(config, progress);
+
 
                 // ── Store session for reuse in Phase 3 ───────────────
                 _driver = phase1Driver;

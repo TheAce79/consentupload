@@ -214,13 +214,16 @@ namespace CsvProcessing
                     LoggerService.LogInformation("   ➕ Adding column: IsDuplicate");
                 }
 
+
+
                 // ── Detect duplicates: same normalised FirstName + LastName + DOB ──
                 LoggerService.LogInformation("\n🔍 Detecting duplicates (FirstName + LastName + DOB)...");
 
                 // Pass 1: count occurrences of each key
                 var keyCounts = new Dictionary<string, int>();
-                foreach (var r in records)
+                for (int idx = 0; idx < records.Count; idx++)
                 {
+                    var r = records[idx];
                     string fn = NormalizeDuplicateKey(r.Properties.GetValueOrDefault(_firstNameColumn, string.Empty));
                     string ln = NormalizeDuplicateKey(r.Properties.GetValueOrDefault(_lastNameColumn, string.Empty));
                     string dob = r.Properties.GetValueOrDefault(_dateOfBirthColumn, string.Empty).Trim();
@@ -228,10 +231,14 @@ namespace CsvProcessing
                     keyCounts[key] = keyCounts.GetValueOrDefault(key, 0) + 1;
                 }
 
-                // Pass 2: flag ALL rows that belong to a duplicate group
+                // Pass 2: flag ALL rows that belong to a duplicate group as IsDuplicate=true
+                // Phase 1 will pick the first unprocessed representative per group to search,
+                // then AssignClientIdsFromDuplicates propagates the result to all rows.
+                // Upload is blocked unless DuplicateResolved=true.
                 int duplicateCount = 0;
-                foreach (var r in records)
+                for (int idx = 0; idx < records.Count; idx++)
                 {
+                    var r = records[idx];
                     string fn = NormalizeDuplicateKey(r.Properties.GetValueOrDefault(_firstNameColumn, string.Empty));
                     string ln = NormalizeDuplicateKey(r.Properties.GetValueOrDefault(_lastNameColumn, string.Empty));
                     string dob = r.Properties.GetValueOrDefault(_dateOfBirthColumn, string.Empty).Trim();
@@ -241,7 +248,9 @@ namespace CsvProcessing
                     {
                         r["IsDuplicate"] = "true";
                         duplicateCount++;
-                        LoggerService.LogInformation($"   ⚠️  Duplicate found: {r.Properties.GetValueOrDefault(_lastNameColumn)} {r.Properties.GetValueOrDefault(_firstNameColumn)} ({dob})");
+                        LoggerService.LogInformation(
+                            $"   ⚠️  Duplicate: {r.Properties.GetValueOrDefault(_lastNameColumn)} " +
+                            $"{r.Properties.GetValueOrDefault(_firstNameColumn)} ({dob})");
                     }
                     else
                     {
@@ -249,7 +258,10 @@ namespace CsvProcessing
                     }
                 }
 
-                LoggerService.LogInformation($"   ✅ {duplicateCount} duplicate row(s) flagged");
+                LoggerService.LogInformation(
+                    $"   ✅ {duplicateCount} duplicate row(s) flagged across all groups");
+
+
                 // Transform Date of Birth column
                 TransformDates(records);
 

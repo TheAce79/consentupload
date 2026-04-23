@@ -105,37 +105,70 @@ namespace CsvProcessing
         /// duplicate group so the robot never searches PHIS for the same person twice.
         /// Call this once after <see cref="ProcessRawCsv"/> and before Phase 1 starts.
         /// </summary>
+        /// <summary>
+        /// Copies ClientId, ClientIdStatus, and BestMatch from the primary (non-duplicate)
+        /// record to all duplicate rows that share the same normalised Name + DOB key.
+        ///
+        /// Handles all primary outcomes:
+        ///   • Found (1)            → duplicate gets the ClientId + status 1
+        ///   • NeedsManualReview(2) → duplicate gets the BestMatch hint + status 2
+        ///   • NotProcessed (0)     → primary not yet searched — nothing copied yet
+        /// </summary>
+        /// 
+        /// <summary>
+        /// For every duplicate group (IsDuplicate=true), finds the row that was already
+        /// searched (ClientIdStatus != NotProcessed) and copies its ClientId, ClientIdStatus,
+        /// and BestMatch to every other row in the same Name+DOB group that is still pending.
+        /// </summary>
         public int AssignClientIdsFromDuplicates()
         {
             var students = ReadAll();
             int assigned = 0;
 
-            // Build a lookup: normalised key → ClientId of the primary (non-duplicate) record
-            var primaryClientIds = students
-                .Where(s => !s.IsDuplicate && !string.IsNullOrWhiteSpace(s.ClientId))
+            // Group ALL duplicate rows by their normalised Name+DOB key
+            var duplicateGroups = students
+                .Where(s => s.IsDuplicate)
                 .GroupBy(s => BuildDuplicateKey(s))
-                .ToDictionary(g => g.Key, g => g.First().ClientId);
+                .ToList();
 
-            foreach (var student in students.Where(s => s.IsDuplicate && string.IsNullOrWhiteSpace(s.ClientId)))
+            foreach (var group in duplicateGroups)
             {
-                string key = BuildDuplicateKey(student);
-                if (primaryClientIds.TryGetValue(key, out var clientId))
+                // The representative is the row that was searched (status != NotProcessed)
+                var searched = group.FirstOrDefault(
+                    s => s.ClientIdStatus != ClientIdStatus.NotProcessed);
+
+                if (searched == null)
+                    continue;   // group not yet searched — nothing to copy
+
+                // Copy result to every OTHER row in the group still pending
+                foreach (var pending in group.Where(
+                    s => s.ClientIdStatus == ClientIdStatus.NotProcessed))
                 {
-                    student.ClientId = clientId;
-                    student.ClientIdStatus = ClientIdStatus.Found;
+                    pending.ClientId = searched.ClientId;
+                    pending.ClientIdStatus = searched.ClientIdStatus;
+                    pending.BestMatch = searched.BestMatch;
                     assigned++;
-                    LoggerService.LogInformation($"   ♻️  Duplicate auto-assigned ClientId {clientId} → {student.FirstName} {student.LastName}");
+
+                    LoggerService.LogInformation(
+                        $"   ♻️  Duplicate synced: {pending.FirstName} {pending.LastName}" +
+                        $" ← ClientId={searched.ClientId}" +
+                        $" Status={searched.ClientIdStatus}" +
+                        (searched.ClientIdStatus == ClientIdStatus.NeedsManualReview
+                            ? $" BestMatch={searched.BestMatch}"
+                            : string.Empty));
                 }
             }
 
             if (assigned > 0)
             {
                 SaveAll(students);
-                LoggerService.LogInformation($"✅ Auto-assigned ClientId to {assigned} duplicate row(s)");
+                LoggerService.LogInformation(
+                    $"✅ Synced {assigned} duplicate row(s) from their searched representative");
             }
 
             return assigned;
         }
+
 
         private static string BuildDuplicateKey(StudentRecord s)
         {

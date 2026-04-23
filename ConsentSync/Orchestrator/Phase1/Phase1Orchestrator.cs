@@ -129,31 +129,43 @@ namespace Orchestrator.Phase1
                     _currentStudentList = allStudents;
                 }
 
-                // ── Step 2: Build search queue — primaries only ───────────────
-                // IsDuplicate rows are ALWAYS excluded: their ClientId will be
-                // copied from the primary after the search loop finishes.
-                var unprocessedStudents = allStudents
-                    .Where(s => !s.IsDuplicate                              // never search duplicates
+                // ── Step 2: Build search queue ────────────────────────────────
+                // a) All non-duplicate unprocessed rows (normal case)
+                var nonDuplicateQueue = allStudents
+                    .Where(s => !s.IsDuplicate
                              && s.ClientIdStatus == ClientIdStatus.NotProcessed)
                     .ToList();
 
-                int skippedDuplicates = allStudents.Count(s => s.IsDuplicate);
-                if (skippedDuplicates > 0)
-                    LoggerService.LogInformation($"   ⏭️  {skippedDuplicates} duplicate row(s) excluded from PHIS search — ClientId will be copied after");
+                // b) For duplicate groups: pick exactly ONE representative per group
+                //    (the first row whose ClientIdStatus is still NotProcessed).
+                //    After the search, AssignClientIdsFromDuplicates copies the result
+                //    to every other row in the same Name+DOB group.
+                var duplicateRepresentatives = allStudents
+                    .Where(s => s.IsDuplicate
+                             && s.ClientIdStatus == ClientIdStatus.NotProcessed)
+                    .GroupBy(s => BuildSearchKey(s))
+                    .Select(g => g.First())   // one search per group
+                    .ToList();
 
-                if (unprocessedStudents.Count == 0)
-                {
-                    LoggerService.LogInformation("\n✅ All primary students already processed!");
-                    // Still run the copy in case duplicates are pending
-                    int lateAssign = _csvRepo.AssignClientIdsFromDuplicates();
-                    if (lateAssign > 0)
-                    {
-                        LoggerService.LogInformation($"   ♻️  Copied ClientId to {lateAssign} pending duplicate(s)");
-                        result.DuplicatesAssigned = lateAssign;
-                    }
-                    DisplaySummary(result);
-                    return result;
-                }
+                var unprocessedStudents = nonDuplicateQueue
+                    .Concat(duplicateRepresentatives)
+                    .ToList();
+
+                int skippedDuplicates = allStudents.Count(s =>
+                    s.IsDuplicate && s.ClientIdStatus == ClientIdStatus.NotProcessed)
+                    - duplicateRepresentatives.Count;
+
+                if (skippedDuplicates > 0)
+                    LoggerService.LogInformation(
+                        $"   ⏭️  {skippedDuplicates} duplicate row(s) skipped — " +
+                        $"result will be copied after their representative is searched");
+
+                if (duplicateRepresentatives.Count > 0)
+                    LoggerService.LogInformation(
+                        $"   🔍 {duplicateRepresentatives.Count} duplicate group(s) — " +
+                        $"searching first occurrence of each");
+
+
 
                 LoggerService.LogInformation($"\n📊 {unprocessedStudents.Count} primary student(s) to search on PHIS");
                 result.ToProcessCount = unprocessedStudents.Count;
@@ -251,6 +263,28 @@ namespace Orchestrator.Phase1
 
 
         #region Student Processing
+
+
+        /// <summary>
+        /// Accent-free, uppercase key used to group duplicate rows.
+        /// Must match the logic in <see cref="StudentCsvRepository.BuildDuplicateKey"/>.
+        /// </summary>
+        private static string BuildSearchKey(StudentRecord s)
+        {
+            static string Norm(string v)
+            {
+                if (string.IsNullOrWhiteSpace(v)) return string.Empty;
+                var sb = new StringBuilder();
+                foreach (var c in v.Normalize(NormalizationForm.FormD))
+                    if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) !=
+                        System.Globalization.UnicodeCategory.NonSpacingMark)
+                        sb.Append(c);
+                return sb.ToString().Normalize(NormalizationForm.FormC)
+                         .ToUpperInvariant()
+                         .Replace(" ", "").Replace("-", "").Replace("'", "");
+            }
+            return $"{Norm(s.LastName)}_{Norm(s.FirstName)}_{s.DateOfBirth.Trim()}";
+        }
 
         /// <summary>
         /// Process all unprocessed students
