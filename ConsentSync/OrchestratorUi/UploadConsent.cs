@@ -86,6 +86,11 @@ namespace OrchestratorUi
             if (cb_Grade.SelectedIndex == -1)
                 cb_Grade.SelectedIndex = 0;
 
+
+            // ── Show bt_test only when Phase3:Testing:Enabled = true ──
+            var config = ConfigurationService.GetConfiguration();
+            bt_test.Visible = config.GetValue<bool>("Phase3:Testing:Enabled");
+
             RefreshChromeButtonState();
         }
 
@@ -770,6 +775,11 @@ namespace OrchestratorUi
 
             try
             {
+
+                // ── Guard: Phase 1 must be complete ──────────────────
+                if (!await CheckAllRowsProcessedAsync("PDF Validation"))
+                    return;
+
                 // ── Duplicate pre-check ───────────────────────────────
                 if (!await CheckUnresolvedDuplicatesAsync("PDF Validation"))
                     return;
@@ -858,6 +868,10 @@ namespace OrchestratorUi
 
             try
             {
+                // ── Guard: Phase 1 must be complete ──────────────────
+                if (!await CheckAllRowsProcessedAsync("PDF Validation"))
+                    return;
+
                 if (!await CheckUnresolvedDuplicatesAsync("Generate Upload CSV"))
                     return;
 
@@ -994,6 +1008,10 @@ namespace OrchestratorUi
 
             try
             {
+                // ── Guard: Phase 1 must be complete ──────────────────
+                if (!await CheckAllRowsProcessedAsync("PDF Validation"))
+                    return;
+
                 // ── Step 1: Extract (move) FileRose PDFs ──────────────────────
                 LoggerService.LogInformation("\n" + new string('═', 60));
                 LoggerService.LogInformation("🌹 STEP 1 — FileRose Extraction");
@@ -1207,6 +1225,10 @@ namespace OrchestratorUi
 
             try
             {
+                // ── Guard: Phase 1 must be complete ──────────────────
+                if (!await CheckAllRowsProcessedAsync("PDF Validation"))
+                    return;
+
                 // ── Duplicate pre-check ───────────────────────────────
                 if (!await CheckUnresolvedDuplicatesAsync("Upload to PHIS"))
                 {
@@ -1629,7 +1651,86 @@ namespace OrchestratorUi
             return name.Trim();
         }
 
+        private void bt_test_Click(object sender, EventArgs e)
+        {
+            var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+            var testPath = bulkConfig.GetOutputReadyPath();   // change to any folder you want to test
 
+            LoggerService.LogInformation($"\n🧪 Running test on: {testPath}");
+            Task.Run(() => TestUtils.ReadPdfName(testPath));
+        }
+
+
+
+        // ── Guard: all rows must be processed before Phase 2 or Phase 3 ──
+        /// <summary>
+        /// Returns <c>true</c> if it is safe to proceed (no NotProcessed rows remain).
+        /// Shows a detailed MessageBox and logs if any rows are still at
+        /// <see cref="ClientIdStatus.NotProcessed"/> (= 0).
+        /// </summary>
+        private async Task<bool> CheckAllRowsProcessedAsync(string callerLabel)
+        {
+            try
+            {
+                var config = ConfigurationService.GetConfiguration();
+                var repo = new StudentCsvRepository(config);
+
+                var allStudents = await Task.Run(() => repo.ReadAll());
+
+                var notProcessed = allStudents
+                    .Where(s => s.ClientIdStatus == ConsentSyncCore.Models.ClientIdStatus.NotProcessed)
+                    .ToList();
+
+                if (notProcessed.Count == 0)
+                    return true;    // ✅ all rows have been actioned
+
+                // ── Log ───────────────────────────────────────────────────
+                LoggerService.LogWarning($"\n⚠️  {callerLabel} blocked — {notProcessed.Count} row(s) still have ClientIdStatus = NotProcessed (0).");
+                LoggerService.LogWarning(new string('─', 60));
+
+                var preview = notProcessed.Take(10).ToList();
+                foreach (var s in preview)
+                    LoggerService.LogWarning($"   • {s.LastName}, {s.FirstName}  (DOB: {s.DateOfBirth})");
+
+                if (notProcessed.Count > 10)
+                    LoggerService.LogWarning($"   … and {notProcessed.Count - 10} more — see full CSV.");
+
+                LoggerService.LogWarning(new string('─', 60));
+
+                // ── Message box ───────────────────────────────────────────
+                var shown = preview
+                    .Select(s => $"  • {s.LastName}, {s.FirstName}  (DOB: {s.DateOfBirth})")
+                    .ToList();
+
+                if (notProcessed.Count > 10)
+                    shown.Add($"  … and {notProcessed.Count - 10} more — see log panel");
+
+                MessageBox.Show(
+                    $"⚠️  {callerLabel} cannot run yet.\n\n" +
+                    $"  {notProcessed.Count} student(s) still have ClientIdStatus = NotProcessed.\n\n" +
+                    "All rows must be either:\n" +
+                    "  ✅  Found            — Client ID located on PHIS\n" +
+                    "  ⚠️   NeedsManualReview — reviewed and filled in manually\n\n" +
+                    "Unprocessed students:\n" +
+                    string.Join(Environment.NewLine, shown) +
+                    "\n\nNext steps:\n" +
+                    "  1. Click  🔍 Search Client IDs on PHIS  (Phase 1).\n" +
+                    "  2. For any remaining NeedsManualReview rows, open\n" +
+                    "     immunizations_processed.csv and fill in the ClientId.\n" +
+                    "  3. Re-run this step.",
+                    $"{callerLabel} — Phase 1 Incomplete",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal — let the caller proceed rather than silently blocking
+                LoggerService.LogWarning($"⚠️  Could not verify ClientIdStatus rows: {ex.Message}");
+                return true;
+            }
+        }
     }
 
     internal static class ControlExtensions

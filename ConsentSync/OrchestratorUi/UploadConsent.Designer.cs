@@ -48,6 +48,7 @@ namespace OrchestratorUi
             gb_UploadPhis = new GroupBox();
             pb_Phase3 = new ProgressBar();
             lbl_Phase3Progress = new Label();
+            bt_test = new Button();
             grpConfig.SuspendLayout();
             gb_Normalise.SuspendLayout();
             gb_Phase1.SuspendLayout();
@@ -121,6 +122,7 @@ namespace OrchestratorUi
             // 
             // grpConfig
             // 
+            grpConfig.Controls.Add(bt_test);
             grpConfig.Controls.Add(lb_Dir);
             grpConfig.Controls.Add(txt_BaseDir);
             grpConfig.Controls.Add(btn_BrowseDir);
@@ -381,6 +383,19 @@ namespace OrchestratorUi
             lbl_Phase3Progress.TabIndex = 2;
             lbl_Phase3Progress.TextAlign = ContentAlignment.MiddleCenter;
             // 
+            // bt_test
+            // 
+            bt_test.BackColor = Color.SeaGreen;
+            bt_test.FlatStyle = FlatStyle.Flat;
+            bt_test.ForeColor = Color.White;
+            bt_test.Location = new Point(6, 241);
+            bt_test.Name = "bt_test";
+            bt_test.Size = new Size(98, 32);
+            bt_test.TabIndex = 12;
+            bt_test.Text = "Test";
+            bt_test.UseVisualStyleBackColor = false;
+            bt_test.Click += bt_test_Click;
+            // 
             // UploadConsent
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
@@ -435,5 +450,6 @@ namespace OrchestratorUi
         private Button bt_AppendFileRose;
         private ProgressBar pb_Phase3;
         private Label lbl_Phase3Progress;
+        private Button bt_test;
     }
 }

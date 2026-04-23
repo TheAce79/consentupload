@@ -184,6 +184,9 @@ namespace ConsentSyncCore.Services.Pdf
         /// </summary>
         /// 
 
+
+
+
         private static (string? firstName, string? lastName) ExtractNamesFromWords(
     List<UglyToad.PdfPig.Content.Word> words,
     PdfExtractionConfig config)
@@ -212,10 +215,11 @@ namespace ConsentSyncCore.Services.Pdf
                             {
                                 LoggerService.LogInformation($"  Found last name pattern ({pattern.Language}) at index {i}");
                                 int startIndex = i + pattern.Words.Length;
+                                int maxIndex = startIndex + config.SearchRange - 1;
 
-                                for (int j = startIndex; j < words.Count && j < startIndex + config.SearchRange; j++)
+                                // Find the first valid word, then collect all consecutive valid words
+                                for (int j = startIndex; j < words.Count && j <= maxIndex; j++)
                                 {
-                                    // ✅ FormC normalization — handles decomposed accents from PDF encoding
                                     string candidateWord = words[j].Text
                                         .Normalize(NormalizationForm.FormC)
                                         .Trim();
@@ -224,9 +228,10 @@ namespace ConsentSyncCore.Services.Pdf
 
                                     if (IsValidNameCandidate(candidateWord, config))
                                     {
-                                        lastName = candidateWord;
-                                        lastNameEndIndex = j;
-                                        LoggerService.LogInformation($"  ✅ Last Name: {lastName} at index {j}");
+                                        var (name, lastIdx) = CollectNameWords(words, j, maxIndex, -1, config);
+                                        lastName = name;
+                                        lastNameEndIndex = lastIdx;
+                                        LoggerService.LogInformation($"  ✅ Last Name: {lastName} (indices {j}–{lastIdx})");
                                         break;
                                     }
                                 }
@@ -248,8 +253,9 @@ namespace ConsentSyncCore.Services.Pdf
                                 {
                                     LoggerService.LogInformation($"  Found first name pattern ({pattern.Language}) at index {i}");
                                     int startIndex = i + pattern.Words.Length;
+                                    int maxIndex = startIndex + config.SearchRange - 1;
 
-                                    for (int j = startIndex; j < words.Count && j < startIndex + config.SearchRange; j++)
+                                    for (int j = startIndex; j < words.Count && j <= maxIndex; j++)
                                     {
                                         if (j == lastNameEndIndex)
                                         {
@@ -257,7 +263,6 @@ namespace ConsentSyncCore.Services.Pdf
                                             continue;
                                         }
 
-                                        // ✅ FormC normalization — handles decomposed accents from PDF encoding
                                         string candidateWord = words[j].Text
                                             .Normalize(NormalizationForm.FormC)
                                             .Trim();
@@ -266,9 +271,10 @@ namespace ConsentSyncCore.Services.Pdf
 
                                         if (IsValidNameCandidate(candidateWord, config))
                                         {
-                                            firstName = candidateWord;
-                                            firstNameEndIndex = j;
-                                            LoggerService.LogInformation($"  ✅ First Name: {firstName} at index {j}");
+                                            var (name, lastIdx) = CollectNameWords(words, j, maxIndex, lastNameEndIndex, config);
+                                            firstName = name;
+                                            firstNameEndIndex = lastIdx;
+                                            LoggerService.LogInformation($"  ✅ First Name: {firstName} (indices {j}–{lastIdx})");
                                             break;
                                         }
                                     }
@@ -293,14 +299,13 @@ namespace ConsentSyncCore.Services.Pdf
 
                     for (int i = 0; i < words.Count - 1; i++)
                     {
-                        // ✅ Normalize the keyword word too for consistent comparison
                         string currentWord = words[i].Text.Normalize(NormalizationForm.FormC);
 
                         if (lastName == null && ContainsAnyKeyword(currentWord, config.LastNameKeywords))
                         {
-                            for (int j = i + 1; j < words.Count && j < i + config.SearchRange; j++)
+                            int maxIndex = i + config.SearchRange;
+                            for (int j = i + 1; j < words.Count && j <= maxIndex; j++)
                             {
-                                // ✅ FormC normalization
                                 string candidateWord = words[j].Text
                                     .Normalize(NormalizationForm.FormC)
                                     .Trim();
@@ -309,9 +314,10 @@ namespace ConsentSyncCore.Services.Pdf
 
                                 if (IsValidNameCandidate(candidateWord, config))
                                 {
-                                    lastName = candidateWord;
-                                    lastNameEndIndex = j;
-                                    LoggerService.LogInformation($"  -> Last Name: {lastName} at index {j}");
+                                    var (name, lastIdx) = CollectNameWords(words, j, maxIndex, -1, config);
+                                    lastName = name;
+                                    lastNameEndIndex = lastIdx;
+                                    LoggerService.LogInformation($"  -> Last Name: {lastName} (indices {j}–{lastIdx})");
                                     break;
                                 }
                             }
@@ -326,11 +332,11 @@ namespace ConsentSyncCore.Services.Pdf
                                 continue;
                             }
 
-                            for (int j = i + 1; j < words.Count && j < i + config.SearchRange; j++)
+                            int maxIndex = i + config.SearchRange;
+                            for (int j = i + 1; j < words.Count && j <= maxIndex; j++)
                             {
                                 if (j == lastNameEndIndex) continue;
 
-                                // ✅ FormC normalization
                                 string candidateWord = words[j].Text
                                     .Normalize(NormalizationForm.FormC)
                                     .Trim();
@@ -339,8 +345,10 @@ namespace ConsentSyncCore.Services.Pdf
 
                                 if (IsValidNameCandidate(candidateWord, config))
                                 {
-                                    firstName = candidateWord;
-                                    LoggerService.LogInformation($"  -> First Name: {firstName} at index {j}");
+                                    var (name, lastIdx) = CollectNameWords(words, j, maxIndex, lastNameEndIndex, config);
+                                    firstName = name;
+                                    firstNameEndIndex = lastIdx;
+                                    LoggerService.LogInformation($"  -> First Name: {firstName} (indices {j}–{lastIdx})");
                                     break;
                                 }
                             }
@@ -691,6 +699,41 @@ namespace ConsentSyncCore.Services.Pdf
                 return true;
 
             return false;
+        }
+
+
+
+        /// <summary>
+        /// Collects consecutive valid name words starting at <paramref name="startIndex"/>,
+        /// stopping as soon as a word fails <see cref="IsValidNameCandidate"/>.
+        /// Returns the joined multi-part name (e.g. "Thomas Raymond") and the last used index.
+        /// </summary>
+        private static (string name, int lastIndex) CollectNameWords(
+            List<UglyToad.PdfPig.Content.Word> words,
+            int startIndex,
+            int maxIndex,
+            int skipIndex,
+            PdfExtractionConfig config)
+        {
+            var parts = new List<string>();
+            int lastIndex = startIndex - 1;
+
+            for (int j = startIndex; j < words.Count && j <= maxIndex; j++)
+            {
+                if (j == skipIndex) break;
+
+                string candidate = words[j].Text
+                    .Normalize(NormalizationForm.FormC)
+                    .Trim();
+
+                if (!IsValidNameCandidate(candidate, config))
+                    break;          // stop on first invalid word — we've left the name cell
+
+                parts.Add(candidate);
+                lastIndex = j;
+            }
+
+            return (string.Join(" ", parts), lastIndex);
         }
 
         #endregion

@@ -442,9 +442,14 @@ namespace Orchestrator.Phase2
             return true;
         }
 
-        /// <summary>
-        /// Parses a normal bulk-PDF filename: <c>{index}_{LastName}_{FirstName}[_...].pdf</c>
+
+        // <summary>
+        /// Parses a bulk-PDF filename: <c>{index}_{LastName}_{FirstName}[_...].pdf</c>
         /// The leading index segment is discarded — it is a page number, not a ClientId.
+        /// '~' within name parts is decoded back to a space so that compound names
+        /// (De~Cruz → De Cruz, Marie~Anne → Marie Anne) round-trip correctly.
+        /// Genuine hyphens (De-Cruz, Jean-Pierre) are preserved as-is.
+        /// Old files that were written without '~' are unaffected (Replace is a no-op).
         /// </summary>
         private (string firstName, string lastName) ExtractNamesFromBulkFilename(string fileName)
         {
@@ -452,15 +457,26 @@ namespace Orchestrator.Phase2
             {
                 var stem = Path.GetFileNameWithoutExtension(fileName);
 
-                if (stem.EndsWith("_consent", StringComparison.OrdinalIgnoreCase))
-                    stem = stem[..^8];
+                // ✅ Strip the consent suffix using config value — handles any suffix, including
+                //    ones that contain underscores (e.g. "school_consent")
+                var consentSuffix = ConfigurationService.GetBulkPdfExtractionConfig().ConsentSuffix;
+                string suffixToken = $"_{consentSuffix}";
+
+                if (stem.EndsWith(suffixToken, StringComparison.OrdinalIgnoreCase))
+                    stem = stem[..^suffixToken.Length];
 
                 var parts = stem.Split('_');
 
+                // Format: {index}_{LastName}_{FirstName}.pdf
+                // parts[0] = page index (discarded)
+                // parts[1] = lastName  — '~' decoded to space (e.g. De~Cruz → De Cruz)
+                // parts[2..] = firstName parts joined with space; '~' decoded to space
                 if (parts.Length >= 3)
                 {
-                    var lastName = parts[1];
-                    var firstName = parts[2];
+                    // ✅ Decode '~' → ' ' to restore compound names written by FormatFileName
+                    //    Genuine hyphens (De-Cruz, Jean-Pierre) are left untouched
+                    var lastName = parts[1].Replace('~', ' ');
+                    var firstName = string.Join(" ", parts[2..]).Replace('~', ' ');
 
                     if (!string.IsNullOrWhiteSpace(lastName) &&
                         !string.IsNullOrWhiteSpace(firstName))
@@ -477,6 +493,7 @@ namespace Orchestrator.Phase2
 
             return (string.Empty, string.Empty);
         }
+
 
         // ─────────────────────────────────────────────────────────────────────
         // Name matching

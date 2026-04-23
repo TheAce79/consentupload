@@ -431,10 +431,16 @@ namespace ConsentSyncCore.Services.Pdf
 
                              LoggerService.LogInformation($"   ⚠️  DUPLICATE #{occurrence}: {lastName}_{firstName} → 5_Duplicate\\");
 
+
                             // ── Create / reuse per-student subfolder ──────────────────────
                             string duplicateSubFolder = GetOrCreateDuplicateSubFolder(lastName, firstName);
-                            string duplicateFileName = MakeSafeFileName($"{pageIndex}_{lastName}_{firstName}_{occurrence}_consent.pdf");
+                            // ✅ Encode spaces as '~' — same convention as FormatFileName
+                            string safeLastName = lastName.Replace(' ', '~');
+                            string safeFirstName = firstName.Replace(' ', '~');
+                            string duplicateFileName = MakeSafeFileName(
+                                $"{pageIndex}_{safeLastName}_{safeFirstName}_{occurrence}_consent.pdf");
                             string duplicatePath = Path.Combine(duplicateSubFolder, duplicateFileName);
+
 
                             File.Move(tempFilePath, duplicatePath, overwrite: true);
                              LoggerService.LogInformation($"   📄 Moved duplicate → {duplicateFileName}");
@@ -825,20 +831,35 @@ namespace ConsentSyncCore.Services.Pdf
 
         #region Helper Methods
 
+
         /// <summary>
-        /// Format filename according to naming convention: {ID}_{LastName}_{FirstName}_consent.pdf
+        /// Format filename: {ID}_{LastName}_{FirstName}_consent.pdf
+        /// Spaces within name parts are encoded as '~' so that '_' is the sole field
+        /// delimiter and genuine hyphens (De-Cruz, Jean-Pierre) are preserved as-is.
+        /// Phase 2 decodes '~' back to ' '.
+        /// Examples:
+        ///   Larochelle / Ève          →  205_Larochelle_Ève_consent.pdf
+        ///   De Cruz / Marie Anne      →  1_De~Cruz_Marie~Anne_consent.pdf
+        ///   De-Cruz / Jean-Pierre     →  3_De-Cruz_Jean-Pierre_consent.pdf
+        ///   De-la Cruz / O Brien      →  7_De-la~Cruz_O~Brien_consent.pdf
         /// </summary>
         private string FormatFileName(int id, string lastName, string firstName, int? duplicateSuffix = null)
         {
-            // ✅ Use ConsentSuffix from config instead of hardcoded "consent"
             string suffix = _bulkConfig.ConsentSuffix;
 
+            // ✅ Encode spaces as '~' — tilde never appears in names and is a valid
+            //    filename character on Windows, macOS and Linux.
+            //    Genuine hyphens (De-Cruz, Jean-Pierre) are left untouched.
+            string safeLastName = lastName.Replace(' ', '~');
+            string safeFirstName = firstName.Replace(' ', '~');
+
             string baseName = duplicateSuffix.HasValue
-                ? $"{id}_{lastName}_{firstName}_{duplicateSuffix}_{suffix}"
-                : $"{id}_{lastName}_{firstName}_{suffix}";
+                ? $"{id}_{safeLastName}_{safeFirstName}_{duplicateSuffix}_{suffix}"
+                : $"{id}_{safeLastName}_{safeFirstName}_{suffix}";
 
             return MakeSafeFileName(baseName + ".pdf");
         }
+
 
         private string CleanAndCapitalizeName(string name)
         {
