@@ -26,6 +26,15 @@ namespace Orchestrator.Phase2
         private readonly PhisWorkspaceConfig _phisWorkspace;
         private readonly ILogger<Phase2Orchestrator> _logger;
 
+
+        // ✅ Register Windows-1252 and other legacy encodings for PdfPig
+        // Must run before any PDF is opened — static ctor guarantees this.
+        static Phase2Orchestrator()
+        {
+            System.Text.Encoding.RegisterProvider(
+                System.Text.CodePagesEncodingProvider.Instance);
+        }
+
         public Phase2Orchestrator(IConfiguration? config = null)
         {
             _config = config ?? ConfigurationService.GetConfiguration();
@@ -475,14 +484,18 @@ namespace Orchestrator.Phase2
 
 
         private (ValidationRecord? record, double score) FindBestMatchingValidationRecord(
-    string pdfFirstName,
-    string pdfLastName,
-    List<ValidationRecord> records)
+            string pdfFirstName,
+            string pdfLastName,
+            List<ValidationRecord> records)
         {
-            // Pass 1: exact match — normal order
+            // Normalize extracted names once — handles FormD/FormC differences from PdfPig
+            string normPdfFirst = RemoveAccents(pdfFirstName.Trim().ToUpperInvariant());
+            string normPdfLast = RemoveAccents(pdfLastName.Trim().ToUpperInvariant());
+
+            // Pass 1: exact match — normal order (accent-normalized)
             var exactMatch = records.FirstOrDefault(r =>
-                r.FirstName.Equals(pdfFirstName, StringComparison.OrdinalIgnoreCase) &&
-                r.LastName.Equals(pdfLastName, StringComparison.OrdinalIgnoreCase));
+                RemoveAccents(r.FirstName.Trim().ToUpperInvariant()) == normPdfFirst &&
+                RemoveAccents(r.LastName.Trim().ToUpperInvariant()) == normPdfLast);
 
             if (exactMatch != null)
             {
@@ -490,10 +503,10 @@ namespace Orchestrator.Phase2
                 return (exactMatch, 100.0);
             }
 
-            // Pass 2: exact match — swapped order
+            // Pass 2: exact match — swapped order (accent-normalized)
             var swappedExact = records.FirstOrDefault(r =>
-                r.FirstName.Equals(pdfLastName, StringComparison.OrdinalIgnoreCase) &&
-                r.LastName.Equals(pdfFirstName, StringComparison.OrdinalIgnoreCase));
+                RemoveAccents(r.FirstName.Trim().ToUpperInvariant()) == normPdfLast &&
+                RemoveAccents(r.LastName.Trim().ToUpperInvariant()) == normPdfFirst);
 
             if (swappedExact != null)
             {
@@ -530,30 +543,22 @@ namespace Orchestrator.Phase2
             }
 
             // Pass 4: compound / double-barrel surname
-            // The PDF filename encodes a compound surname as two underscore-separated tokens
-            // (e.g. "Puente_Delgadillo"), making lastName="Puente" firstName="Delgadillo".
-            // Try reassembling both orderings and check whether either is fully contained
-            // within a student's normalised full name in the CSV.
             LoggerService.LogInformation(
                 "         Trying compound-surname pass (double-barrel names)...");
 
-            string normExtractedA = RemoveAccents($"{pdfLastName}{pdfFirstName}".ToUpperInvariant());   // PuenteDelgadillo
-            string normExtractedB = RemoveAccents($"{pdfFirstName}{pdfLastName}".ToUpperInvariant());   // DelgadilloPuente
+            string normExtractedA = RemoveAccents($"{pdfLastName}{pdfFirstName}".ToUpperInvariant());
+            string normExtractedB = RemoveAccents($"{pdfFirstName}{pdfLastName}".ToUpperInvariant());
 
             var compoundMatch = records
                 .Select(r =>
                 {
-                    // Collapse the student's full name to a single accent-free uppercase string
                     string normCsv = RemoveAccents(
                         $"{r.FirstName}{r.LastName}".ToUpperInvariant().Replace(" ", "").Replace("-", ""));
 
-                    // Both extracted tokens must appear inside the CSV full name (order-independent)
                     string normPart1 = RemoveAccents(pdfLastName.ToUpperInvariant());
                     string normPart2 = RemoveAccents(pdfFirstName.ToUpperInvariant());
 
                     bool containsBoth = normCsv.Contains(normPart1) && normCsv.Contains(normPart2);
-
-                    // Score: 90 for an exact compound hit, so it stays above the 85 threshold
                     double score = containsBoth ? 90.0 : 0.0;
                     return new { Record = r, Score = score };
                 })
