@@ -1,18 +1,19 @@
-﻿using Docnet.Core;
+﻿using ConsentSyncCore.Services.Configuration;
+using ConsentSyncCore.Services.ConfigurationPoco;
+using Docnet.Core;
 using Docnet.Core.Models;
 using Microsoft.Extensions.Configuration;
+using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Tesseract;
 using UglyToad.PdfPig;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Processing;
-using ConsentSyncCore.Services.ConfigurationPoco;
-using ConsentSyncCore.Services.Configuration;
 
 namespace ConsentSyncCore.Services.Pdf
 {
@@ -33,9 +34,11 @@ namespace ConsentSyncCore.Services.Pdf
             _config = ConfigurationService.GetPdfExtractionConfig();
         }
 
-      
+
 
         #region Public API
+
+
 
         /// <summary>
         /// Process a single PDF and extract first name, last name, and page count
@@ -43,7 +46,7 @@ namespace ConsentSyncCore.Services.Pdf
         /// </summary>
         public static (string firstName, string lastName, int pageCount) ProcessSinglePdf(
             string pdfFilePath,
-            bool debugOcr = false,
+            bool debugOcr = true,
             string? debugOutputDir = null)
         {
             if (string.IsNullOrEmpty(pdfFilePath))
@@ -66,22 +69,15 @@ namespace ConsentSyncCore.Services.Pdf
                 Directory.CreateDirectory(debugFolder);
             }
 
-            // Skip "Scanned_" files
-            if (fileName.StartsWith("Scanned_", StringComparison.OrdinalIgnoreCase))
-            {
-                 LoggerService.LogInformation($"Skipping {fileName} (already scanned)");
-                return ("Unknown", "Unknown", 0);
-            }
-
             try
             {
-                 LoggerService.LogInformation($"\n--- Processing: {fileName} ---");
+                LoggerService.LogInformation($"\n--- Processing: {fileName} ---");
 
                 using var document = PdfDocument.Open(pdfFilePath);
 
                 if (document.NumberOfPages < 1)
                 {
-                     LoggerService.LogInformation("  No pages found in PDF");
+                    LoggerService.LogInformation("  No pages found in PDF");
                     return ("Unknown", "Unknown", 0);
                 }
 
@@ -89,7 +85,7 @@ namespace ConsentSyncCore.Services.Pdf
                 var words = page.GetWords().ToList();
                 int pageCount = document.NumberOfPages;
 
-                 LoggerService.LogInformation($"  Total words found via PdfPig: {words.Count}");
+                LoggerService.LogInformation($"  Total words found via PdfPig: {words.Count}");
 
                 string? firstName = null;
                 string? lastName = null;
@@ -97,43 +93,155 @@ namespace ConsentSyncCore.Services.Pdf
                 // Try text extraction first (faster)
                 if (words.Count == 0)
                 {
-                     LoggerService.LogInformation("  PDF is scanned - using OCR extraction...");
-                    var ocrText = ExtractTextWithOCR(pdfFilePath, 1, fileName, debugOcr, debugFolder, config);
+                    LoggerService.LogInformation("  PDF is scanned - using OCR extraction...");
+
+                    // ── Pass 1: Full Page OCR ──
+                    var ocrText = ExtractTextWithOCR(pdfFilePath, 1, fileName, debugOcr, debugFolder, config, false);
 
                     if (!string.IsNullOrEmpty(ocrText))
                     {
-                         LoggerService.LogInformation($"  OCR extracted {ocrText.Length} characters");
-
-                        if (debugOcr)
-                        {
-                            var debugPath = Path.Combine(debugFolder, $"OCR_DEBUG_{fileName}.txt");
-                            File.WriteAllText(debugPath, ocrText);
-                             LoggerService.LogInformation($"  OCR text saved to: {debugPath}");
-                        }
+                        LoggerService.LogInformation($"  OCR extracted {ocrText.Length} characters");
+                        if (debugOcr) File.WriteAllText(Path.Combine(debugFolder, $"OCR_DEBUG_{fileName}.txt"), ocrText);
 
                         (firstName, lastName) = ExtractNamesFromOCRText(ocrText, config);
                     }
-                    else
+
+                    // ── Pass 2: Fallback (Crop to Name Area) ──
+                    if (firstName == null || lastName == null)
                     {
-                         LoggerService.LogInformation("  OCR extraction failed or returned empty text");
+                        LoggerService.LogInformation("  Names not found on full page. Retrying with cropped name area...");
+
+                        var croppedOcrText = ExtractTextWithOCR(pdfFilePath, 1, fileName, debugOcr, debugFolder, config, true);
+
+                        if (!string.IsNullOrEmpty(croppedOcrText))
+                        {
+                            LoggerService.LogInformation($"  Cropped OCR extracted {croppedOcrText.Length} characters");
+                            if (debugOcr) File.WriteAllText(Path.Combine(debugFolder, $"OCR_DEBUG_{fileName}_CROPPED.txt"), croppedOcrText);
+
+                            var (cropFirst, cropLast) = ExtractNamesFromOCRText(croppedOcrText, config);
+
+                            // Only overwrite if it actually found something
+                            if (cropLast != null) lastName = cropLast;
+                            if (cropFirst != null) firstName = cropFirst;
+                        }
                     }
                 }
                 else
                 {
-                     LoggerService.LogInformation("  PDF has extractable text - using direct extraction");
+                    LoggerService.LogInformation("  PDF has extractable text - using direct extraction");
                     (firstName, lastName) = ExtractNamesFromWords(words, config);
                 }
 
-                 LoggerService.LogInformation($"  Final Result: {firstName ?? "Unknown"} {lastName ?? "Unknown"} | Pages: {pageCount}");
+                LoggerService.LogInformation($"  Final Result: {firstName ?? "Unknown"} {lastName ?? "Unknown"} | Pages: {pageCount}");
 
                 return (firstName ?? "Unknown", lastName ?? "Unknown", pageCount);
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"  ERROR processing {fileName}: {ex.Message}");
+                LoggerService.LogInformation($"  ERROR processing {fileName}: {ex.Message}");
                 return ("Error", "Error", 0);
             }
         }
+
+
+
+        /// <summary>
+        /// Process a single scanned PDF using OCR and extract first name, last name, date of birth, and page count
+        /// Returns: (firstName, lastName, dateOfBirth, pageCount)
+        /// </summary>
+        public static (string firstName, string lastName, string dateOfBirth, int pageCount) ProcessSingleScannedPdf(
+            string pdfFilePath,
+            bool debugOcr = true,
+            string? debugOutputDir = null)
+        {
+            if (string.IsNullOrEmpty(pdfFilePath))
+            {
+                throw new ArgumentException("PDF file path cannot be null or empty.", nameof(pdfFilePath));
+            }
+
+            if (!File.Exists(pdfFilePath))
+            {
+                throw new FileNotFoundException($"PDF file not found: {pdfFilePath}");
+            }
+
+            string fileName = Path.GetFileNameWithoutExtension(pdfFilePath);
+            var config = ConfigurationService.GetPdfExtractionConfig();
+
+            // Use provided debug directory or create temp folder
+            string debugFolder = debugOutputDir ?? Path.Combine(Path.GetTempPath(), "PdfProcessor_Debug");
+            if (debugOcr && !Directory.Exists(debugFolder))
+            {
+                Directory.CreateDirectory(debugFolder);
+            }
+
+            try
+            {
+                LoggerService.LogInformation($"\n--- Processing Scanned PDF: {fileName} ---");
+
+                using var document = PdfDocument.Open(pdfFilePath);
+
+                int pageCount = document.NumberOfPages;
+                if (pageCount < 1)
+                {
+                    LoggerService.LogInformation("  No pages found in PDF");
+                    return ("Unknown", "Unknown", "Unknown", 0);
+                }
+
+                LoggerService.LogInformation("  Starting OCR extraction...");
+
+                string? firstName = null;
+                string? lastName = null;
+                string? dateOfBirth = null;
+
+                // ── Full Page OCR ──
+                var ocrText = ExtractTextWithOCR(pdfFilePath, 1, fileName, debugOcr, debugFolder, config, false);
+
+                if (!string.IsNullOrEmpty(ocrText))
+                {
+                    LoggerService.LogInformation($"  OCR extracted {ocrText.Length} characters");
+                    if (debugOcr) File.WriteAllText(Path.Combine(debugFolder, $"OCR_DEBUG_{fileName}.txt"), ocrText);
+
+                    // Extract DOB using the specific Regex/Encoding handler
+                    (_, _, dateOfBirth) = ExtractDetailsFromOCRText(ocrText);
+
+                    // Extract Names using pattern matching logic
+                    (firstName, lastName) = ExtractNamesFromOCRText(ocrText, config);
+                }
+
+                // ── Pass 2: Fallback (Crop to Name Area) ──
+                if (firstName == null || lastName == null)
+                {
+                    LoggerService.LogInformation("  Names not found on full page. Retrying with cropped name area...");
+
+                    var croppedOcrText = ExtractTextWithOCR(pdfFilePath, 1, fileName, debugOcr, debugFolder, config, true);
+
+                    if (!string.IsNullOrEmpty(croppedOcrText))
+                    {
+                        LoggerService.LogInformation($"  Cropped OCR extracted {croppedOcrText.Length} characters");
+                        if (debugOcr) File.WriteAllText(Path.Combine(debugFolder, $"OCR_DEBUG_{fileName}_CROPPED.txt"), croppedOcrText);
+
+                        var (_, _, cropDob) = ExtractDetailsFromOCRText(croppedOcrText);
+                        var (cropFirst, cropLast) = ExtractNamesFromOCRText(croppedOcrText, config);
+
+                        // Only overwrite if it actually found something
+                        if (cropLast != null) lastName = cropLast;
+                        if (cropFirst != null) firstName = cropFirst;
+                        if (dateOfBirth == null) dateOfBirth = cropDob;
+                    }
+                }
+
+                LoggerService.LogInformation($"  Final Result: {firstName ?? "Unknown"} {lastName ?? "Unknown"} | DOB: {dateOfBirth ?? "Unknown"} | Pages: {pageCount}");
+
+                return (firstName ?? "Unknown", lastName ?? "Unknown", dateOfBirth ?? "Unknown", pageCount);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogInformation($"  ERROR processing {fileName}: {ex.Message}");
+                return ("Error", "Error", "Error", 0);
+            }
+        }
+
+
 
         /// <summary>
         /// Process multiple PDFs in a directory
@@ -389,7 +497,7 @@ namespace ConsentSyncCore.Services.Pdf
         /// <summary>
         /// Extract text using OCR for scanned PDFs
         /// </summary>
-        private static string ExtractTextWithOCR(
+        private static string ExtractTextWithOCRPSM4(
             string pdfPath,
             int pageNumber,
             string fileName,
@@ -445,6 +553,79 @@ namespace ConsentSyncCore.Services.Pdf
             }
         }
 
+
+
+
+
+
+
+        /// <summary>
+        /// Extract text using OCR for scanned PDFs
+        /// </summary>
+        private static string ExtractTextWithOCR(
+            string pdfPath,
+            int pageNumber,
+            string fileName,
+            bool saveDebugImage,
+            string debugOutputDir,
+            PdfExtractionConfig config,
+            bool cropNameArea = false)
+        {
+            string tempImagePath = string.Empty;
+
+            try
+            {
+                var tessDataPath = Path.Combine(AppContext.BaseDirectory, "tessdata");
+
+                if (!Directory.Exists(tessDataPath))
+                {
+                    LoggerService.LogInformation($"    ERROR: tessdata not found at: {tessDataPath}");
+                    return string.Empty;
+                }
+
+                LoggerService.LogInformation($"    Converting PDF page {pageNumber} to image...");
+                tempImagePath = ConvertPdfPageToImage(pdfPath, pageNumber, fileName, saveDebugImage, true, debugOutputDir, cropNameArea);
+
+                if (string.IsNullOrEmpty(tempImagePath) || !File.Exists(tempImagePath))
+                {
+                    LoggerService.LogInformation("    Failed to convert PDF to image");
+                    return string.Empty;
+                }
+
+                LoggerService.LogInformation($"    Running OCR...");
+
+                using var engine = new TesseractEngine(tessDataPath, "fra+eng", EngineMode.Default);
+
+                // When cropped, PSM 4 (Assume a single column of text of variable sizes) 
+                // or PSM 6 often does better at reading trapped table text.
+                engine.SetVariable("tessedit_pageseg_mode", cropNameArea ? "4" : "6");
+
+                using var img = Pix.LoadFromFile(tempImagePath);
+                using var result = engine.Process(img);
+
+                var text = result.GetText();
+                var confidence = result.GetMeanConfidence();
+
+                LoggerService.LogInformation($"    OCR Confidence: {confidence:P}");
+
+                return text;
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogInformation($"    OCR Error: {ex.Message}");
+                return string.Empty;
+            }
+            finally
+            {
+                if (!saveDebugImage && !string.IsNullOrEmpty(tempImagePath) && File.Exists(tempImagePath))
+                {
+                    try { File.Delete(tempImagePath); } catch { }
+                }
+            }
+        }
+
+
+
         /// <summary>
         /// Convert PDF page to image for OCR
         /// </summary>
@@ -454,7 +635,8 @@ namespace ConsentSyncCore.Services.Pdf
             string fileName,
             bool saveForDebug,
             bool detectOrientation,
-            string? debugOutputDir)
+            string? debugOutputDir,
+            bool cropNameArea = false)
         {
             try
             {
@@ -477,17 +659,29 @@ namespace ConsentSyncCore.Services.Pdf
                     int rotationNeeded = DetectOrientation(image);
                     if (rotationNeeded > 0)
                     {
-                         LoggerService.LogInformation($"    Rotating {rotationNeeded}°");
+                        LoggerService.LogInformation($"    Rotating {rotationNeeded}°");
                         image.Mutate(x => x.Rotate(rotationNeeded));
                     }
+                }
+
+                // ✅ Fallback: crop to the top horizontal band where the name table is
+                if (cropNameArea)
+                {
+                    // Crop the specific horizontal region containing the "REINSEIGNEMENTS PERSONNELS" block.
+                    // Assuming the student name is roughly between 10% and 35% down the page height.
+                    int startY = (int)(image.Height * 0.10);
+                    int cropHeight = (int)(image.Height * 0.25);
+                    image.Mutate(x => x.Crop(new Rectangle(0, startY, image.Width, cropHeight)));
+                    LoggerService.LogInformation($"    Cropping image to name area (Y: {startY} to {startY + cropHeight})");
                 }
 
                 string tempPath;
                 if (saveForDebug)
                 {
                     var outputDir = debugOutputDir ?? Path.GetDirectoryName(pdfPath)!;
-                    tempPath = Path.Combine(outputDir, $"DEBUG_IMAGE_{fileName}.png");
-                     LoggerService.LogInformation($"    Debug image: {tempPath}");
+                    string suffix = cropNameArea ? "_CROPPED" : "";
+                    tempPath = Path.Combine(outputDir, $"DEBUG_IMAGE_{fileName}{suffix}.png");
+                    LoggerService.LogInformation($"    Debug image: {tempPath}");
                 }
                 else
                 {
@@ -499,7 +693,7 @@ namespace ConsentSyncCore.Services.Pdf
             }
             catch (Exception ex)
             {
-                 LoggerService.LogInformation($"    Error converting PDF: {ex.Message}");
+                LoggerService.LogInformation($"    Error converting PDF: {ex.Message}");
                 return string.Empty;
             }
         }
@@ -570,6 +764,7 @@ namespace ConsentSyncCore.Services.Pdf
             }
         }
 
+
         /// <summary>
         /// Extract names from OCR text
         /// </summary>
@@ -581,33 +776,33 @@ namespace ConsentSyncCore.Services.Pdf
             string? lastName = null;
 
             var lines = ocrText.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-             LoggerService.LogInformation($"    Parsing {lines.Length} lines from OCR...");
+            LoggerService.LogInformation($"    Parsing {lines.Length} lines from OCR...");
 
             string[] skipWords = config.FieldLabelWords
                 .Concat(new[] { "STUDENT", "STUDENTS", "ÉLÈVE", "ELEVE", "SIGNATURE" })
                 .ToArray();
 
-            // Priority 1: Look for "NOM DE L'ÉLÈVE" or "STUDENT'S NAME"
+            // ── Priority 1: "NOM DE L'ÉLÈVE" / "STUDENT'S NAME" combined header ──────
             for (int i = 0; i < lines.Length; i++)
             {
                 string line = lines[i].Trim();
 
                 bool hasFrenchPattern = line.Contains("NOM DE L", StringComparison.OrdinalIgnoreCase) &&
                                         line.Contains("ÉLÈVE", StringComparison.OrdinalIgnoreCase);
-
                 bool hasEnglishPattern = line.Contains("STUDENT", StringComparison.OrdinalIgnoreCase) &&
                                          line.Contains("NAME", StringComparison.OrdinalIgnoreCase);
 
                 if ((hasFrenchPattern || hasEnglishPattern) &&
                     !line.Contains("PRÉFÉRÉ", StringComparison.OrdinalIgnoreCase))
                 {
-                     LoggerService.LogInformation($"    Found student name header in line {i}");
+                    LoggerService.LogInformation($"    Found student name header in line {i}");
 
                     string cleanedLine = System.Text.RegularExpressions.Regex.Replace(
                         line, @"NOM\s+DE\s+L.?[ÉE]L[ÈE]VE|STUDENT.?S?\s+NAME", "",
                         System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
-                    var validNames = cleanedLine.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+                    var validNames = cleanedLine
+                        .Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)
                         .Where(w => IsValidNameCandidate(w, config) && !IsSkipWord(w, skipWords))
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToList();
@@ -616,17 +811,163 @@ namespace ConsentSyncCore.Services.Pdf
                     {
                         firstName = validNames[0];
                         lastName = validNames[1];
-                         LoggerService.LogInformation($"      ✅ Found: {firstName} {lastName}");
+                        LoggerService.LogInformation($"      ✅ Found (P1): {firstName} {lastName}");
                         return (firstName, lastName);
                     }
                 }
             }
 
-            // Additional extraction strategies...
-            // (Keeping your other strategies for brevity)
+            // ── Priority 2: Look after "NOM DE FAMILLE" label using leading-token extraction ──
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i].Trim();
 
+                bool hasLastNameLabel =
+                    line.Contains("NOM DE FAMILLE", StringComparison.OrdinalIgnoreCase) ||
+                    line.Contains("LAST NAME", StringComparison.OrdinalIgnoreCase) ||
+                    line.Contains("SURNAME", StringComparison.OrdinalIgnoreCase);
+
+                if (!hasLastNameLabel) continue;
+
+                LoggerService.LogInformation($"    Found NOM DE FAMILLE label in line {i}: \"{line}\"");
+
+                for (int j = i + 1; j < lines.Length && j <= i + 15; j++)
+                {
+                    string valueLine = lines[j].Trim();
+                    if (string.IsNullOrWhiteSpace(valueLine)) continue;
+
+                    var leading = ExtractLeadingNameTokens(valueLine, config, skipWords);
+
+                    // ✅ GUARD against OCR noise: a valid name sequence MUST contain 
+                    //    at least one token longer than 2 characters.
+                    if (leading.Count > 0 && !leading.Any(t => t.Length > 2))
+                    {
+                        LoggerService.LogInformation($"    Skipping noise tokens '{string.Join(" ", leading)}' on line {j}");
+                        continue;
+                    }
+
+                    if (leading.Count >= 1)
+                    {
+                        lastName = leading[0];
+                        firstName = leading.Count >= 2 ? leading[1] : null;
+                        LoggerService.LogInformation($"      ✅ Last name  (P2): {lastName}  ← line {j}: \"{valueLine}\"");
+                        if (firstName != null)
+                            LoggerService.LogInformation($"      ✅ First name (P2): {firstName}");
+                        break;
+                    }
+
+                    LoggerService.LogInformation($"    Skipping line {j} (no leading names): \"{valueLine}\"");
+                }
+
+                if (lastName != null) break;
+            }
+
+            // ── Priority 2.5: Pure-name-line scan over the entire document ────────────
+            if (lastName == null)
+            {
+                LoggerService.LogInformation($"    P2 failed — scanning all lines for pure name line...");
+
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string line = lines[i].Trim();
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+
+                    if (IsContactOrDataRow(line)) continue;
+
+                    var tokens = line.Split(new[] { ' ', '\t', '|' }, StringSplitOptions.RemoveEmptyEntries);
+
+                    if (tokens.Length < 1 || tokens.Length > 3) continue;
+
+                    var nameTokens = tokens
+                        .Where(t => IsValidNameCandidate(t, config) && !IsSkipWord(t, skipWords))
+                        .ToList();
+
+                    if (nameTokens.Count != tokens.Length) continue;
+
+                    // ✅ A pure name line must contain at least one real word (> 2 chars)
+                    if (!nameTokens.Any(t => t.Length > 2)) continue;
+
+                    bool hasFormIndicator = nameTokens.Any(t =>
+                        _formLabelIndicators.Any(kw =>
+                            t.ToUpperInvariant().Contains(kw, StringComparison.OrdinalIgnoreCase)));
+
+                    if (hasFormIndicator) continue;
+
+                    lastName = nameTokens[0];
+                    firstName = nameTokens.Count >= 2 ? nameTokens[1] : null;
+
+                    LoggerService.LogInformation($"      ✅ Last name  (P2.5, pure line): {lastName}  ← line {i}: \"{line}\"");
+                    if (firstName != null)
+                        LoggerService.LogInformation($"      ✅ First name (P2.5, pure line): {firstName}");
+                    break;
+                }
+            }
+
+            // ── Priority 3: Dedicated PRÉNOM label scan (fills missing first name) ────
+            if (firstName == null)
+            {
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string line = lines[i].Trim();
+
+                    bool hasFirstNameLabel =
+                        (line.Contains("PRÉNOM", StringComparison.OrdinalIgnoreCase) ||
+                         line.Contains("PRENOM", StringComparison.OrdinalIgnoreCase) ||
+                         line.Contains("FIRST NAME", StringComparison.OrdinalIgnoreCase) ||
+                         line.Contains("GIVEN NAME", StringComparison.OrdinalIgnoreCase)) &&
+                        !line.Contains("PRÉFÉRÉ", StringComparison.OrdinalIgnoreCase) &&
+                        !line.Contains("PREFERRED", StringComparison.OrdinalIgnoreCase);
+
+                    if (!hasFirstNameLabel) continue;
+
+                    LoggerService.LogInformation($"    Found PRÉNOM label in line {i}: \"{line}\"");
+
+                    string inlineValue = System.Text.RegularExpressions.Regex.Replace(
+                        line,
+                        @"PR[ÉE]NOM(\s+PR[ÉE]F[ÉE]R[ÉE])?|FIRST\s+NAME|GIVEN\s+NAME|NOM\s+DE\s+FAMILLE|LAST\s+NAME",
+                        " ",
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+
+                    var inlineTokens = inlineValue
+                        .Split(new[] { ' ', '\t', '|' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Where(w => IsValidNameCandidate(w, config) && !IsSkipWord(w, skipWords))
+                        .Where(t => lastName == null || !t.Equals(lastName, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                    if (inlineTokens.Count >= 1)
+                    {
+                        firstName = inlineTokens[0];
+                        LoggerService.LogInformation($"      ✅ First name (P3, inline): {firstName}");
+                        break;
+                    }
+
+                    for (int j = i + 1; j < lines.Length && j <= i + 5; j++)
+                    {
+                        string valueLine = lines[j].Trim();
+                        if (string.IsNullOrWhiteSpace(valueLine)) continue;
+
+                        var leading = ExtractLeadingNameTokens(valueLine, config, skipWords);
+                        var candidate = leading
+                            .Where(t => lastName == null || !t.Equals(lastName, StringComparison.OrdinalIgnoreCase))
+                            .FirstOrDefault();
+
+                        if (candidate != null)
+                        {
+                            firstName = candidate;
+                            LoggerService.LogInformation($"      ✅ First name (P3, next line): {firstName}");
+                            break;
+                        }
+                    }
+
+                    if (firstName != null) break;
+                }
+            }
+
+            LoggerService.LogInformation($"    OCR name extraction complete: lastName={lastName ?? "NULL"} firstName={firstName ?? "NULL"}");
             return (firstName, lastName);
         }
+
+
 
         #endregion
 
@@ -677,12 +1018,24 @@ namespace ConsentSyncCore.Services.Pdf
             return keywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
         }
 
+
         private static bool IsValidNameCandidate(string word, PdfExtractionConfig config)
         {
             if (string.IsNullOrWhiteSpace(word) || word.Length < config.MinNameLength)
                 return false;
 
             string upperWord = word.ToUpper();
+
+            // ✅ Reject purely OCR noise like "OF", "OX", "O", "X", "M", "F", "CE", "LL" 
+            //    that often come from checkboxes.
+            string[] exactNoiseWords = { "OF", "OX", "OM", "CE", "LL", "O", "X", "M", "F", "A", "Y", "N", "OUI", "NON", "OUL", "GOUL", "OOUL" };
+            if (exactNoiseWords.Contains(upperWord))
+                return false;
+
+            // Reject checkbox noise that ends in X (e.g. "Ox")
+            if (upperWord.Length == 2 && upperWord.EndsWith("X"))
+                return false;
+
             if (config.FieldLabelWords.Any(label => upperWord.Equals(label, StringComparison.OrdinalIgnoreCase)))
                 return false;
 
@@ -698,6 +1051,7 @@ namespace ConsentSyncCore.Services.Pdf
 
             return true;
         }
+
 
         private static bool IsSkipWord(string word, string[] skipWords)
         {
@@ -771,6 +1125,197 @@ namespace ConsentSyncCore.Services.Pdf
 
             return (string.Join(" ", parts), lastIndex);
         }
+
+
+
+        /// <summary>
+        /// Returns true when a line looks like a form field-label row rather than a value row.
+        /// Used in OCR extraction to skip secondary header rows (e.g. "S'IDENTIFIE COMME
+        /// NO D'ASSURANCE-MALADIE") that sit between the primary label row and the value row.
+        /// </summary>
+        /// 
+        private static readonly string[] _formLabelIndicators = new[]
+       {
+            // French form labels (Vitalité / Horizon)
+            "S'IDENTIFIE", "IDENTIFIE", "ASSURANCE", "MALADIE", "NAISSANCE",
+            "TUTEUR", "TUTRICE", "PARENT", "LEGAL", "LÉGAL",
+            "TELEPHONE", "TÉLÉPHONE", "COURRIEL",
+            "ALLERGIES", "MEDICAMENTS", "MÉDICAMENTS", "SANTE", "SANTÉ",
+            "PROFESSEUR", "TITULAIRE", "CLASSE", "FOYER", "ANNÉE", "ANNEE",
+            "SECTION", "CONSENTEMENT", "VACCIN", "DIPHTERIE", "TÉTANOS",
+            "COQUELUCHE", "PAPILLOME", "HUMAIN", "ALERTE", "SIGNATURE",
+            // Question-sentence openers on Vitalité/Horizon alert rows
+            "VOTRE", "ENFANT", "PREND", "PROBLÈME", "PROBLEME",
+            // Header artifacts
+            "VITALITÉ", "VITALITE", "HORIZON", "RÉSEAU", "RESEAU",
+            // English equivalents
+            "IDENTIFY", "IDENTIFIES", "INSURANCE", "BIRTH", "GUARDIAN",
+            "TELEPHONE", "EMAIL", "ALLERGIES", "MEDICATIONS", "HEALTH",
+            "TEACHER", "HOMEROOM", "YEAR", "SECTION", "CONSENT", "VACCINE"
+        };
+
+        private static bool IsFormLabelRow(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return false;
+
+            string upper = line.ToUpperInvariant();
+
+            // ✅ Single-token lines: one matching indicator is enough.
+            //    A genuine name ("Landry", "Lucas") will never appear in _formLabelIndicators.
+            //    A lone section header ("ALERTE", "SECTION", "VACCIN") will.
+            var tokens = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 1)
+            {
+                return _formLabelIndicators.Any(kw =>
+                    upper.Contains(kw, StringComparison.OrdinalIgnoreCase));
+            }
+
+            // Multi-token lines: require 2+ hits to avoid false positives on
+            // lines like "Tina Landry" that might contain one incidental keyword.
+            int hits = _formLabelIndicators.Count(kw =>
+                upper.Contains(kw, StringComparison.OrdinalIgnoreCase));
+
+            return hits >= 2;
+        }
+
+
+
+        /// <summary>
+        /// Returns true when a line contains phone numbers, emails, dates, or checkbox
+        /// markers — i.e. it is a data/contact row, never a student name row.
+        /// </summary>
+        private static bool IsContactOrDataRow(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return false;
+
+            // Phone number pattern  e.g. (506)874-9641
+            if (System.Text.RegularExpressions.Regex.IsMatch(line, @"\(?\d{3}\)?[\s\-]\d{3}[\s\-]\d{4}"))
+                return true;
+
+            // Any standalone digit cluster ≥ 4  e.g. dates, health-card numbers
+            if (System.Text.RegularExpressions.Regex.IsMatch(line, @"\b\d{4,}\b"))
+                return true;
+
+            // Email address
+            if (System.Text.RegularExpressions.Regex.IsMatch(line, @"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"))
+                return true;
+
+            // Checkbox markers produced by OCR  e.g. "ceELL", "ceLL", "O cell", "M cell"
+            if (System.Text.RegularExpressions.Regex.IsMatch(line, @"\bce[EL]{2,}\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return true;
+
+            // ISO date  e.g. 2013-09-25
+            if (System.Text.RegularExpressions.Regex.IsMatch(line, @"\b\d{4}-\d{2}-\d{2}\b"))
+                return true;
+
+            return false;
+        }
+
+
+
+
+
+        /// <summary>
+        /// Reads tokens from the START of a line until a form-label indicator or
+        /// contact/data marker is encountered.  Returns the leading name tokens found
+        /// before that stopping point.
+        ///
+        /// Example: "Landry Lucas S'IDENTIFIE COMME …"
+        ///   → ["Landry", "Lucas"]   (stops at S'IDENTIFIE)
+        ///
+        /// Example: "NOM DU PARENT/TUTEUR LEGAL Tina Landry"
+        ///   → []   (first token "NOM" is in FieldLabelWords → nothing before a stopper)
+        ///
+        /// Example: "S'IDENTIFIE COMME …"
+        ///   → []   (first token hits a form-label indicator immediately)
+        /// </summary>
+        private static List<string> ExtractLeadingNameTokens(
+            string line,
+            PdfExtractionConfig config,
+            string[] skipWords)
+        {
+            var result = new List<string>();
+            var tokens = line.Split(new[] { ' ', '\t', '|' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var raw in tokens)
+            {
+                string token = raw.Trim();
+                string upper = token.ToUpperInvariant();
+
+                // Stop as soon as we hit a known form-label indicator
+                bool isFormIndicator = _formLabelIndicators.Any(kw =>
+                    upper.Contains(kw, StringComparison.OrdinalIgnoreCase));
+                if (isFormIndicator) break;
+
+                // Stop at contact/data markers (email, phone, digits …)
+                if (IsContactOrDataRow(token)) break;
+
+                // Stop at a field-label word from config (e.g. NOM, PRÉNOM, DE, FAMILLE …)
+                bool isConfigLabel = config.FieldLabelWords.Any(lw =>
+                    upper.Equals(lw, StringComparison.OrdinalIgnoreCase));
+                if (isConfigLabel) break;
+
+                if (IsValidNameCandidate(token, config) && !IsSkipWord(token, skipWords))
+                    result.Add(token);
+                else if (result.Count > 0)
+                    break; // first non-name after we already have names → stop
+            }
+
+            return result;
+        }
+
+
+        private static (string? firstName, string? lastName, string? dateOfBirth) ExtractDetailsFromOCRText(string ocrResult)
+        {
+            // 1. Ensure support for Windows-1252 in .NET Core/.NET 9 (if not already registered in Program.cs/Startup)
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
+            // 2. Define encodings
+            Encoding utf8 = Encoding.UTF8;
+            Encoding win1252 = Encoding.GetEncoding(1252); // "Western European (Windows)"
+
+            // 3. Convert the string to Windows-1252
+            byte[] utf8Bytes = utf8.GetBytes(ocrResult);
+            byte[] win1252Bytes = Encoding.Convert(utf8, win1252, utf8Bytes);
+
+            // 4. Decoded string for extraction
+            string decodedText = win1252.GetString(win1252Bytes);
+
+            string? firstName = null;
+            string? lastName = null;
+            string? dateOfBirth = null;
+
+            // --- Extractions ---
+
+            // Extract Date of Birth - matches formats like 2013-11-27 or 2013/11/27
+            Match dobMatch = Regex.Match(decodedText, @"\b(\d{4}[-/]\d{2}[-/]\d{2})\b");
+            if (dobMatch.Success)
+            {
+                dateOfBirth = dobMatch.Groups[1].Value;
+            }
+
+            // Extract Last Name (NOM DE FAMILLE). Looks for the label and captures the next likely line.
+            // NOTE: OCR newline patterns vary, adjust the spacing (\s) as needed for your specific OCR output.
+            Match lastNameMatch = Regex.Match(decodedText, @"NOM DE FAMILLE[:\s]*\r?\n([A-Za-zÀ-ÿ\-]+)", RegexOptions.IgnoreCase);
+            if (lastNameMatch.Success)
+            {
+                lastName = lastNameMatch.Groups[1].Value.Trim();
+            }
+
+            // Extract First Name (PRÉNOM). Looks for PRÉNOM but avoids capturing PRÉNOM PRÉFÉRÉ on the same line.
+            Match firstNameMatch = Regex.Match(decodedText, @"PRÉNOM(?![ ]+PRÉFÉRÉ)[:\s]*\r?\n([A-Za-zÀ-ÿ\-\s]+)", RegexOptions.IgnoreCase);
+            if (firstNameMatch.Success)
+            {
+                // Often OCR might lump first name and last name together like "Malik Perry", split if necessary
+                firstName = firstNameMatch.Groups[1].Value.Trim();
+            }
+
+            return (firstName, lastName, dateOfBirth);
+        }
+
+
+
+
 
 
         #endregion

@@ -37,8 +37,8 @@ namespace OrchestratorUi
                 string fileName = Path.GetFileName(file);
                 try
                 {
-                    var (firstName, lastName, pageCount) =
-                        PdfProcessor.ProcessSinglePdf(file, debugOcr: false, debugOutputDir: null);
+                    var (firstName, lastName, dateOfBirth, pageCount) =
+                        PdfProcessor.ProcessSingleScannedPdf(file, debugOcr: false, debugOutputDir: null);
 
                     bool isUnknown = firstName is "Unknown" or "Error"
                                   || lastName is "Unknown" or "Error";
@@ -46,13 +46,13 @@ namespace OrchestratorUi
                     if (isUnknown)
                     {
                         LoggerService.LogWarning(
-                            $"   ⚠️  {fileName,-45} → {firstName} {lastName}  (pages: {pageCount})");
+                            $"   ⚠️  {fileName,-45} → {firstName} {lastName}  (pages: {pageCount}   (DOB: {dateOfBirth})");
                         failed++;
                     }
                     else
                     {
                         LoggerService.LogInformation(
-                            $"   ✅  {fileName,-45} → {firstName} {lastName}  (pages: {pageCount})");
+                            $"   ✅  {fileName,-45} → {firstName} {lastName}  (pages: {pageCount})  (DOB: {dateOfBirth})");
                         ok++;
                     }
                 }

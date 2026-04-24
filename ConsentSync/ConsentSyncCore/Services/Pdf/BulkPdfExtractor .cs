@@ -13,7 +13,7 @@ using ConsentSyncCore.Services.Configuration;
 
 namespace ConsentSyncCore.Services.Pdf
 {
-    public class BulkPdfExtractor
+    public partial class BulkPdfExtractor
     {
    
 
@@ -248,7 +248,7 @@ namespace ConsentSyncCore.Services.Pdf
 
                 // Extract names
                 var (firstName, lastName, pageCount) = PdfProcessor.ProcessSinglePdf(
-                    pdfPath, debugOcr: false, debugOutputDir: null);
+                    pdfPath, debugOcr: true, debugOutputDir: null);
 
                 //// Track if names were detected
                 //bool namesDetected = true;
