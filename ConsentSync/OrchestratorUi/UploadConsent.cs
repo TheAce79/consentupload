@@ -1677,7 +1677,7 @@ namespace OrchestratorUi
         private void bt_test_Click(object sender, EventArgs e)
         {
             var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
-            var testPath = bulkConfig.GetOutputReadyPath();   // change to any folder you want to test
+            var testPath = bulkConfig.GetInputScannedPath();   // change to any folder you want to test
 
             LoggerService.LogInformation($"\n🧪 Running test on: {testPath}");
             Task.Run(() => TestUtils.ReadPdfName(testPath));
