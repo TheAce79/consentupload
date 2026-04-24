@@ -169,6 +169,8 @@ namespace Orchestrator.Services
         /// <c>{clientId}.pdf</c> in <c>3_Output_Ready</c>.
         /// Used when the same ClientId appears under different names (typo/OCR error).
         /// </summary>
+        /// 
+
         private MergeResult MergeClientIdGroupPdfs(string clientId)
         {
             var result = new MergeResult();
@@ -200,7 +202,6 @@ namespace Orchestrator.Services
                 foreach (var f in pdfFiles)
                     LoggerService.LogInformation($"         • {Path.GetFileName(f)}");
 
-                // ✅ Output as {clientId}.pdf — simplest filename, matched instantly
                 string outputFileName = $"{clientId}.pdf";
                 string outputPath = Path.Combine(_bulkConfig.GetOutputReadyPath(), outputFileName);
 
@@ -227,6 +228,11 @@ namespace Orchestrator.Services
                 result.Success = true;
                 result.OutputFileName = outputFileName;
                 result.OutputPath = outputPath;
+
+                // ✅ Delete the now-empty subfolder (e.g. 5_Duplicate\404820\)
+                //    but NOT the parent 5_Duplicate\ folder itself.
+                TryDeleteDuplicateSubfolder(duplicateDir);
+
                 return result;
             }
             catch (Exception ex)
@@ -367,11 +373,6 @@ namespace Orchestrator.Services
                 foreach (var f in pdfFiles)
                     LoggerService.LogInformation($"         • {Path.GetFileName(f)}");
 
-                // ✅ Output as {ClientId}.pdf — no underscores, no timestamp.
-                //    This is the simplest possible filename so RescanForClientIdRenames
-                //    and FindPdfForRecord Pass 1 both match it instantly on re-run.
-                //    Falls back to {LastName}_{FirstName}_merged_consent.pdf only when
-                //    no ClientId is known (should never happen in normal flow).
                 string outputFileName = !string.IsNullOrWhiteSpace(clientId)
                     ? $"{clientId.Trim()}.pdf"
                     : MakeSafeFileName($"{lastName}_{firstName}_merged_consent.pdf");
@@ -380,13 +381,11 @@ namespace Orchestrator.Services
 
                 if (pdfFiles.Count == 1)
                 {
-                    // Single PDF — move directly, overwrite any stale copy
                     File.Move(pdfFiles[0], outputPath, overwrite: true);
                     LoggerService.LogInformation($"      ℹ️  Single PDF — moved directly");
                 }
                 else
                 {
-                    // Multiple PDFs — merge pages then overwrite
                     var builder = new PdfDocumentBuilder();
                     foreach (var pdfPath in pdfFiles)
                     {
@@ -396,7 +395,6 @@ namespace Orchestrator.Services
                     }
                     File.WriteAllBytes(outputPath, builder.Build());
 
-                    // Clean up originals only after successful write
                     foreach (var pdfPath in pdfFiles)
                         try { File.Delete(pdfPath); } catch { /* non-fatal */ }
                 }
@@ -408,6 +406,10 @@ namespace Orchestrator.Services
                 LoggerService.LogInformation(
                     $"      ✅ Merged → {outputFileName}  ({_bulkConfig.GetOutputReadyPath()})");
 
+                // ✅ Delete the now-empty subfolder (e.g. 5_Duplicate\Maisonneuve_Maahik\)
+                //    but NOT the parent 5_Duplicate\ folder itself.
+                TryDeleteDuplicateSubfolder(duplicateDir);
+
                 return result;
             }
             catch (Exception ex)
@@ -416,7 +418,6 @@ namespace Orchestrator.Services
                 return result;
             }
         }
-
 
 
         // ── Helpers ───────────────────────────────────────────────────────────
@@ -453,6 +454,45 @@ namespace Orchestrator.Services
             foreach (char c in Path.GetInvalidFileNameChars())
                 name = name.Replace(c, '_');
             return name.Trim();
+        }
+
+
+        /// <summary>
+        /// Deletes a resolved duplicate subfolder (e.g. 5_Duplicate\Maisonneuve_Maahik\)
+        /// after its PDFs have been successfully merged and moved to 3_Output_Ready.
+        /// Only deletes the specific subfolder — never touches the parent 5_Duplicate\.
+        /// Non-fatal: logs a warning if deletion fails (e.g. file locked by Explorer).
+        /// </summary>
+        private void TryDeleteDuplicateSubfolder(string duplicateDir)
+        {
+            try
+            {
+                // Safety: never delete the root 5_Duplicate folder itself
+                string parent = _bulkConfig.GetDuplicateClientPath()
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string target = duplicateDir
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                if (string.Equals(target, parent, StringComparison.OrdinalIgnoreCase))
+                {
+                    LoggerService.LogWarning(
+                        "      ⚠️  Skipped deletion — target is the root 5_Duplicate folder.");
+                    return;
+                }
+
+                if (Directory.Exists(duplicateDir))
+                {
+                    // recursive: removes any leftover .txt files (HOW_TO_MERGE.txt etc.)
+                    Directory.Delete(duplicateDir, recursive: true);
+                    LoggerService.LogInformation(
+                        $"      🗑️  Deleted subfolder: {Path.GetFileName(duplicateDir)}\\");
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogWarning(
+                    $"      ⚠️  Could not delete subfolder {Path.GetFileName(duplicateDir)}: {ex.Message}");
+            }
         }
 
         private sealed class MergeResult

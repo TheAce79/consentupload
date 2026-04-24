@@ -768,6 +768,8 @@ namespace OrchestratorUi
 
 
         // ── Phase 2: Validate PDFs against student records ────────────
+
+        // ── Phase 2: Validate PDFs against student records ────────────
         private async void bt_ValidatePdf_Click(object sender, EventArgs e)
         {
             bt_ValidatePdf.Enabled = false;
@@ -775,7 +777,6 @@ namespace OrchestratorUi
 
             try
             {
-
                 // ── Guard: Phase 1 must be complete ──────────────────
                 if (!await CheckAllRowsProcessedAsync("PDF Validation"))
                     return;
@@ -806,8 +807,6 @@ namespace OrchestratorUi
                     return;
                 }
 
-                // ✅ Use the exact session subfolder the orchestrator created (e.g. 6_Error\Error_20250419_143512)
-                // Falls back to the base 6_Error path if no errors occurred (sessionErrorDir is null)
                 var bulkPdfConfig = ConfigurationService.GetBulkPdfExtractionConfig();
                 var errorFolder = phase2Result.SessionErrorDir ?? bulkPdfConfig.GetErrorPath();
 
@@ -818,20 +817,40 @@ namespace OrchestratorUi
                 LoggerService.LogInformation($"   ✅ Matched to student    : {phase2Result.SuccessfullyProcessed}");
                 LoggerService.LogInformation($"   ⚠️  Unmatched (errors)   : {phase2Result.FailedToMatch}");
 
+                // ── Detect ClientId-only files that were matched this run ─────
+                // These are files the user manually renamed to {ClientId}.pdf.
+                // Phase 2 validates them but does NOT move them to 1 Consent Upload —
+                // that is PrePhase3's job.  Warn the user explicitly so they know
+                // they must also click Generate Upload CSV.
+                var pdfSourcePath = bulkPdfConfig.GetOutputReadyPath();
+                bool hasClientIdFilesReady = Directory.Exists(pdfSourcePath) &&
+                    Directory.GetFiles(pdfSourcePath, "*.pdf")
+                        .Any(f =>
+                        {
+                            var stem = Path.GetFileNameWithoutExtension(f).Trim();
+                            if (stem.Contains('_')) return false;
+                            if (long.TryParse(stem, out _)) return stem.Length >= 4;
+                            return true;
+                        });
+
                 if (phase2Result.FailedToMatch > 0)
                 {
                     LoggerService.LogWarning($"\n   ⚠️  {phase2Result.FailedToMatch} unmatched PDF(s) copied to:");
                     LoggerService.LogWarning($"       {errorFolder}");
-                    LoggerService.LogWarning("   Review the error folder, correct filenames if needed,");
-                    LoggerService.LogWarning("   then re-run validation before generating the Upload CSV.");
 
                     foreach (var err in phase2Result.ErrorMessages)
                         LoggerService.LogWarning($"      • {err}");
                 }
 
-                LoggerService.LogInformation(new string('═', 60));
-
                 var hasUnmatched = phase2Result.FailedToMatch > 0;
+
+                // ── Build message ─────────────────────────────────────────────
+                string clientIdNote = hasClientIdFilesReady
+                    ? "\n\n📋 Manually renamed file(s) detected (e.g. 12345.pdf).\n" +
+                      "   Validation is complete — you MUST also click\n" +
+                      "   📄 Generate Upload CSV  to move them to the upload folder."
+                    : string.Empty;
+
                 MessageBox.Show(
                     $"🔍 PDF Validation complete.\n\n" +
                     $"  📄 Total PDFs          : {phase2Result.TotalPdfs}\n" +
@@ -839,7 +858,11 @@ namespace OrchestratorUi
                     $"  ⚠️  Unmatched (errors) : {phase2Result.FailedToMatch}\n" +
                     (hasUnmatched
                         ? $"\n⚠️  Unmatched PDFs have been copied to:\n  {errorFolder}\n\nReview and correct them, then re-run validation."
-                        : "\n✅ All PDFs matched — you may now click\n   📄 Generate Upload CSV."),
+                        : "\n✅ All PDFs matched.") +
+                    clientIdNote +
+                    (!hasUnmatched && !hasClientIdFilesReady
+                        ? "\n\nYou may now click  📄 Generate Upload CSV."
+                        : string.Empty),
                     hasUnmatched ? "Validation — Review Required" : "Validation Successful",
                     MessageBoxButtons.OK,
                     hasUnmatched ? MessageBoxIcon.Warning : MessageBoxIcon.Information);

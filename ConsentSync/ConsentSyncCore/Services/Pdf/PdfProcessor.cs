@@ -188,8 +188,8 @@ namespace ConsentSyncCore.Services.Pdf
 
 
         private static (string? firstName, string? lastName) ExtractNamesFromWords(
-    List<UglyToad.PdfPig.Content.Word> words,
-    PdfExtractionConfig config)
+              List<UglyToad.PdfPig.Content.Word> words,
+              PdfExtractionConfig config)
         {
             string? firstName = null;
             string? lastName = null;
@@ -217,7 +217,6 @@ namespace ConsentSyncCore.Services.Pdf
                                 int startIndex = i + pattern.Words.Length;
                                 int maxIndex = startIndex + config.SearchRange - 1;
 
-                                // Find the first valid word, then collect all consecutive valid words
                                 for (int j = startIndex; j < words.Count && j <= maxIndex; j++)
                                 {
                                     string candidateWord = words[j].Text
@@ -252,17 +251,21 @@ namespace ConsentSyncCore.Services.Pdf
                                 if (MatchesPattern(words, i, pattern.Words))
                                 {
                                     LoggerService.LogInformation($"  Found first name pattern ({pattern.Language}) at index {i}");
-                                    int startIndex = i + pattern.Words.Length;
-                                    int maxIndex = startIndex + config.SearchRange - 1;
+                                    int patternStart = i + pattern.Words.Length;
+                                    int maxIndex = patternStart + config.SearchRange - 1;
 
-                                    for (int j = startIndex; j < words.Count && j <= maxIndex; j++)
+                                    // ✅ Always start AFTER the full lastName range so we never
+                                    //    re-collect lastName words as firstName.
+                                    //    On the Vitalité form the value row is:
+                                    //      [lastName words] [firstName words] [preferred words]
+                                    //    Without this, firstName search restarts from the same
+                                    //    value row position and duplicates the lastName.
+                                    int fnSearchFrom = lastNameEndIndex >= 0
+                                        ? Math.Max(patternStart, lastNameEndIndex + 1)
+                                        : patternStart;
+
+                                    for (int j = fnSearchFrom; j < words.Count && j <= maxIndex; j++)
                                     {
-                                        if (j == lastNameEndIndex)
-                                        {
-                                            LoggerService.LogInformation($"    Skipping index {j} - already used as last name");
-                                            continue;
-                                        }
-
                                         string candidateWord = words[j].Text
                                             .Normalize(NormalizationForm.FormC)
                                             .Trim();
@@ -333,7 +336,13 @@ namespace ConsentSyncCore.Services.Pdf
                             }
 
                             int maxIndex = i + config.SearchRange;
-                            for (int j = i + 1; j < words.Count && j <= maxIndex; j++)
+
+                            // ✅ Start AFTER lastName range here too
+                            int fnSearchFrom = lastNameEndIndex >= 0
+                                ? Math.Max(i + 1, lastNameEndIndex + 1)
+                                : i + 1;
+
+                            for (int j = fnSearchFrom; j < words.Count && j <= maxIndex; j++)
                             {
                                 if (j == lastNameEndIndex) continue;
 
@@ -367,6 +376,9 @@ namespace ConsentSyncCore.Services.Pdf
 
             return (firstName, lastName);
         }
+
+
+
 
 
 
@@ -702,12 +714,18 @@ namespace ConsentSyncCore.Services.Pdf
         }
 
 
-
         /// <summary>
         /// Collects consecutive valid name words starting at <paramref name="startIndex"/>,
-        /// stopping as soon as a word fails <see cref="IsValidNameCandidate"/>.
-        /// Returns the joined multi-part name (e.g. "Thomas Raymond") and the last used index.
+        /// stopping when:
+        ///   • a word fails <see cref="IsValidNameCandidate"/>, OR
+        ///   • the horizontal gap to the next word exceeds <see cref="MaxIntraCellGapPts"/>
+        ///     (indicates a new table cell — e.g. the gap between the LastName column and
+        ///      the FirstName column on the Vitalité consent form).
+        /// Words within the same cell (e.g. "Marie Anne", "De Cruz", "Romo Lerma") are
+        /// spaced only a few points apart; column gaps are typically 50+ points.
         /// </summary>
+        private const double MaxIntraCellGapPts = 40.0;
+
         private static (string name, int lastIndex) CollectNameWords(
             List<UglyToad.PdfPig.Content.Word> words,
             int startIndex,
@@ -717,6 +735,7 @@ namespace ConsentSyncCore.Services.Pdf
         {
             var parts = new List<string>();
             int lastIndex = startIndex - 1;
+            double lastWordRight = double.MinValue;
 
             for (int j = startIndex; j < words.Count && j <= maxIndex; j++)
             {
@@ -727,14 +746,32 @@ namespace ConsentSyncCore.Services.Pdf
                     .Trim();
 
                 if (!IsValidNameCandidate(candidate, config))
-                    break;          // stop on first invalid word — we've left the name cell
+                    break;
+
+                // ✅ Cell-boundary detection: stop when horizontal gap between words
+                //    exceeds the intra-cell threshold.
+                //    Same-cell words ("Marie Anne"):  gap ≈ 5–15 pt  → continue
+                //    Adjacent cells ("Donnelly|Rhys"): gap ≈ 50–150 pt → stop
+                if (parts.Count > 0)
+                {
+                    double gap = words[j].BoundingBox.Left - lastWordRight;
+                    if (gap > MaxIntraCellGapPts)
+                    {
+                        LoggerService.LogInformation(
+                            $"    Cell boundary at [{j}] '{candidate}': " +
+                            $"X gap {gap:F0}pt > {MaxIntraCellGapPts}pt — stopping collection");
+                        break;
+                    }
+                }
 
                 parts.Add(candidate);
+                lastWordRight = words[j].BoundingBox.Right;
                 lastIndex = j;
             }
 
             return (string.Join(" ", parts), lastIndex);
         }
+
 
         #endregion
 

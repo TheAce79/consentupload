@@ -434,13 +434,10 @@ namespace ConsentSyncCore.Services.Pdf
 
                             // ── Create / reuse per-student subfolder ──────────────────────
                             string duplicateSubFolder = GetOrCreateDuplicateSubFolder(lastName, firstName);
-                            // ✅ Encode spaces as '~' — same convention as FormatFileName
-                            string safeLastName = lastName.Replace(' ', '~');
-                            string safeFirstName = firstName.Replace(' ', '~');
+                            // ✅ No encoding — spaces are valid in filenames, '_' is the only delimiter
                             string duplicateFileName = MakeSafeFileName(
-                                $"{pageIndex}_{safeLastName}_{safeFirstName}_{occurrence}_consent.pdf");
+                                $"{pageIndex}_{lastName}_{firstName}_{occurrence}_consent.pdf");
                             string duplicatePath = Path.Combine(duplicateSubFolder, duplicateFileName);
-
 
                             File.Move(tempFilePath, duplicatePath, overwrite: true);
                              LoggerService.LogInformation($"   📄 Moved duplicate → {duplicateFileName}");
@@ -834,43 +831,70 @@ namespace ConsentSyncCore.Services.Pdf
 
         /// <summary>
         /// Format filename: {ID}_{LastName}_{FirstName}_consent.pdf
-        /// Spaces within name parts are encoded as '~' so that '_' is the sole field
-        /// delimiter and genuine hyphens (De-Cruz, Jean-Pierre) are preserved as-is.
-        /// Phase 2 decodes '~' back to ' '.
+        /// Spaces within name parts are kept as-is — they are valid in Windows filenames
+        /// and '_' is the sole field delimiter (names never contain underscores).
+        /// Genuine hyphens (De-Cruz, Jean-Pierre) are preserved untouched.
         /// Examples:
-        ///   Larochelle / Ève          →  205_Larochelle_Ève_consent.pdf
-        ///   De Cruz / Marie Anne      →  1_De~Cruz_Marie~Anne_consent.pdf
-        ///   De-Cruz / Jean-Pierre     →  3_De-Cruz_Jean-Pierre_consent.pdf
-        ///   De-la Cruz / O Brien      →  7_De-la~Cruz_O~Brien_consent.pdf
+        ///   Larochelle / Ève              →  205_Larochelle_Ève_consent.pdf
+        ///   De Cruz / Marie Anne          →  1_De Cruz_Marie Anne_consent.pdf
+        ///   De-Cruz / Jean-Pierre         →  3_De-Cruz_Jean-Pierre_consent.pdf
+        ///   Hoosdally / Mohammad Jaabir   →  1_Hoosdally_Mohammad Jaabir_consent.pdf
+        ///   Romo Lerma / Angel Javier     →  92_Romo Lerma_Angel Javier_consent.pdf
         /// </summary>
         private string FormatFileName(int id, string lastName, string firstName, int? duplicateSuffix = null)
         {
             string suffix = _bulkConfig.ConsentSuffix;
 
-            // ✅ Encode spaces as '~' — tilde never appears in names and is a valid
-            //    filename character on Windows, macOS and Linux.
-            //    Genuine hyphens (De-Cruz, Jean-Pierre) are left untouched.
-            string safeLastName = lastName.Replace(' ', '~');
-            string safeFirstName = firstName.Replace(' ', '~');
-
+            // ✅ No encoding needed — spaces are valid in Windows filenames and '_' is
+            //    the only field separator.  Names never contain underscores.
             string baseName = duplicateSuffix.HasValue
-                ? $"{id}_{safeLastName}_{safeFirstName}_{duplicateSuffix}_{suffix}"
-                : $"{id}_{safeLastName}_{safeFirstName}_{suffix}";
+                ? $"{id}_{lastName}_{firstName}_{duplicateSuffix}_{suffix}"
+                : $"{id}_{lastName}_{firstName}_{suffix}";
 
             return MakeSafeFileName(baseName + ".pdf");
         }
 
 
+        /// <summary>
+        /// Capitalizes a name, processing each space-separated word independently so that
+        /// mixed names like "Bouibaoune-Sayf-Eddine Sayf" are NOT collapsed to
+        /// "Bouibaoune-Sayf-Eddine-Sayf".  Genuine hyphens within a single token
+        /// (e.g. "Jean-Pierre", "De-Cruz") are preserved.
+        /// </summary>
         private string CleanAndCapitalizeName(string name)
         {
             if (string.IsNullOrWhiteSpace(name)) return string.Empty;
-            var cleaned = Regex.Replace(name, @"[^\w\s\-'']", "");
-            cleaned = Regex.Replace(cleaned.Trim(), @"\s+", " ");
-            var parts = cleaned.Split(new[] { ' ', '-' }, StringSplitOptions.RemoveEmptyEntries);
-            var capitalized = parts.Select(part =>
-                part.Length <= 1 ? part.ToUpperInvariant() :
-                char.ToUpperInvariant(part[0]) + part.Substring(1).ToLowerInvariant());
-            return cleaned.Contains('-') ? string.Join("-", capitalized) : string.Join(" ", capitalized);
+
+            // Normalize whitespace
+            name = Regex.Replace(name.Trim(), @"\s+", " ");
+
+            // ✅ Split on spaces FIRST so each word is capitalized independently.
+            //    Old code: split on both ' ' and '-' then re-join with '-' if ANY hyphen
+            //    existed → "Bouibaoune-Sayf-Eddine Sayf" became "Bouibaoune-Sayf-Eddine-Sayf".
+            var spaceParts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            var processed = spaceParts.Select(word =>
+            {
+                // Remove characters that are invalid in names (keep letters, digits, hyphens, apostrophes)
+                word = Regex.Replace(word, @"[^\w\-'']", "");
+                if (string.IsNullOrEmpty(word)) return string.Empty;
+
+                if (word.Contains('-'))
+                {
+                    // Capitalize each hyphenated segment, re-join with the hyphen
+                    return string.Join("-",
+                        word.Split('-', StringSplitOptions.RemoveEmptyEntries)
+                            .Select(p => p.Length <= 1
+                                ? p.ToUpperInvariant()
+                                : char.ToUpperInvariant(p[0]) + p[1..].ToLowerInvariant()));
+                }
+
+                return word.Length <= 1
+                    ? word.ToUpperInvariant()
+                    : char.ToUpperInvariant(word[0]) + word[1..].ToLowerInvariant();
+            });
+
+            return string.Join(" ", processed.Where(w => !string.IsNullOrEmpty(w)));
         }
 
         private string NormalizeName(string name)
