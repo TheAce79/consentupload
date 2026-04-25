@@ -331,6 +331,27 @@ namespace Orchestrator.Phase1
                 bool found = false;
                 try
                 {
+
+                    // Only this one condition bypasses PHIS — everything else falls through unchanged
+                    if (student.IsScanPdf && !student.IsScanPdfReady)
+                    {
+                        student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
+                        student.BestMatch = string.Empty;
+                        result.ManualReviewCount++;
+
+                        LoggerService.LogWarning(
+                            $"   ⏭️  Skipped PHIS search — IsScanPdf=true / IsScanPdfReady=false " +
+                            $"(PDF: {student.PdfName}) → NeedsManualReview");
+
+                        progress?.Report(new Phase1Progress(
+                            Current: i + 1,
+                            Total: batch.Count,
+                            StudentName: $"{student.FirstName} {student.LastName}",
+                            IsFound: false));
+
+                        continue;   // ← skips ProcessSingleStudentAsync for THIS row only
+                    }
+
                     found = await ProcessSingleStudentAsync(student, result);
 
                     if ((i + 1) % _phase1Config.SaveProgressEveryNRecords == 0)

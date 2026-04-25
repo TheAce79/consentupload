@@ -24,6 +24,7 @@ namespace OrchestratorUi
             bt_Upload = new Button();
             bt_AppendFileRose = new Button();
             grpConfig = new GroupBox();
+            bt_ScanPdf = new Button();
             lb_Dir = new Label();
             txt_BaseDir = new TextBox();
             btn_BrowseDir = new Button();
@@ -48,7 +49,6 @@ namespace OrchestratorUi
             gb_UploadPhis = new GroupBox();
             pb_Phase3 = new ProgressBar();
             lbl_Phase3Progress = new Label();
-            bt_test = new Button();
             grpConfig.SuspendLayout();
             gb_Normalise.SuspendLayout();
             gb_Phase1.SuspendLayout();
@@ -63,7 +63,7 @@ namespace OrchestratorUi
             bt_ValidatePdf.FlatStyle = FlatStyle.Flat;
             bt_ValidatePdf.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             bt_ValidatePdf.ForeColor = Color.White;
-            bt_ValidatePdf.Location = new Point(12, 28);
+            bt_ValidatePdf.Location = new Point(6, 60);
             bt_ValidatePdf.Name = "bt_ValidatePdf";
             bt_ValidatePdf.Size = new Size(270, 38);
             bt_ValidatePdf.TabIndex = 0;
@@ -79,7 +79,7 @@ namespace OrchestratorUi
             bt_GenerateCsv.FlatStyle = FlatStyle.Flat;
             bt_GenerateCsv.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             bt_GenerateCsv.ForeColor = Color.White;
-            bt_GenerateCsv.Location = new Point(12, 76);
+            bt_GenerateCsv.Location = new Point(6, 104);
             bt_GenerateCsv.Name = "bt_GenerateCsv";
             bt_GenerateCsv.Size = new Size(270, 38);
             bt_GenerateCsv.TabIndex = 1;
@@ -95,7 +95,7 @@ namespace OrchestratorUi
             bt_Upload.FlatStyle = FlatStyle.Flat;
             bt_Upload.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             bt_Upload.ForeColor = Color.White;
-            bt_Upload.Location = new Point(6, 28);
+            bt_Upload.Location = new Point(6, 99);
             bt_Upload.Name = "bt_Upload";
             bt_Upload.Size = new Size(228, 48);
             bt_Upload.TabIndex = 0;
@@ -111,7 +111,7 @@ namespace OrchestratorUi
             bt_AppendFileRose.FlatStyle = FlatStyle.Flat;
             bt_AppendFileRose.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             bt_AppendFileRose.ForeColor = Color.White;
-            bt_AppendFileRose.Location = new Point(12, 124);
+            bt_AppendFileRose.Location = new Point(6, 157);
             bt_AppendFileRose.Name = "bt_AppendFileRose";
             bt_AppendFileRose.Size = new Size(270, 38);
             bt_AppendFileRose.TabIndex = 2;
@@ -122,7 +122,7 @@ namespace OrchestratorUi
             // 
             // grpConfig
             // 
-            grpConfig.Controls.Add(bt_test);
+            grpConfig.Controls.Add(bt_ScanPdf);
             grpConfig.Controls.Add(lb_Dir);
             grpConfig.Controls.Add(txt_BaseDir);
             grpConfig.Controls.Add(btn_BrowseDir);
@@ -136,10 +136,23 @@ namespace OrchestratorUi
             grpConfig.Controls.Add(btn_PortableChrome);
             grpConfig.Location = new Point(12, 12);
             grpConfig.Name = "grpConfig";
-            grpConfig.Size = new Size(440, 303);
+            grpConfig.Size = new Size(440, 341);
             grpConfig.TabIndex = 0;
             grpConfig.TabStop = false;
             grpConfig.Text = "Configuration";
+            // 
+            // bt_ScanPdf
+            // 
+            bt_ScanPdf.BackColor = Color.SeaGreen;
+            bt_ScanPdf.FlatStyle = FlatStyle.Flat;
+            bt_ScanPdf.ForeColor = Color.White;
+            bt_ScanPdf.Location = new Point(6, 232);
+            bt_ScanPdf.Name = "bt_ScanPdf";
+            bt_ScanPdf.Size = new Size(202, 35);
+            bt_ScanPdf.TabIndex = 12;
+            bt_ScanPdf.Text = "\U0001f9ea  Scanned PDF → CSV ";
+            bt_ScanPdf.UseVisualStyleBackColor = false;
+            bt_ScanPdf.Click += bt_ScanPdf_Click;
             // 
             // lb_Dir
             // 
@@ -251,11 +264,11 @@ namespace OrchestratorUi
             rtxt_Log.BackColor = Color.Black;
             rtxt_Log.Font = new Font("Consolas", 9F);
             rtxt_Log.ForeColor = Color.LimeGreen;
-            rtxt_Log.Location = new Point(12, 325);
+            rtxt_Log.Location = new Point(12, 359);
             rtxt_Log.Name = "rtxt_Log";
             rtxt_Log.ReadOnly = true;
             rtxt_Log.ScrollBars = RichTextBoxScrollBars.Vertical;
-            rtxt_Log.Size = new Size(1007, 252);
+            rtxt_Log.Size = new Size(1007, 218);
             rtxt_Log.TabIndex = 1;
             rtxt_Log.Text = "";
             // 
@@ -348,7 +361,7 @@ namespace OrchestratorUi
             gb_PreUpload.Controls.Add(bt_GenerateCsv);
             gb_PreUpload.Location = new Point(468, 140);
             gb_PreUpload.Name = "gb_PreUpload";
-            gb_PreUpload.Size = new Size(300, 175);
+            gb_PreUpload.Size = new Size(300, 213);
             gb_PreUpload.TabIndex = 3;
             gb_PreUpload.TabStop = false;
             gb_PreUpload.Text = "Phase 2 — PDF Validation & Upload Preparation";
@@ -360,14 +373,14 @@ namespace OrchestratorUi
             gb_UploadPhis.Controls.Add(lbl_Phase3Progress);
             gb_UploadPhis.Location = new Point(790, 140);
             gb_UploadPhis.Name = "gb_UploadPhis";
-            gb_UploadPhis.Size = new Size(254, 175);
+            gb_UploadPhis.Size = new Size(254, 213);
             gb_UploadPhis.TabIndex = 4;
             gb_UploadPhis.TabStop = false;
             gb_UploadPhis.Text = "Phase 3 — PHIS Document Upload";
             // 
             // pb_Phase3
             // 
-            pb_Phase3.Location = new Point(6, 86);
+            pb_Phase3.Location = new Point(6, 181);
             pb_Phase3.Name = "pb_Phase3";
             pb_Phase3.Size = new Size(228, 14);
             pb_Phase3.Style = ProgressBarStyle.Continuous;
@@ -382,19 +395,6 @@ namespace OrchestratorUi
             lbl_Phase3Progress.Size = new Size(228, 18);
             lbl_Phase3Progress.TabIndex = 2;
             lbl_Phase3Progress.TextAlign = ContentAlignment.MiddleCenter;
-            // 
-            // bt_test
-            // 
-            bt_test.BackColor = Color.SeaGreen;
-            bt_test.FlatStyle = FlatStyle.Flat;
-            bt_test.ForeColor = Color.White;
-            bt_test.Location = new Point(6, 241);
-            bt_test.Name = "bt_test";
-            bt_test.Size = new Size(98, 32);
-            bt_test.TabIndex = 12;
-            bt_test.Text = "Test";
-            bt_test.UseVisualStyleBackColor = false;
-            bt_test.Click += bt_test_Click;
             // 
             // UploadConsent
             // 
@@ -450,6 +450,6 @@ namespace OrchestratorUi
         private Button bt_AppendFileRose;
         private ProgressBar pb_Phase3;
         private Label lbl_Phase3Progress;
-        private Button bt_test;
+        private Button bt_ScanPdf;
     }
 }

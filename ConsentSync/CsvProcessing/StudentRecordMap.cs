@@ -38,6 +38,18 @@ namespace CsvProcessing
             Map(m => m.ClientIdStatus).Name("ClientIdStatus")
                 .TypeConverter<ClientIdStatusConverter>();
             Map(m => m.BestMatch).Name("BestMatch").Optional(); // Optional for backward compatibility
+
+            // ✅ Optional — not present in existing CSVs produced before scanned support
+            Map(m => m.IsScanPdf).Name("IsScanPdf")
+                .TypeConverter<SafeBooleanConverter>()
+                .Optional();
+
+            Map(m => m.PdfName).Name("PdfName")
+                .Optional();
+
+            Map(m => m.IsScanPdfReady).Name("IsScanPdfReady")
+                .TypeConverter<SafeBooleanConverter>()
+                .Optional();
         }
     }
 

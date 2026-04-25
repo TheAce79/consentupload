@@ -89,7 +89,7 @@ namespace OrchestratorUi
 
             // ── Show bt_test only when Phase3:Testing:Enabled = true ──
             var config = ConfigurationService.GetConfiguration();
-            bt_test.Visible = config.GetValue<bool>("Phase3:Testing:Enabled");
+            bt_ScanPdf.Visible = config.GetValue<bool>("Phase3:Testing:Enabled");
 
             RefreshChromeButtonState();
         }
@@ -164,6 +164,7 @@ namespace OrchestratorUi
                 {
                     LoggerService.LogError("❌ Phase 1 failed with a critical error.");
                     MessageBox.Show(
+                        this,
                         "❌ Phase 1 encountered a critical error and could not complete.\n\n" +
                         "Possible causes:\n" +
                         "  • Chrome / ChromeDriver not found or version mismatch\n" +
@@ -181,6 +182,7 @@ namespace OrchestratorUi
                 {
                     LoggerService.LogInformation("ℹ️  All students already processed.");
                     MessageBox.Show(
+                        this,
                         "ℹ️  All students have already been processed.\n\n" +
                         $"  📋 Total students        : {phase1Result.TotalStudents}\n" +
                         $"  ✅ Client IDs found      : {phase1Result.FoundCount}\n" +
@@ -199,6 +201,7 @@ namespace OrchestratorUi
                     LoggerService.LogInformation($"⏸️  Batch limit reached — {remaining} record(s) remaining.");
 
                     var answer = MessageBox.Show(
+                        this,
                         $"⏸️  Batch completed — more records remain.\n\n" +
                         $"  ✅ Found in this batch     : {phase1Result.FoundCount}\n" +
                         $"  ⚠️  Manual review needed   : {phase1Result.ManualReviewCount}\n" +
@@ -223,6 +226,7 @@ namespace OrchestratorUi
                     LoggerService.LogWarning($"⚠️  {phase1Result.ManualReviewCount} student(s) need manual review.");
 
                     var answer = MessageBox.Show(
+                        this,
                         $"⚠️  Phase 1 completed — {phase1Result.ManualReviewCount} record(s) need manual attention.\n\n" +
                         $"  ✅ Client IDs found       : {phase1Result.FoundCount}\n" +
                         $"  ♻️  Duplicates assigned   : {phase1Result.DuplicatesAssigned}\n" +
@@ -248,6 +252,7 @@ namespace OrchestratorUi
                     // ── Full success ──────────────────────────────────
                     LoggerService.LogInformation("✅ Phase 1 completed successfully — all Client IDs found.");
                     MessageBox.Show(
+                        this,
                         $"✅ Phase 1 completed successfully.\n\n" +
                         $"  ✅ Client IDs found       : {phase1Result.FoundCount}\n" +
                         $"  ♻️  Duplicates assigned   : {phase1Result.DuplicatesAssigned}\n" +
@@ -261,6 +266,7 @@ namespace OrchestratorUi
             {
                 LoggerService.LogError($"❌ Browser error: {ex.Message}", ex);
                 MessageBox.Show(
+                    this,
                     $"❌ A browser error occurred.\n\n{ex.Message}\n\n" +
                     "Ensure Portable Chrome is installed and ChromeDriver version matches.\n" +
                     "Use the '🌐 Download Portable Chrome' button to re-install if needed.",
@@ -270,6 +276,7 @@ namespace OrchestratorUi
             {
                 LoggerService.LogError($"❌ Unexpected Phase 1 error: {ex.Message}", ex);
                 MessageBox.Show(
+                    this,
                     $"❌ An unexpected error occurred during Phase 1:\n\n{ex.Message}\n\n" +
                     "Check the log panel for the full stack trace.",
                     "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -355,6 +362,7 @@ namespace OrchestratorUi
             {
                 LoggerService.LogWarning($"⚠️  Pre-flight failed: {processedCsvPath}");
                 MessageBox.Show(
+                    this,
                     $"⚠️  The processed CSV file was not found.\n\n" +
                     $"  Expected file   : {csvConfig.OutputCsvFileName}\n" +
                     $"  Expected folder : {csvWs.GetProcessedCsvPath()}\n\n" +
@@ -376,6 +384,7 @@ namespace OrchestratorUi
             {
                 LoggerService.LogWarning($"⚠️  chrome.exe not found: {check.ChromePath}");
                 MessageBox.Show(
+                    this,
                     $"⚠️  Portable Chrome was not found.\n\n" +
                     $"  Expected: {check.ChromePath}\n\n" +
                     "Please click  🌐 Download Portable Chrome  to install it.",
@@ -387,6 +396,7 @@ namespace OrchestratorUi
             {
                 LoggerService.LogWarning($"⚠️  chromedriver.exe not found: {check.DriverPath}");
                 MessageBox.Show(
+                    this,
                     $"⚠️  ChromeDriver was not found.\n\n" +
                     $"  Expected: {check.DriverPath}\n\n" +
                     "Please click  🌐 Download Portable Chrome  to re-download both\n" +
@@ -399,6 +409,7 @@ namespace OrchestratorUi
             {
                 LoggerService.LogWarning($"⚠️  Version mismatch — {check.ErrorMessage}");
                 var answer = MessageBox.Show(
+                    this,
                     $"⚠️  Chrome and ChromeDriver version mismatch!\n\n" +
                     $"  chrome.exe       : v{check.ChromeVersion}\n" +
                     $"  chromedriver.exe : v{check.DriverVersion}\n\n" +
@@ -437,6 +448,7 @@ namespace OrchestratorUi
                     int readyCount = Directory.GetFiles(outputReadyPath, "*.pdf", SearchOption.AllDirectories).Length;
                     LoggerService.LogInformation("ℹ️  Bulk PDF extraction already completed.");
                     MessageBox.Show(
+                        this,
                         $"The bulk PDF has already been extracted.\n\n" +
                         $"  ✅  {readyCount} file(s) are ready in the output folder.\n\n" +
                         $"Output folder:\n{outputReadyPath}\n\n" +
@@ -449,6 +461,7 @@ namespace OrchestratorUi
                 {
                     LoggerService.LogInformation("⚠️  No bulk PDF found — input and output folders are both empty.");
                     MessageBox.Show(
+                        this,
                         $"No bulk PDF was found.\n\n" +
                         $"Please place your bulk PDF file into the following folder, then try again:\n\n" +
                         $"{inputBulkPath}",
@@ -466,6 +479,7 @@ namespace OrchestratorUi
                     int total = result.TotalExtracted + result.DuplicatesFound;
                     LoggerService.LogInformation($"✅ Extraction complete — {total} total file(s).");
                     MessageBox.Show(
+                        this,
                         $"✅ Bulk PDF extraction completed successfully.\n\n" +
                         $"  Total files extracted  :  {total}\n" +
                         $"  ├── Unique files       :  {result.TotalExtracted}\n" +
@@ -477,6 +491,7 @@ namespace OrchestratorUi
                 else
                 {
                     MessageBox.Show(
+                        this,
                         $"⚠️  Extraction completed with errors.\n\n{result.ErrorMessage}\n\nCheck the log for details.",
                         "Extraction Errors", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
@@ -484,7 +499,7 @@ namespace OrchestratorUi
             catch (Exception ex)
             {
                 LoggerService.LogError($"❌ Bulk extraction failed: {ex.Message}", ex);
-                MessageBox.Show($"❌ An unexpected error occurred:\n\n{ex.Message}",
+                MessageBox.Show(this, $"❌ An unexpected error occurred:\n\n{ex.Message}",
                     "Extraction Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
@@ -513,6 +528,7 @@ namespace OrchestratorUi
                 if (!File.Exists(inputFile) && !File.Exists(processedFile))
                 {
                     MessageBox.Show(
+                        this,
                         $"No CSV file was found.\n\nPlease drop \"{csvConfig.InputCsvFileName}\" into:\n\n{inputCsvFolder}",
                         "No CSV Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
@@ -542,6 +558,7 @@ namespace OrchestratorUi
                         : string.Empty;
 
                     var ans = MessageBox.Show(
+                        this,
                         $"A processed CSV already exists:\n\n{processedFile}\n\n" +
                         $"  Last modified : {fi.LastWriteTime:yyyy-MM-dd HH:mm}\n" +
                         $"  Size          : {fi.Length / 1024.0:F1} KB\n" +
@@ -576,13 +593,13 @@ namespace OrchestratorUi
                     repo.DisplayStatistics();
                 });
 
-                MessageBox.Show("✅ CSV processing completed successfully.\n\nSee the log for a preview and statistics.",
+                MessageBox.Show(this,"✅ CSV processing completed successfully.\n\nSee the log for a preview and statistics.",
                     "Processing Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
                 LoggerService.LogError($"❌ CSV processing failed: {ex.Message}", ex);
-                MessageBox.Show($"❌ An unexpected error occurred:\n\n{ex.Message}",
+                MessageBox.Show(this,$"❌ An unexpected error occurred:\n\n{ex.Message}",
                     "Processing Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
@@ -644,6 +661,7 @@ namespace OrchestratorUi
                             cancellationToken: _chromeCts.Token));
 
                     MessageBox.Show(
+                        this,
                         success
                             ? "✅ ChromeDriver updated successfully!\n\nIt now matches your system Chrome version."
                             : "❌ ChromeDriver update failed.\nCheck the log panel for details.",
@@ -658,6 +676,7 @@ namespace OrchestratorUi
                 if (File.Exists(chromeConfig.PortableChromePath))
                 {
                     if (MessageBox.Show(
+                        this,
                         $"✅ Portable Chrome is already installed at:\n{chromeConfig.PortableChromePath}\n\nRe-download anyway?",
                         "Already Installed", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                         return;
@@ -678,12 +697,13 @@ namespace OrchestratorUi
                         SearchOption.AllDirectories).FirstOrDefault();
                     if (chrome != null) SaveChromePathToConfig(chrome);
                     MessageBox.Show(
+                        this,
                         $"✅ Portable Chrome is ready!\n\n{chrome ?? chromeConfig.PortableChromeExtractTo}",
                         "Download Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
                 {
-                    MessageBox.Show("❌ Download failed.\nCheck the log for details.",
+                    MessageBox.Show(this,"❌ Download failed.\nCheck the log for details.",
                         "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
@@ -736,12 +756,12 @@ namespace OrchestratorUi
 
         private void btn_SaveConfig_Click(object sender, EventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(txt_BaseDir.Text)) { MessageBox.Show("❌ Base Directory cannot be empty.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (string.IsNullOrWhiteSpace(txt_SchoolName.Text)) { MessageBox.Show("❌ School Name cannot be empty.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (!int.TryParse(txtBox_BatchSize.Text, out int batchSize) || batchSize < 1) { MessageBox.Show("❌ Batch Size must be a number greater than 0.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (string.IsNullOrWhiteSpace(txt_BaseDir.Text)) { MessageBox.Show(this,"❌ Base Directory cannot be empty.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (string.IsNullOrWhiteSpace(txt_SchoolName.Text)) { MessageBox.Show(this,"❌ School Name cannot be empty.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (!int.TryParse(txtBox_BatchSize.Text, out int batchSize) || batchSize < 1) { MessageBox.Show(this,"❌ Batch Size must be a number greater than 0.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
             var dirError = WorkspaceInitializer.ValidateBaseDirectory(txt_BaseDir.Text);
-            if (dirError != null) { MessageBox.Show($"❌ {dirError}", "Directory Error", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+            if (dirError != null) { MessageBox.Show(this,$"❌ {dirError}", "Directory Error", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
 
             try
             {
@@ -761,9 +781,9 @@ namespace OrchestratorUi
 
                 ConfigurationService.ReloadConfiguration();
                 WorkspaceInitializer.EnsureAllFoldersExist();
-                MessageBox.Show($"✅ Configuration saved!\n\n  Base Dir : {txt_BaseDir.Text}\n  School   : {txt_SchoolName.Text}\n  Grade    : {cb_Grade.SelectedItem}\n  Batch    : {batchSize}", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this,$"✅ Configuration saved!\n\n  Base Dir : {txt_BaseDir.Text}\n  School   : {txt_SchoolName.Text}\n  Grade    : {cb_Grade.SelectedItem}\n  Batch    : {batchSize}", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            catch (Exception ex) { MessageBox.Show($"❌ Failed to save:\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            catch (Exception ex) { MessageBox.Show(this,$"❌ Failed to save:\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
 
 
@@ -801,6 +821,7 @@ namespace OrchestratorUi
                 {
                     LoggerService.LogError("❌ Phase 2 completed with errors.");
                     MessageBox.Show(
+                        this,
                         "❌ PDF Validation encountered errors and could not complete.\n\n" +
                         "Please check the log panel for details.",
                         "Validation Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -852,6 +873,7 @@ namespace OrchestratorUi
                     : string.Empty;
 
                 MessageBox.Show(
+                    this,
                     $"🔍 PDF Validation complete.\n\n" +
                     $"  📄 Total PDFs          : {phase2Result.TotalPdfs}\n" +
                     $"  ✅ Matched             : {phase2Result.SuccessfullyProcessed}\n" +
@@ -871,6 +893,7 @@ namespace OrchestratorUi
             {
                 LoggerService.LogError($"❌ Unexpected error during validation: {ex.Message}", ex);
                 MessageBox.Show(
+                    this,
                     $"❌ An unexpected error occurred:\n\n{ex.Message}\n\nCheck the log panel for details.",
                     "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
@@ -914,6 +937,7 @@ namespace OrchestratorUi
                 {
                     LoggerService.LogError("❌ Pre-Phase 3 completed with errors.");
                     MessageBox.Show(
+                        this,
                         "❌ Upload CSV generation encountered errors.\n\n" +
                         "Review Validation_Results.csv for records with missing PDFs,\n" +
                         "then retry.",
@@ -927,6 +951,7 @@ namespace OrchestratorUi
                     var pdfSourcePath = ConfigurationService.GetBulkPdfExtractionConfig().GetOutputReadyPath();
                     LoggerService.LogInformation("ℹ️  Already processed — nothing new to generate.");
                     MessageBox.Show(
+                        this,
                         "ℹ️  Everything is already processed.\n\n" +
                         "  • The Upload CSV already exists.\n" +
                         "  • 3_Output_Ready is empty.\n\n" +
@@ -995,6 +1020,7 @@ namespace OrchestratorUi
                     : MessageBoxIcon.Information;
 
                 MessageBox.Show(
+                    this,
                     $"{icon} Upload CSV updated.\n\n" +
                     $"  ✅ New rows appended      : {prePhase3Result.UploadRecordsCreated}\n" +
                     $"  📋 FileRose records       : {prePhase3Result.FileRoseRecordsCreated}\n" +
@@ -1011,6 +1037,7 @@ namespace OrchestratorUi
             {
                 LoggerService.LogError($"❌ Unexpected error generating Upload CSV: {ex.Message}", ex);
                 MessageBox.Show(
+                    this,
                     $"❌ An unexpected error occurred:\n\n{ex.Message}\n\nCheck the log panel for details.",
                     "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
@@ -1076,6 +1103,7 @@ namespace OrchestratorUi
                         "Upload CSV will NOT be updated.");
 
                     MessageBox.Show(
+                        this,
                         $"❌ FileRose extraction encountered {extractionResult.Errors} error(s).\n\n" +
                         "Files with errors have been LEFT in the scan folder for you to fix:\n\n" +
                         string.Join("\n", errorLines) +
@@ -1105,6 +1133,7 @@ namespace OrchestratorUi
                     int extra = extractionResult.PendingFileRoseRows.Count - 8;
 
                     var answer = MessageBox.Show(
+                        this,
                         $"⚠️  {extractionResult.PendingFileRoseRows.Count} student(s) have " +
                         "IsFileRoseDefault=True but no PDF was found in the scan folder " +
                         "(IsFileRoseExtracted=False):\n\n" +
@@ -1135,6 +1164,7 @@ namespace OrchestratorUi
                     LoggerService.LogInformation(
                         "ℹ️  No FileRose PDFs in the output folder — nothing to append.");
                     MessageBox.Show(
+                        this,
                         "ℹ️  No FileRose PDFs are ready for upload.\n\n" +
                         "Ensure the scan folder contains files named {ClientId}.pdf and that\n" +
                         "those ClientIds appear in Validation_Results.csv with\n" +
@@ -1166,6 +1196,7 @@ namespace OrchestratorUi
                 if (appendResult.HasErrors)
                 {
                     MessageBox.Show(
+                        this,
                         "❌ FileRose append encountered errors.\n\n" +
                         string.Join("\n", appendResult.Messages.Take(5)) +
                         "\n\nCheck the log panel for details.",
@@ -1180,6 +1211,7 @@ namespace OrchestratorUi
                     : string.Empty;
 
                 MessageBox.Show(
+                    this,
                     $"🌹 FileRose — Extraction & Append complete.\n\n" +
                     $"  Extraction:\n" +
                     $"    ✅ Moved to upload folder : {extractionResult.Extracted}\n" +
@@ -1198,7 +1230,7 @@ namespace OrchestratorUi
             catch (Exception ex)
             {
                 LoggerService.LogError($"❌ Unexpected error in FileRose append: {ex.Message}", ex);
-                MessageBox.Show($"❌ Unexpected error:\n\n{ex.Message}",
+                MessageBox.Show(this,$"❌ Unexpected error:\n\n{ex.Message}",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
@@ -1285,6 +1317,7 @@ namespace OrchestratorUi
                     {
                         LoggerService.LogError("❌ PHIS login failed — cannot proceed with upload.");
                         MessageBox.Show(
+                            this,
                             "❌ Could not log into PHIS.\n\n" +
                             "Ensure your credentials are correct and the PHIS portal is accessible,\n" +
                             "then try again.",
@@ -1332,6 +1365,7 @@ namespace OrchestratorUi
                 if (phase3Result.BatchLimitReached)
                 {
                     var answer = MessageBox.Show(
+                        this,
                         $"⏸️  Batch limit reached — upload paused.\n\n" +
                         $"  ✅ Uploaded this batch : {phase3Result.SuccessfulUploads}\n" +
                         $"  📋 Total records      : {phase3Result.TotalRecords}\n\n" +
@@ -1351,6 +1385,7 @@ namespace OrchestratorUi
                 else if (phase3Result.IsSuccessful)
                 {
                     MessageBox.Show(
+                        this,
                         $"✅ All documents uploaded successfully to PHIS.\n\n" +
                         $"  ✅ Successful uploads : {phase3Result.SuccessfulUploads}\n" +
                         $"  📋 Total records     : {phase3Result.TotalRecords}\n\n" +
@@ -1360,6 +1395,7 @@ namespace OrchestratorUi
                 else
                 {
                     MessageBox.Show(
+                        this,
                         $"⚠️  Upload completed with errors.\n\n" +
                         $"  ✅ Successful : {phase3Result.SuccessfulUploads}\n" +
                         $"  ❌ Failed     : {phase3Result.TotalRecords - phase3Result.SuccessfulUploads}\n\n" +
@@ -1372,6 +1408,7 @@ namespace OrchestratorUi
             {
                 LoggerService.LogError($"❌ Browser error during upload: {ex.Message}", ex);
                 MessageBox.Show(
+                    this,
                     $"❌ A browser error occurred during upload.\n\n{ex.Message}\n\n" +
                     "The Chrome session may have timed out. Try running Phase 1 first\n" +
                     "to establish a fresh PHIS session.",
@@ -1381,6 +1418,7 @@ namespace OrchestratorUi
             {
                 LoggerService.LogError($"❌ Unexpected error during upload: {ex.Message}", ex);
                 MessageBox.Show(
+                    this,
                     $"❌ An unexpected error occurred:\n\n{ex.Message}\n\nCheck the log panel for details.",
                     "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
@@ -1637,6 +1675,7 @@ namespace OrchestratorUi
                       "  4. Retry.";
 
                 var answer = MessageBox.Show(
+                    this,
                     $"⚠️  {displayLines.Count} duplicate group(s) have NOT been fully resolved.\n\n" +
                     string.Join(Environment.NewLine, shown) +
                     "\n\n" +
@@ -1674,14 +1713,41 @@ namespace OrchestratorUi
             return name.Trim();
         }
 
-        private void bt_test_Click(object sender, EventArgs e)
-        {
-            var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
-            var testPath = bulkConfig.GetInputScannedPath();   // change to any folder you want to test
 
-            LoggerService.LogInformation($"\n🧪 Running test on: {testPath}");
-            Task.Run(() => TestUtils.ReadPdfName(testPath));
+        private void bt_ScanPdf_Click(object sender, EventArgs e)
+        {
+            bt_ScanPdf.Enabled = false;
+            bt_ScanPdf.Text = "⏳ Processing Scanned PDFs…";
+
+            LoggerService.LogInformation("\n🧪 Processing Scanned Folder...");
+
+            Task.Run(() =>
+            {
+                ConsentSyncCore.Services.Pdf.BulkPdfExtractor.ProcessScannedFolder();
+                LoggerService.LogInformation("✅ Scanned folder processing complete.");
+            }).ContinueWith(_ =>
+            {
+                this.InvokeIfRequired(() =>
+                {
+                    bt_ScanPdf.Enabled = true;
+                    bt_ScanPdf.Text = "🧪 Process Scanned PDFs (Test)";
+
+                    // ✅ Pass 'this' as owner so the dialog is always parented to
+                    //    the main form and cannot slip behind it.
+                    MessageBox.Show(
+                        this,
+                        "🧪 Scanned PDF processing complete.\n\n" +
+                        "  • Extracted rows have been appended to the CSV.\n" +
+                        "  • Successfully processed PDFs were moved to ScannedOK.\n" +
+                        "  • PDFs that could not be fully extracted remain in the scanned folder.\n\n" +
+                        "Check the log panel for a detailed per-file report.",
+                        "Scanned PDFs Processed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                });
+            });
         }
+
 
 
 
@@ -1729,6 +1795,7 @@ namespace OrchestratorUi
                     shown.Add($"  … and {notProcessed.Count - 10} more — see log panel");
 
                 MessageBox.Show(
+                    this,
                     $"⚠️  {callerLabel} cannot run yet.\n\n" +
                     $"  {notProcessed.Count} student(s) still have ClientIdStatus = NotProcessed.\n\n" +
                     "All rows must be either:\n" +

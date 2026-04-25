@@ -62,6 +62,27 @@ namespace ConsentSyncCore.Models
         /// Only populated when ClientIdStatus = NeedsManualReview
         /// </summary>
         public string BestMatch { get; set; } = string.Empty;
+
+
+        // ── Scanned PDF columns ───────────────────────────────────────────────
+
+        /// <summary>
+        /// True when this row was produced by reading from the scanned input folder.
+        /// False when produced from the bulk PDF extraction path (production).
+        /// </summary>
+        public bool IsScanPdf { get; set; } = false;
+
+        /// <summary>
+        /// Original file name of the PDF that produced this row.
+        /// </summary>
+        public string PdfName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// True only when IsScanPdf=true AND all fields (FirstName, LastName, DOB)
+        /// were successfully extracted from the scanned PDF.
+        /// </summary>
+        public bool IsScanPdfReady { get; set; } = false;
+
     }
 
    
