@@ -1265,56 +1265,93 @@ namespace ConsentSyncCore.Services.Pdf
         }
 
 
+        ////private static (string? firstName, string? lastName, string? dateOfBirth) ExtractDetailsFromOCRText(string ocrResult)
+        ////{
+        ////    // 1. Ensure support for Windows-1252 in .NET Core/.NET 9 (if not already registered in Program.cs/Startup)
+        ////    Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
+        ////    // 2. Define encodings
+        ////    Encoding utf8 = Encoding.UTF8;
+        ////    Encoding win1252 = Encoding.GetEncoding(1252); // "Western European (Windows)"
+
+        ////    // 3. Convert the string to Windows-1252
+        ////    byte[] utf8Bytes = utf8.GetBytes(ocrResult);
+        ////    byte[] win1252Bytes = Encoding.Convert(utf8, win1252, utf8Bytes);
+
+        ////    // 4. Decoded string for extraction
+        ////    string decodedText = win1252.GetString(win1252Bytes);
+
+        ////    string? firstName = null;
+        ////    string? lastName = null;
+        ////    string? dateOfBirth = null;
+
+        ////    // --- Extractions ---
+
+        ////    // Extract Date of Birth - matches formats like 2013-11-27 or 2013/11/27
+        ////    Match dobMatch = Regex.Match(decodedText, @"\b(\d{4}[-/]\d{2}[-/]\d{2})\b");
+        ////    if (dobMatch.Success)
+        ////    {
+        ////        dateOfBirth = dobMatch.Groups[1].Value;
+        ////    }
+
+        ////    // Extract Last Name (NOM DE FAMILLE). Looks for the label and captures the next likely line.
+        ////    // NOTE: OCR newline patterns vary, adjust the spacing (\s) as needed for your specific OCR output.
+        ////    Match lastNameMatch = Regex.Match(decodedText, @"NOM DE FAMILLE[:\s]*\r?\n([A-Za-zÀ-ÿ\-]+)", RegexOptions.IgnoreCase);
+        ////    if (lastNameMatch.Success)
+        ////    {
+        ////        lastName = lastNameMatch.Groups[1].Value.Trim();
+        ////    }
+
+        ////    // Extract First Name (PRÉNOM). Looks for PRÉNOM but avoids capturing PRÉNOM PRÉFÉRÉ on the same line.
+        ////    Match firstNameMatch = Regex.Match(decodedText, @"PRÉNOM(?![ ]+PRÉFÉRÉ)[:\s]*\r?\n([A-Za-zÀ-ÿ\-\s]+)", RegexOptions.IgnoreCase);
+        ////    if (firstNameMatch.Success)
+        ////    {
+        ////        // Often OCR might lump first name and last name together like "Malik Perry", split if necessary
+        ////        firstName = firstNameMatch.Groups[1].Value.Trim();
+        ////    }
+
+        ////    return (firstName, lastName, dateOfBirth);
+        ////}
+
+
         private static (string? firstName, string? lastName, string? dateOfBirth) ExtractDetailsFromOCRText(string ocrResult)
         {
-            // 1. Ensure support for Windows-1252 in .NET Core/.NET 9 (if not already registered in Program.cs/Startup)
+            // No need to register provider here if you use EncodingConfigurationService elsewhere,
+            // but it doesn't hurt.
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
-            // 2. Define encodings
-            Encoding utf8 = Encoding.UTF8;
-            Encoding win1252 = Encoding.GetEncoding(1252); // "Western European (Windows)"
-
-            // 3. Convert the string to Windows-1252
-            byte[] utf8Bytes = utf8.GetBytes(ocrResult);
-            byte[] win1252Bytes = Encoding.Convert(utf8, win1252, utf8Bytes);
-
-            // 4. Decoded string for extraction
-            string decodedText = win1252.GetString(win1252Bytes);
+            // Use the raw ocrResult. C# strings handle 'È' and 'ë' natively.
+            string text = ocrResult;
 
             string? firstName = null;
             string? lastName = null;
             string? dateOfBirth = null;
 
-            // --- Extractions ---
+            // --- Date of Birth ---
+            // Matches YYYY-MM-DD or YYYY/MM/DD
+            Match dobMatch = Regex.Match(text, @"\b(\d{4}[-/]\d{2}[-/]\d{2})\b");
+            if (dobMatch.Success) dateOfBirth = dobMatch.Groups[1].Value;
 
-            // Extract Date of Birth - matches formats like 2013-11-27 or 2013/11/27
-            Match dobMatch = Regex.Match(decodedText, @"\b(\d{4}[-/]\d{2}[-/]\d{2})\b");
-            if (dobMatch.Success)
-            {
-                dateOfBirth = dobMatch.Groups[1].Value;
-            }
-
-            // Extract Last Name (NOM DE FAMILLE). Looks for the label and captures the next likely line.
-            // NOTE: OCR newline patterns vary, adjust the spacing (\s) as needed for your specific OCR output.
-            Match lastNameMatch = Regex.Match(decodedText, @"NOM DE FAMILLE[:\s]*\r?\n([A-Za-zÀ-ÿ\-]+)", RegexOptions.IgnoreCase);
+            // --- Last Name (NOM DE FAMILLE) ---
+            // Look for the label, allow optional colon/spaces, and capture the next word(s)
+            // Supports names on the same line OR the next line.
+            var lastNameMatch = Regex.Match(text, @"NOM DE FAMILLE[:\s]+(?:\r?\n)?([A-ZÀ-ÿ][A-Za-zÀ-ÿ\-\s']+)", RegexOptions.IgnoreCase);
             if (lastNameMatch.Success)
             {
-                lastName = lastNameMatch.Groups[1].Value.Trim();
+                lastName = lastNameMatch.Groups[1].Value.Trim().Split('\n')[0].Trim();
             }
 
-            // Extract First Name (PRÉNOM). Looks for PRÉNOM but avoids capturing PRÉNOM PRÉFÉRÉ on the same line.
-            Match firstNameMatch = Regex.Match(decodedText, @"PRÉNOM(?![ ]+PRÉFÉRÉ)[:\s]*\r?\n([A-Za-zÀ-ÿ\-\s]+)", RegexOptions.IgnoreCase);
+            // --- First Name (PRÉNOM) ---
+            // Negative lookahead for "PRÉFÉRÉ" is smart! 
+            // Added support for names on same line or next line.
+            var firstNameMatch = Regex.Match(text, @"PRÉNOM(?![ ]+PRÉFÉRÉ)[:\s]+(?:\r?\n)?([A-ZÀ-ÿ][A-Za-zÀ-ÿ\-\s']+)", RegexOptions.IgnoreCase);
             if (firstNameMatch.Success)
             {
-                // Often OCR might lump first name and last name together like "Malik Perry", split if necessary
-                firstName = firstNameMatch.Groups[1].Value.Trim();
+                firstName = firstNameMatch.Groups[1].Value.Trim().Split('\n')[0].Trim();
             }
 
             return (firstName, lastName, dateOfBirth);
         }
-
-
-
 
 
 

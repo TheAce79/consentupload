@@ -118,7 +118,10 @@ namespace ConsentSyncCore.Services
             LoggerService.LogInformation($"   📄 CSV  : {_validationCsvPath}");
             LoggerService.LogInformation($"   📁 Scan : {_fileRoseDirectory}");
 
-            var lines = File.ReadAllLines(_validationCsvPath, Encoding.UTF8);
+            // ✅ Resolve the same Priority 1 encoding used by your CSVs
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
+            var lines = File.ReadAllLines(_validationCsvPath, targetEncoding);
 
             if (lines.Length < 2)
             {
@@ -205,7 +208,7 @@ namespace ConsentSyncCore.Services
             if (patchedLines > 0)
             {
                 string tempPath = _validationCsvPath + ".tmp";
-                File.WriteAllLines(tempPath, lines, Encoding.UTF8);
+                File.WriteAllLines(tempPath, lines, targetEncoding);
                 File.Move(tempPath, _validationCsvPath, overwrite: true);
 
                 LoggerService.LogInformation(

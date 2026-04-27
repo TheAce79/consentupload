@@ -93,8 +93,10 @@ namespace ConsentSyncCore.Services
             LoggerService.LogInformation($"   📋 CSV     : {_validationCsvPath}");
             LoggerService.LogInformation($"   📅 Year    : {_schoolYear}  |  Suffix : {_roseSuffix}");
 
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
             // ── Load entire CSV into memory ───────────────────────────────────
-            var lines = File.ReadAllLines(_validationCsvPath, Encoding.UTF8);
+            var lines = File.ReadAllLines(_validationCsvPath, targetEncoding);
             if (lines.Length < 2)
             {
                 LoggerService.LogWarning("⚠️  Validation_Results.csv is empty or has no data rows.");
@@ -264,7 +266,7 @@ namespace ConsentSyncCore.Services
             if (patchedLines > 0)
             {
                 string tempPath = _validationCsvPath + ".tmp";
-                File.WriteAllLines(tempPath, lines, Encoding.UTF8);
+                File.WriteAllLines(tempPath, lines, targetEncoding);
                 File.Move(tempPath, _validationCsvPath, overwrite: true);
                 LoggerService.LogInformation(
                     $"\n   ✅ Validation_Results.csv rewritten — {patchedLines} field(s) updated.");
@@ -394,6 +396,9 @@ namespace ConsentSyncCore.Services
                 return;
             }
 
+            // ✅ Resolve the same Priority 1 encoding used by your CSVs
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
             var sb = new StringBuilder();
             sb.AppendLine("╔══════════════════════════════════════════════════════════════╗");
             sb.AppendLine("║       FileRose Extraction — Error Summary                    ║");
@@ -451,7 +456,7 @@ namespace ConsentSyncCore.Services
             sb.AppendLine("  After fixing ALL errors, click '🌹 Append FileRose Rows' again.");
             sb.AppendLine(new string('═', 64));
 
-            File.WriteAllText(summaryPath, sb.ToString(), Encoding.UTF8);
+            File.WriteAllText(summaryPath, sb.ToString(), targetEncoding);
             LoggerService.LogWarning(
                 $"\n   ⚠️  {result.Errors} error(s) — summary: {summaryPath}");
         }

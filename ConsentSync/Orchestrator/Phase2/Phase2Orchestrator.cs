@@ -634,7 +634,10 @@ namespace Orchestrator.Phase2
             Directory.CreateDirectory(_phase2Config.ValidationCsvPath);
             var outputPath = Path.Combine(_phase2Config.ValidationCsvPath, _phase2Config.ValidationResultsCsv);
 
-            using (var writer = new StreamWriter(outputPath, false, Encoding.UTF8))
+            // ✅ Use the centralized service for priority encoding
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
+            using (var writer = new StreamWriter(outputPath, false, targetEncoding))
             using (var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture)))
             {
                 csv.Context.RegisterClassMap<ValidationRecordMap>();

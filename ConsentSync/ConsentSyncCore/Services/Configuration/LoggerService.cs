@@ -125,6 +125,9 @@ namespace ConsentSyncCore.Services.Configuration
 
                 Directory.CreateDirectory(_fileConfig.LogPath);
 
+                // ✅ Resolve the same Priority 1 encoding used by your CSVs
+                var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
                 var fileName = _fileConfig.LogFileName.Replace("{Date}", DateTime.Now.ToString("yyyyMMdd"));
                 var fullPath = Path.Combine(_fileConfig.LogPath, fileName);
 
@@ -142,7 +145,7 @@ namespace ConsentSyncCore.Services.Configuration
                     Console.WriteLine($"   📦 Rotated log file: {Path.GetFileName(archiveName)}");
                 }
 
-                _fileWriter = new StreamWriter(fullPath, append: true, encoding: Encoding.UTF8)
+                _fileWriter = new StreamWriter(fullPath, append: true, encoding: targetEncoding)
                 {
                     AutoFlush = true
                 };

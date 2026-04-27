@@ -9,9 +9,10 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
     /// <summary>
     /// Bulk PDF Extraction configuration (standalone - can run at any phase)
     /// Folder structure:
-    ///   1_Input_Bulk
-    ///   2_Input_Scanned
+    ///   1_Input_Bulk       ← users drop dowloaded PDFs from SNB here
+    ///   2_Input_Scanned    ← users drop scanned PDFs here
     ///   3_Output_Ready
+    ///   ├── ScannedOK/
     ///   4 FileRose Extraction/
     ///     ├── 1_Scan_FileRose/          ← users drop {ClientId}.pdf here
     ///     └── 3_Error_FileRose_Extraction/
@@ -37,6 +38,10 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         public string InputBulkFolder { get; set; } = "1_Input_Bulk";
         public string InputScannedFolder { get; set; } = "2_Input_Scanned";
         public string OutputReadyFolder { get; set; } = "3_Output_Ready";
+
+        // ✅ Add the subfolder name here
+        public string ScannedOkSubFolder { get; set; } = "ScannedOK";
+
         public string FileRoseFolder { get; set; } = "4 FileRose Extraction";
         public string DuplicateClientFolder { get; set; } = "5_Duplicate";
         public string ErrorFolder { get; set; } = "6_Error";
@@ -72,6 +77,12 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         public string GetInputBulkPath() => Path.Combine(BasePdfPath, InputBulkFolder);
         public string GetInputScannedPath() => Path.Combine(BasePdfPath, InputScannedFolder);
         public string GetOutputReadyPath() => Path.Combine(BasePdfPath, OutputReadyFolder);
+
+        // ✅ Add the path helper
+        /// <summary>
+        /// Path for finalized scanned PDFs (renamed to {ClientId}.pdf or {ID}_{Last}_{First}.pdf)
+        /// </summary>
+        public string GetScannedOkPath() => Path.Combine(GetOutputReadyPath(), ScannedOkSubFolder);
 
         // FileRose parent + its subfolders
         public string GetFileRosePath() => Path.Combine(BasePdfPath, FileRoseFolder);

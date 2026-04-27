@@ -306,6 +306,9 @@ namespace Orchestrator.Services
 
         private List<ValidationRecord> LoadValidationCsv()
         {
+            // ✅ Use the centralized service for priority encoding
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
             var path = Path.Combine(_prePhase3Config.ValidationCsvPath, _prePhase3Config.ValidationCsvFileName);
 
             if (!File.Exists(path))
@@ -314,7 +317,7 @@ namespace Orchestrator.Services
                 return new List<ValidationRecord>();
             }
 
-            using var reader = new StreamReader(path, Encoding.UTF8);
+            using var reader = new StreamReader(path, targetEncoding);
             using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
             {
                 MissingFieldFound = null,
@@ -326,10 +329,13 @@ namespace Orchestrator.Services
 
         private void SaveValidationCsv(List<ValidationRecord> records)
         {
+            // ✅ Use the centralized service for priority encoding
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
             var path = Path.Combine(_prePhase3Config.ValidationCsvPath, _prePhase3Config.ValidationCsvFileName);
             var tmpPath = path + ".tmp";
 
-            using (var writer = new StreamWriter(tmpPath, false, Encoding.UTF8))
+            using (var writer = new StreamWriter(tmpPath, false, targetEncoding))
             using (var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture)))
             {
                 csv.Context.RegisterClassMap<ValidationRecordMap>();

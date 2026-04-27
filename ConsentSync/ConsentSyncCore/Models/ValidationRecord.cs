@@ -56,6 +56,28 @@ namespace ConsentSyncCore.Models
         public double MatchScore { get; set; } = 0.0;
         public string ValidationNotes { get; set; } = string.Empty;
         public string MergedFromDuplicate { get; set; } = string.Empty;
+
+
+
+        //other field here
+        // ── Scanned PDF columns ───────────────────────────────────────────────
+
+        /// <summary>
+        /// True when this row was produced by reading from the scanned input folder.
+        /// False when produced from the bulk PDF extraction path (production).
+        /// </summary>
+        public bool IsScanPdf { get; set; } = false;
+
+        /// <summary>
+        /// Original file name of the PDF that produced this row.
+        /// </summary>
+        public string PdfName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// True only when IsScanPdf=true AND all fields (FirstName, LastName, DOB)
+        /// were successfully extracted from the scanned PDF.
+        /// </summary>
+        public bool IsScanPdfReady { get; set; } = false;
     }
 
 
@@ -95,6 +117,14 @@ namespace ConsentSyncCore.Models
             Map(m => m.MatchScore).Name("MatchScore");
             Map(m => m.ValidationNotes).Name("ValidationNotes");
             Map(m => m.MergedFromDuplicate).Name("MergedFromDuplicate");
+
+
+            // Inside ValidationRecordMap ctor
+            Map(m => m.IsScanPdf).Name("IsScanPdf").Default(false);
+            Map(m => m.PdfName).Name("PdfName").Default(string.Empty);
+            Map(m => m.IsScanPdfReady).Name("IsScanPdfReady").Default(false);
+
+
         }
 
     }

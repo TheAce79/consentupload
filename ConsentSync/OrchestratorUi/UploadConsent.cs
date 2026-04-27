@@ -1717,38 +1717,38 @@ namespace OrchestratorUi
         private void bt_ScanPdf_Click(object sender, EventArgs e)
         {
             bt_ScanPdf.Enabled = false;
-            bt_ScanPdf.Text = "⏳ Processing Scanned PDFs…";
+            bt_ScanPdf.Text = "⏳ Processing Scanned PDFs...";
 
-            LoggerService.LogInformation("\n🧪 Processing Scanned Folder...");
+            LoggerService.LogInformation("\n🧪 Starting Scanned PDF Workflow...");
 
+            // ✅ Only one Task.Run is needed.
             Task.Run(() =>
             {
+                var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+                string inputPath = bulkConfig.GetInputScannedPath();
+
+                // 1. First, OCR anything new in the folder
+                // This call is synchronous inside the Task, so it blocks the background thread (correctly)
                 ConsentSyncCore.Services.Pdf.BulkPdfExtractor.ProcessScannedFolder();
-                LoggerService.LogInformation("✅ Scanned folder processing complete.");
-            }).ContinueWith(_ =>
+
+                // 2. Then, Finalize anything that now has a ClientID
+                var promoted = ProcessScannedCsv.FinalizeAndPromoteScannedPdfs(inputPath);
+
+                LoggerService.LogInformation($"✅ Scanned process complete. {promoted.Count} students promoted to Validation Results.");
+            })
+            .ContinueWith(_ =>
             {
+                // This only executes once the code inside the Task.Run above is finished
                 this.InvokeIfRequired(() =>
                 {
                     bt_ScanPdf.Enabled = true;
                     bt_ScanPdf.Text = "🧪 Process Scanned PDFs (Test)";
 
-                    // ✅ Pass 'this' as owner so the dialog is always parented to
-                    //    the main form and cannot slip behind it.
-                    MessageBox.Show(
-                        this,
-                        "🧪 Scanned PDF processing complete.\n\n" +
-                        "  • Extracted rows have been appended to the CSV.\n" +
-                        "  • Successfully processed PDFs were moved to ScannedOK.\n" +
-                        "  • PDFs that could not be fully extracted remain in the scanned folder.\n\n" +
-                        "Check the log panel for a detailed per-file report.",
-                        "Scanned PDFs Processed",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
+                    MessageBox.Show(this, "Processing complete. Check the logs for details.",
+                        "Scanned PDFs Processed", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 });
             });
         }
-
-
 
 
         // ── Guard: all rows must be processed before Phase 2 or Phase 3 ──

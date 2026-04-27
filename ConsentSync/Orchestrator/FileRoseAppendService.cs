@@ -187,7 +187,11 @@ namespace Orchestrator.Services
                 LoggerService.LogInformation($"   ℹ️  Upload CSV not found — will create: {path}");
                 return new List<UploadRecord>();
             }
-            using var reader = new StreamReader(path, Encoding.UTF8);
+
+            // ✅ Use the centralized service for priority encoding
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
+            using var reader = new StreamReader(path, targetEncoding);
             using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
             { MissingFieldFound = null, HeaderValidated = null });
             csv.Context.RegisterClassMap<UploadRecordMap>();
@@ -197,7 +201,11 @@ namespace Orchestrator.Services
         private static void SaveUploadCsv(string path, List<UploadRecord> records)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            using var writer = new StreamWriter(path, false, Encoding.UTF8);
+
+            // ✅ Use the centralized service for priority encoding
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
+            using var writer = new StreamWriter(path, false, targetEncoding);
             using var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture));
             csv.Context.RegisterClassMap<UploadRecordMap>();
             csv.WriteRecords(records);

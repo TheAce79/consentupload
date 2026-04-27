@@ -1,4 +1,5 @@
-﻿using ConsentSyncCore.Services.Configuration;
+﻿using ConsentSyncCore.Models;
+using ConsentSyncCore.Services.Configuration;
 using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Extensions.Configuration;
@@ -133,37 +134,7 @@ namespace CsvProcessing
     };
         }
 
-        /// <summary>
-        /// Converts encoding configuration to actual Encoding object
-        /// </summary>
-        private Encoding GetEncodingFromConfig(EncodingConfiguration config)
-        {
-            try
-            {
-                if (config.CodePage.Equals("default", StringComparison.OrdinalIgnoreCase))
-                {
-                    return Encoding.Default;
-                }
-                else if (config.CodePage.Equals("utf-8", StringComparison.OrdinalIgnoreCase))
-                {
-                    return config.UseBOM ? new UTF8Encoding(true) : Encoding.UTF8;
-                }
-                else if (int.TryParse(config.CodePage, out int codePage))
-                {
-                    return Encoding.GetEncoding(codePage);
-                }
-                else
-                {
-                    return Encoding.GetEncoding(config.CodePage);
-                }
-            }
-            catch (Exception ex)
-            {
-                 LoggerService.LogInformation($"⚠ Failed to load encoding '{config.Name}' (CodePage: {config.CodePage}): {ex.Message}");
-                return Encoding.UTF8; // Fallback
-            }
-        }
-
+      
 
         /// <summary>
         /// Processes the CSV: reads, transforms dates, sorts, adds columns, and writes output
@@ -309,10 +280,11 @@ namespace CsvProcessing
             {
                 try
                 {
-                    var encoding = GetEncodingFromConfig(encodingConfig);
-                     LoggerService.LogInformation($"   Trying: {encodingConfig.Name}...");
+                    var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
 
-                    using var reader = new StreamReader(_inputCsvPath, encoding);
+                    LoggerService.LogInformation($"   Trying: {encodingConfig.Name}...");
+
+                    using var reader = new StreamReader(_inputCsvPath, targetEncoding);
                     using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
                     {
                         HasHeaderRecord = true,
@@ -448,7 +420,7 @@ namespace CsvProcessing
                     }
 
                     // If we got here successfully, use this encoding
-                    successfulEncoding = encoding;
+                    successfulEncoding = targetEncoding;
                      LoggerService.LogInformation($"   ✅ Successfully read with {encodingConfig.Name}");
                      LoggerService.LogInformation($"      Total input rows: {_totalInputRows}");
                      LoggerService.LogInformation($"      Successfully parsed: {_successfullyParsedRows}");
@@ -578,8 +550,11 @@ namespace CsvProcessing
 
             try
             {
+                // ✅ Use the centralized service for priority encoding
+                var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
                 // ✅ FIX: Wrap in using block and ensure disposal before verification
-                using (var writer = new StreamWriter(_outputCsvPath, false, new UTF8Encoding(true)))
+                using (var writer = new StreamWriter(_outputCsvPath, false, targetEncoding))
                 using (var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture)
                 {
                     HasHeaderRecord = true
@@ -606,7 +581,7 @@ namespace CsvProcessing
                  LoggerService.LogInformation($"   ✅ Successfully wrote {records.Count} records");
 
                 // ✅ NOW it's safe to verify - file is closed
-                var verifyLines = File.ReadAllLines(_outputCsvPath, Encoding.UTF8);
+                var verifyLines = File.ReadAllLines(_outputCsvPath, targetEncoding);
                  LoggerService.LogInformation($"   ✅ Verification: File contains {verifyLines.Length} lines (including header)");
             }
             catch (Exception ex)
@@ -674,7 +649,10 @@ namespace CsvProcessing
                 return;
             }
 
-            var lines = File.ReadAllLines(_outputCsvPath, Encoding.UTF8).Take(maxRows + 1).ToList();
+            // ✅ Use the centralized service for priority encoding
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
+            var lines = File.ReadAllLines(_outputCsvPath, targetEncoding).Take(maxRows + 1).ToList();
 
              LoggerService.LogInformation($"\n📋 Preview of processed CSV (first {maxRows} rows):");
              LoggerService.LogInformation(new string('═', 100));

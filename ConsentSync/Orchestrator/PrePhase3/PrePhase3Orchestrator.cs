@@ -70,16 +70,25 @@ namespace Orchestrator.PrePhase3
                     ? $"   ✅ {rescanned} record(s) updated from ClientId-renamed PDFs"
                     : "   ℹ️  No ClientId-renamed PDFs found");
 
-                // ── Shared paths used by both early-exit guards ───────────────
+
+                // ── Shared paths ───────────────────────────────────────────────
                 var pdfSourcePath = _bulkPdfConfig.GetOutputReadyPath();
+                var scannedOkPath = _bulkPdfConfig.GetScannedOkPath(); // ✅ Define the subfolder
+
+
                 var uploadCsvPath = Path.Combine(_prePhase3Config.OutputPath, _phase2Config.UploadCsv);
                 var frScanPath = _bulkPdfConfig.GetFileRoseScanPath();
                 var frUploadPath = _phisWs.GetFileRoseUploadPath();
                 var frSuffix = _bulkPdfConfig.RoseSuffix;
                 var frYear = _schoolContext.SchoolYear;
 
-                bool outputReadyIsEmpty = !Directory.Exists(pdfSourcePath) ||
-                                           Directory.GetFiles(pdfSourcePath, "*.pdf").Length == 0;
+
+                // ── Comprehensive Empty Check ──────────────────────────────────
+                // It is only "Empty" if BOTH the root AND the subfolder have no PDFs.
+                bool outputReadyIsEmpty =
+                    (!Directory.Exists(pdfSourcePath) || Directory.GetFiles(pdfSourcePath, "*.pdf").Length == 0) &&
+                    (!Directory.Exists(scannedOkPath) || Directory.GetFiles(scannedOkPath, "*.pdf").Length == 0);
+
                 bool uploadCsvExists = File.Exists(uploadCsvPath);
 
                 // TRUE when at least one {ClientId}_{suffix}_{year}.pdf exists in the
@@ -96,22 +105,19 @@ namespace Orchestrator.PrePhase3
                     Directory.Exists(frScanPath) &&
                     Directory.GetFiles(frScanPath, "*.pdf").Length > 0;
 
-                // ── Early-exit #1: 3_Output_Ready empty + CSV exists ──────────
-                // Guard: skip ONLY when there is nothing FileRose-related pending either —
-                //   • no scan files waiting to be moved, AND
-                //   • no already-moved files whose CSV row is still missing
+
+                // ── The Early-Exit Guard ───────────────────────────────────────
                 if (outputReadyIsEmpty && uploadCsvExists && rescanned == 0 &&
                     !hasPendingFileRoseScanFiles && !HasFileRoseReadyToRecord())
                 {
                     LoggerService.LogInformation(
-                        "\n   ℹ️  3_Output_Ready is empty, Upload CSV exists, and no FileRose work pending — nothing to do.");
-                    LoggerService.LogInformation(
-                        "   💡 To process more PDFs: rename unmatched files to {ClientId}.pdf,");
-                    LoggerService.LogInformation(
-                        "      drop them into 3_Output_Ready, then click Generate Upload CSV again.");
+                        "\n   ℹ️  No pending files found (Production or ScannedOK) and Upload CSV exists — nothing to do.");
+
                     result.AlreadyProcessed = true;
                     return result;
                 }
+
+
 
                 // ── Step 2: Filter validated consent records ──────────────────
                 LoggerService.LogInformation("\n📋 Step 2: Filtering validated records...");
@@ -121,8 +127,31 @@ namespace Orchestrator.PrePhase3
                                 !string.IsNullOrWhiteSpace(r.ClientId))
                     .ToList();
 
-                var toProcess = validatedRecords.Where(r => !r.IsPdfSave).ToList();
-                var alreadyDone = validatedRecords.Count - toProcess.Count;
+                // ── Step 2: Filter validated records ──────────────────
+
+                LoggerService.LogInformation("\n📋 Step 2: Filtering validated records for processing...");
+
+                // Consolidated filter that works for BOTH downloaded and scanned PDFs
+                var toProcess = validationRecords.Where(r =>
+                    // 1. Core requirement: Must have a ClientId assigned
+                    !string.IsNullOrWhiteSpace(r.ClientId) &&
+
+                    // 2. State requirement: Must not have been processed into an Upload row yet
+                    !r.IsPdfSave &&
+
+                    // 3. Validation requirement: Must be a match and file must exist (from Phase 2)
+                    r.FileFound &&
+                    r.IsMatch &&
+
+                    // 4. Source-Specific Guard:
+                    //    - If NOT a scanned PDF (Download), it passes (Legacy support)
+                    //    - If IT IS a scanned PDF, it MUST be marked as Ready (Finalized)
+                    (!r.IsScanPdf || r.IsScanPdfReady)
+                ).ToList();
+
+                var alreadyDone = validationRecords.Count(r =>
+                    r.FileFound && r.IsMatch && !string.IsNullOrWhiteSpace(r.ClientId) && r.IsPdfSave);
+
 
                 result.ValidatedRecords = validatedRecords.Count;
                 result.SkippedNotValidated = validationRecords.Count - validatedRecords.Count;
@@ -156,7 +185,7 @@ namespace Orchestrator.PrePhase3
                     if (rescanned > 0)
                         SaveValidationCsv(validationRecords);
 
-                    ReportRemainingPdfs(pdfSourcePath, result);
+                    ReportRemainingPdfs(pdfSourcePath, scannedOkPath, result);
                     DisplaySummary(result);
                     return result;
                 }
@@ -288,7 +317,7 @@ namespace Orchestrator.PrePhase3
                 SaveValidationCsv(validationRecords);
 
                 // ── Step 6: Report remaining unmatched PDFs ───────────────────
-                ReportRemainingPdfs(pdfSourcePath, result);
+                ReportRemainingPdfs(pdfSourcePath, scannedOkPath, result);
 
                 // ── Step 7: Summary ───────────────────────────────────────────
                 DisplaySummary(result);
@@ -302,6 +331,8 @@ namespace Orchestrator.PrePhase3
                 return result;
             }
         }
+
+
 
         // ─────────────────────────────────────────────────────────────────────
         // Step 1b — Re-scan for {ClientId}.pdf renames
@@ -388,7 +419,99 @@ namespace Orchestrator.PrePhase3
         ///   Pass 4 — LastName tokens only (≥ 2 tokens) for compound/double-barrel surnames
         ///             where the first name is absent from the PDF filename
         /// </summary>
+        /// 
         private string? FindPdfForRecord(ValidationRecord record)
+        {
+            // If it's a scanned file but the user hasn't finished resolving it yet, 
+            // we stop here so we don't accidentally match a partial name.
+            if (record.IsScanPdf && !record.IsScanPdfReady)
+            {
+                return null;
+            }
+
+
+
+            var pdfSourcePath = _bulkPdfConfig.GetOutputReadyPath();
+            var scannedOkPath = _bulkPdfConfig.GetScannedOkPath(); // The subfolder
+
+            if (!Directory.Exists(pdfSourcePath)) return null;
+
+            string NormToken(string s) =>
+                RemoveAccents(s.Trim().Replace(' ', '_').Replace('-', '_').ToUpperInvariant());
+
+            // ── Pass 1: exact {ClientId}.pdf ──────────────────────────────────
+            // Check main folder first, then ScannedOK
+            var exactPaths = new[] {
+        Path.Combine(pdfSourcePath, $"{record.ClientId}.pdf"),
+        Path.Combine(scannedOkPath, $"{record.ClientId}.pdf")
+            };
+
+            foreach (var path in exactPaths)
+            {
+                if (File.Exists(path)) return path;
+            }
+
+            // ── Prepare File List for fuzzy matching ──────────────────────────
+            // Get all PDFs from both the main folder and the ScannedOK subfolder
+            var allPdfs = Directory.GetFiles(pdfSourcePath, "*.pdf", SearchOption.AllDirectories);
+
+            // ── Pass 2: ExtractedName tokens (strong matches only) ────────────
+            if (!string.IsNullOrWhiteSpace(record.ExtractedName) && record.MatchScore >= 85.0)
+            {
+                var extractedTokens = record.ExtractedName
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(NormToken)
+                    .Where(t => t.Length > 1)
+                    .ToArray();
+
+                if (extractedTokens.Length > 0)
+                {
+                    var match = allPdfs.FirstOrDefault(f =>
+                    {
+                        var stemNorm = NormToken(Path.GetFileNameWithoutExtension(f));
+                        return extractedTokens.All(t => stemNorm.Contains(t));
+                    });
+                    if (match != null) return match;
+                }
+            }
+
+            // ── Pass 3: all CSV name tokens (LastName + FirstName) ────────────
+            var lastTokens = record.LastName
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Select(NormToken).Where(t => t.Length > 1).ToArray();
+
+            var firstTokens = record.FirstName
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Select(NormToken).Where(t => t.Length > 1).ToArray();
+
+            var allTokens = lastTokens.Concat(firstTokens).ToArray();
+
+            if (allTokens.Length > 0)
+            {
+                var match = allPdfs.FirstOrDefault(f =>
+                {
+                    var stemNorm = NormToken(Path.GetFileNameWithoutExtension(f));
+                    return allTokens.All(t => stemNorm.Contains(t));
+                });
+                if (match != null) return match;
+            }
+
+            // ── Pass 4: LastName tokens only (compound surnames) ──────────────
+            if (lastTokens.Length >= 2)
+            {
+                var match = allPdfs.FirstOrDefault(f =>
+                {
+                    var stemNorm = NormToken(Path.GetFileNameWithoutExtension(f));
+                    return lastTokens.All(t => stemNorm.Contains(t));
+                });
+                if (match != null) return match;
+            }
+
+            LoggerService.LogWarning($"❌ PDF not found for {record.FirstName} {record.LastName} ({record.ClientId})");
+            return null;
+        }
+
+        private string? FindPdfForRecordOLD(ValidationRecord record)
         {
             var pdfSourcePath = _bulkPdfConfig.GetOutputReadyPath();
             if (!Directory.Exists(pdfSourcePath)) return null;
@@ -510,31 +633,42 @@ namespace Orchestrator.PrePhase3
         // Report remaining unmatched PDFs
         // ─────────────────────────────────────────────────────────────────────
 
-      
 
-        private void ReportRemainingPdfs(string pdfSourcePath, PrePhase3Result result)
+
+        private void ReportRemainingPdfs(string pdfSourcePath,string scannedOkPath, PrePhase3Result result)
         {
             if (!Directory.Exists(pdfSourcePath)) return;
 
-            var remaining = Directory.GetFiles(pdfSourcePath, "*.pdf");
+            //var bulkPdfConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+            //var scannedOkPath = bulkPdfConfig.GetScannedOkPath(); // Use config to get the subfolder path
+            
+
+            // Gather files from both locations
+            var mainFiles = Directory.GetFiles(pdfSourcePath, "*.pdf");
+            var subFiles = Directory.Exists(scannedOkPath)
+                ? Directory.GetFiles(scannedOkPath, "*.pdf")
+                : Array.Empty<string>();
+
+            var remaining = mainFiles.Concat(subFiles).ToArray();
+
             if (remaining.Length == 0)
             {
-                LoggerService.LogInformation(
-                    "\n   ✅ 3_Output_Ready is now empty — all PDFs have been processed.");
+                LoggerService.LogInformation("\n✅ 3_Output_Ready (and ScannedOK) are now empty.");
                 return;
             }
 
-            // Store in result so the UI can display them prominently
             result.RemainingUnmatchedPdfs.AddRange(remaining.Select(Path.GetFileName)!);
 
             LoggerService.LogWarning(
-                $"\n   ⚠️  {remaining.Length} unmatched PDF(s) still in 3_Output_Ready:");
+               $"\n   ⚠️  {remaining.Length} unmatched PDF(s) still in 3_Output_Ready:");
             LoggerService.LogWarning(
                 "   💡 Rename each to {ClientId}.pdf, then click Generate Upload CSV again:");
             foreach (var f in remaining)
                 LoggerService.LogWarning($"      • {Path.GetFileName(f)}");
         }
 
+
+     
 
 
         // ─────────────────────────────────────────────────────────────────────
@@ -546,11 +680,16 @@ namespace Orchestrator.PrePhase3
             var outputPath = Path.Combine(_prePhase3Config.OutputPath, _phase2Config.UploadCsv);
 
             var existingRecords = new List<UploadRecord>();
+
+            // ✅ Use the centralized service for priority encoding
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
             if (File.Exists(outputPath))
             {
                 try
                 {
-                    using var reader = new StreamReader(outputPath, Encoding.UTF8);
+                  
+                    using var reader = new StreamReader(outputPath, targetEncoding);
                     using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
                     {
                         MissingFieldFound = null,
@@ -594,7 +733,7 @@ namespace Orchestrator.PrePhase3
             var allRecords = existingRecords.Concat(toAppend).ToList();
             var tmpPath = outputPath + ".tmp";
 
-            using (var writer = new StreamWriter(tmpPath, false, Encoding.UTF8))
+            using (var writer = new StreamWriter(tmpPath, false, targetEncoding))
             using (var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture)))
             {
                 csv.Context.RegisterClassMap<UploadRecordMap>();
@@ -759,7 +898,9 @@ namespace Orchestrator.PrePhase3
             if (!File.Exists(csvPath))
                 throw new FileNotFoundException($"Validation CSV not found: {csvPath}");
 
-            using var reader = new StreamReader(csvPath, Encoding.UTF8);
+
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+            using var reader = new StreamReader(csvPath, targetEncoding);
             using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture));
             csv.Context.RegisterClassMap<ValidationRecordMap>();
             return csv.GetRecords<ValidationRecord>().ToList();
@@ -771,7 +912,9 @@ namespace Orchestrator.PrePhase3
                 _prePhase3Config.ValidationCsvPath,
                 _prePhase3Config.ValidationCsvFileName);
 
-            using var writer = new StreamWriter(csvPath, false, Encoding.UTF8);
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
+            using var writer = new StreamWriter(csvPath, false, targetEncoding);
             using var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture));
             csv.Context.RegisterClassMap<ValidationRecordMap>();
             csv.WriteRecords(records);

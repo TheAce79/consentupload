@@ -466,7 +466,10 @@ namespace Orchestrator.Phase3
                 PrepareHeaderForMatch = args => args.Header.ToLower().Replace(" ", "")
             };
 
-            using var reader = new StreamReader(csvPath, Encoding.UTF8);
+            // ✅ Use the centralized service for priority encoding
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
+            using var reader = new StreamReader(csvPath, targetEncoding);
             using var csv = new CsvReader(reader, csvConfig);
             csv.Context.RegisterClassMap<UploadRecordMap>();
 
@@ -556,11 +559,14 @@ namespace Orchestrator.Phase3
                 PrepareHeaderForMatch = args => args.Header.ToLower().Replace(" ", "")
             };
 
+            // ✅ Use the centralized service for priority encoding
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
             // ── Step 1: Read current CSV from disk ────────────────────────────
             List<UploadRecord> allRecords;
             try
             {
-                using var reader = new StreamReader(csvPath, Encoding.UTF8);
+                using var reader = new StreamReader(csvPath, targetEncoding);
                 using var csvReader = new CsvReader(reader, csvConfig);
                 csvReader.Context.RegisterClassMap<UploadRecordMap>();
                 allRecords = csvReader.GetRecords<UploadRecord>().ToList();
@@ -667,7 +673,7 @@ namespace Orchestrator.Phase3
             // ── Step 5: Write .tmp ────────────────────────────────────────────
             try
             {
-                using (var writer = new StreamWriter(tmpPath, false, Encoding.UTF8))
+                using (var writer = new StreamWriter(tmpPath, false, targetEncoding))
                 using (var csvWriter = new CsvWriter(writer,
                            new CsvConfiguration(CultureInfo.InvariantCulture)))
                 {

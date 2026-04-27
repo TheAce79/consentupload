@@ -207,7 +207,10 @@ namespace CsvProcessing
 
              LoggerService.LogInformation($"📖 Reading students from: {_outputCsvFullPath}");
 
-            using var reader = new StreamReader(_outputCsvFullPath, Encoding.UTF8);
+            // ✅ Use the centralized service for priority encoding
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
+            using var reader = new StreamReader(_outputCsvFullPath, targetEncoding);
             using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
             {
                 HasHeaderRecord = true,
@@ -279,10 +282,13 @@ namespace CsvProcessing
 
             try
             {
-                 LoggerService.LogInformation($"💾 Saving {students.Count} students to: {_outputCsvFullPath}");
+                // ✅ Use the centralized service for priority encoding
+                var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
+                LoggerService.LogInformation($"💾 Saving {students.Count} students to: {_outputCsvFullPath}");
 
                 // Write to temporary file first
-                using (var writer = new StreamWriter(tempFile, false, Encoding.UTF8))
+                using (var writer = new StreamWriter(tempFile, false, targetEncoding))
                 using (var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture)
                 {
                     HasHeaderRecord = true
@@ -355,7 +361,10 @@ namespace CsvProcessing
                 throw new FileNotFoundException($"Processed CSV not found: {_outputCsvFullPath}");
             }
 
-            var lines = File.ReadAllLines(_outputCsvFullPath, Encoding.UTF8);
+            // ✅ Use the centralized service for priority encoding
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+            var lines = File.ReadAllLines(_outputCsvFullPath, targetEncoding);
+
             if (lines.Length < 2)
             {
                 return new List<CsvRecord>();
@@ -391,6 +400,9 @@ namespace CsvProcessing
                 return;
             }
 
+            // ✅ Use the centralized service for priority encoding
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
             var header = records[0].GetColumnNames().ToList();
             var lines = new List<string> { string.Join(",", header) };
 
@@ -400,7 +412,7 @@ namespace CsvProcessing
                 lines.Add(string.Join(",", values));
             }
 
-            File.WriteAllLines(_outputCsvFullPath, lines, Encoding.UTF8);
+            File.WriteAllLines(_outputCsvFullPath, lines, targetEncoding);
              LoggerService.LogInformation($"✅ Saved {records.Count} CSV records");
         }
 
