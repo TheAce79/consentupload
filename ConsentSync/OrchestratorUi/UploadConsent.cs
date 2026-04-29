@@ -1729,7 +1729,7 @@ namespace OrchestratorUi
 
                 // 1. First, OCR anything new in the folder
                 // This call is synchronous inside the Task, so it blocks the background thread (correctly)
-                ConsentSyncCore.Services.Pdf.BulkPdfExtractor.ProcessScannedFolder();
+                ProcessScannedCsv.ProcessScannedFolder(bulkConfig.IsClientIdAsFileName);
 
                 // 2. Then, Finalize anything that now has a ClientID
                 var promoted = ProcessScannedCsv.FinalizeAndPromoteScannedPdfs(inputPath);

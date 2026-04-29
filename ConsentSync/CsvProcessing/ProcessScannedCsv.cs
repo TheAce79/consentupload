@@ -1,5 +1,6 @@
 ﻿using ConsentSyncCore.Models;
 using ConsentSyncCore.Services.Configuration;
+using ConsentSyncCore.Services.Pdf;
 using CsvHelper;
 using CsvHelper.Configuration;
 using System;
@@ -15,14 +16,14 @@ namespace CsvProcessing
     {
 
 
-      
+
 
 
         public static List<StudentRecord> FinalizeAndPromoteScannedPdfs(string inputScannedPath)
         {
             var config = ConfigurationService.GetConfiguration();
             var repo = new CsvProcessing.StudentCsvRepository(config);
-            
+
 
             // We target the Scanned version of the CSV specifically
             // Assuming your naming convention: immunizations_processed_Scanned.csv
@@ -30,7 +31,7 @@ namespace CsvProcessing
 
             var students = repo.ReadAll();
             var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
-            
+
             string scannedOkFolder = bulkConfig.GetScannedOkPath();
             var finalizedThisRun = new List<StudentRecord>();
 
@@ -111,6 +112,12 @@ namespace CsvProcessing
             {
                 if (existingIds.Contains(s.ClientId)) continue;
 
+
+                int clientIdStatus = string.IsNullOrWhiteSpace(s.ClientId)
+                    ? (int)ConsentSyncCore.Models.ClientIdStatus.NeedsManualReview
+                    : (int)ConsentSyncCore.Models.ClientIdStatus.Found;
+
+
                 masterRecords.Add(new ValidationRecord
                 {
                     ClientId = s.ClientId,
@@ -125,7 +132,8 @@ namespace CsvProcessing
                     IsScanPdfReady = true,
                     PdfName = s.PdfName,
                     MatchScore = 100.0,
-                    IsPdfSave = false
+                    IsPdfSave = false,
+                    ClientIdStatus = clientIdStatus // assign the enum value directly
                 });
             }
 
@@ -148,5 +156,138 @@ namespace CsvProcessing
 
 
 
+        public static void ProcessScannedFolder(bool isClientIdAsFileName)
+        {
+            var config = ConfigurationService.GetConfiguration();
+            var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+            var csvWsConfig = ConfigurationService.GetCsvWorkspaceConfig();
+            var csvConfig = ConfigurationService.GetCsvConfig();
+            var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+
+            string inputScannedPath = bulkConfig.GetInputScannedPath();
+            string outputCsvFullPath = Path.Combine(csvWsConfig.GetProcessedCsvPath(), csvConfig.OutputCsvFileName ?? "immunizations_processed.csv");
+
+            // 1. Load existing data to perform the merge check
+            var repo = new CsvProcessing.StudentCsvRepository(config);
+            var existingStudents = File.Exists(outputCsvFullPath) ? repo.ReadAll() : new List<StudentRecord>();
+
+            // Prepare lookup sets for fast duplicate checking
+            var existingIdentityKeys = existingStudents
+                .Select(s => $"{s.LastName?.Trim()}_{s.FirstName?.Trim()}_{s.DateOfBirth?.Trim()}".ToLowerInvariant())
+                .ToHashSet();
+
+            var existingClientIds = existingStudents
+                .Where(s => !string.IsNullOrEmpty(s.ClientId))
+                .Select(s => s.ClientId.Trim().ToLowerInvariant())
+                .ToHashSet();
+
+            var pdfFiles = Directory.GetFiles(inputScannedPath, "*.pdf");
+            bool hasNewChanges = false;
+
+            foreach (var file in pdfFiles)
+            {
+                string stem = Path.GetFileNameWithoutExtension(file).Trim();
+                string safeLast = "", safeFirst = "", safeDob = "", clientId = "";
+                bool fullyExtracted = false;
+
+                // ── Extraction Logic (Bypass or OCR) ──
+                if (isClientIdAsFileName && IsValidClientId(stem))
+                {
+                    clientId = stem;
+                    fullyExtracted = true;
+                }
+                else
+                {
+                    var (fn, ln, dob, _) = PdfProcessor.ProcessSingleScannedPdf(file, false, null);
+                    safeLast = ln is "Unknown" or "Error" ? "" : ln ?? "";
+                    safeFirst = fn is "Unknown" or "Error" ? "" : fn ?? "";
+                    safeDob = dob is "Unknown" or "Error" or null ? "" : dob;
+                    fullyExtracted = !string.IsNullOrEmpty(safeLast) && !string.IsNullOrEmpty(safeFirst) && !string.IsNullOrEmpty(safeDob);
+                }
+
+                // ── The Merge/Duplicate Check ──
+                string currentIdentityKey = $"{safeLast}_{safeFirst}_{safeDob}".ToLowerInvariant();
+
+                // Skip if Name+DOB exists
+                if (fullyExtracted && existingIdentityKeys.Contains(currentIdentityKey)) continue;
+
+                // Skip if ClientId is already defined in the file
+                if (!string.IsNullOrEmpty(clientId) && existingClientIds.Contains(clientId.ToLowerInvariant())) continue;
+
+                // ── If we are here, it's a NEW row — Create it ──
+                var newStudent = new StudentRecord
+                {
+                    LastName = safeLast,
+                    FirstName = safeFirst,
+                    DateOfBirth = safeDob,
+                    School = config["SchoolContext:SchoolName"] ?? "",
+                    Grade = config["SchoolContext:Grade"] ?? "",
+                    IsScanPdf = true,
+                    IsScanPdfReady = fullyExtracted,
+                    PdfName = Path.GetFileName(file), // Will be renamed later
+                    ClientId = clientId,
+                    ClientIdStatus = !string.IsNullOrEmpty(clientId) ? ClientIdStatus.Found : ClientIdStatus.NotProcessed
+                };
+
+                // Determine Final Filename and Move PDF
+                if (fullyExtracted)
+                {
+                    string finalPdfName = !string.IsNullOrEmpty(clientId)
+                        ? $"{clientId}.pdf"
+                        : $"{Guid.NewGuid().ToString("N")[..8]}_{safeLast}_{safeFirst}.pdf";
+
+                    string destinationPath = Path.Combine(bulkConfig.GetScannedOkPath(), finalPdfName);
+                    Directory.CreateDirectory(bulkConfig.GetScannedOkPath());
+                    File.Move(file, destinationPath, overwrite: true);
+
+                    newStudent.PdfName = finalPdfName;
+                }
+
+                existingStudents.Add(newStudent);
+                hasNewChanges = true;
+            }
+
+            // 2. Save the unified list back to the main file
+            if (hasNewChanges)
+            {
+                repo.SaveAll(existingStudents);
+                LoggerService.LogInformation($"✅ Merged new scanned records into {Path.GetFileName(outputCsvFullPath)}");
+            }
+        }
+
+
+        private static string EscapeCsv(string field)
+        {
+            if (string.IsNullOrEmpty(field)) return "";
+            if (field.Contains(',') || field.Contains('"') || field.Contains('\n'))
+                return $"\"{field.Replace("\"", "\"\"")}\"";
+            return field;
+        }
+
+
+        private static bool IsValidClientId(string stem)
+        {
+            // Basic check: Is it numeric and long enough to be a PHIS ID?
+            return stem.Length >= 4 && long.TryParse(stem, out _);
+        }
+
+
+
     }
+
+
+
+    // ── Small local helper — avoids pulling in a dependency just for null display ──
+    internal static class StringDisplayExtensions
+    {
+        public static string OrNull(this string s) => string.IsNullOrEmpty(s) ? "(empty)" : s;
+    }
+
+
+
+
+
+
+
+
 }

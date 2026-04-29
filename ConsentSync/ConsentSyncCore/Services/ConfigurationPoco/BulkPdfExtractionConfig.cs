@@ -99,5 +99,8 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         public string GetArchiveBulkPath() => Path.Combine(GetArchivePath(), "Bulk");
         public string GetArchiveScannedPath() => Path.Combine(GetArchivePath(), "Scanned");
         public string GetArchiveFileRosePath() => Path.Combine(GetArchivePath(), "FileRose");
+
+
+        public bool IsClientIdAsFileName { get; set; } = true;
     }
 }

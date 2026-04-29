@@ -45,6 +45,8 @@ namespace ConsentSyncCore.Services.Configuration
                 OverwriteExisting = section.GetValue<bool>("OverwriteExisting", false),
                 MoveToArchiveAfterProcessing = section.GetValue<bool>("MoveToArchiveAfterProcessing", true),
                 MoveErrorPdfsToErrorFolder = section.GetValue<bool>("MoveErrorPdfsToErrorFolder", true),
+
+                IsClientIdAsFileName = section.GetValue<bool>("IsClientIdAsFileName", true)
             };
 
             bulkConfig.BasePdfPath = ResolvePath(bulkConfig.BasePdfPath);
