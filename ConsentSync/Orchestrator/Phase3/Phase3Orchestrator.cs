@@ -33,7 +33,10 @@ namespace Orchestrator.Phase3
         private readonly IWebDriver _driver;
         private readonly PhisSearchService _phisSearchService;
         private readonly PhisSessionManager _sessionManager;
+        private readonly PhisWorkspaceConfig _phisWorkspaceConfig;
+
         private readonly ILogger<Phase3Orchestrator> _logger;
+       
 
         public Phase3Orchestrator(
             IConfiguration? config = null,
@@ -47,6 +50,8 @@ namespace Orchestrator.Phase3
             _driver = driver ?? throw new ArgumentNullException(nameof(driver));
             _phisSearchService = phisSearchService ?? throw new ArgumentNullException(nameof(phisSearchService));
             _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
+            _phisWorkspaceConfig = ConfigurationService.GetPhisWorkspaceConfig();
+
             _logger = LoggerService.GetLogger<Phase3Orchestrator>();
         }
 
@@ -330,29 +335,14 @@ namespace Orchestrator.Phase3
 
             LoggerService.LogInformation("   ✅ Document uploaded successfully!");
             record.VerifStatus = UploadVerificationStatus.Success;
+
+            // ✅ Clean & Synchronous Archiving
+            ArchiveUploadedPdf(pdfPath, record.DocumentTitle, false);
+
             record.FailureReason = string.Empty;
             await _phisSearchService.NavigateBackToSearchPagesAsync();
             return true;
         }
-
-        // ── FileRose upload (stub — to be implemented) ────────────────────────
-
-        /// <summary>
-        /// FileRose upload is not yet implemented.
-        /// Leaves <see cref="UploadRecord.VerifStatus"/> as
-        /// <see cref="UploadVerificationStatus.NotProcessed"/> and returns
-        /// <c>false</c> so it is retried on the next run once implemented.
-        /// </summary>
-        //private Task<bool> ProcessFileRoseUploadAsync(UploadRecord record)
-        //{
-        //    LoggerService.LogInformation(
-        //        $"   ℹ️  FileRose upload not yet implemented — " +
-        //        $"leaving VerifStatus = NotProcessed for {record.ClientID}");
-
-        //    // Do NOT set NeedsManualReview — keep at NotProcessed so Phase 3
-        //    // will pick it up again once the upload logic is coded.
-        //    return Task.FromResult(false);
-        //}
 
 
         private async Task<bool> ProcessFileRoseUploadAsync(UploadRecord record)
@@ -421,6 +411,9 @@ namespace Orchestrator.Phase3
                 record.VerifStatus = UploadVerificationStatus.Success;
                 record.FailureReason = string.Empty;
                 LoggerService.LogInformation("   ✅ FileRose uploaded successfully!");
+
+                // ✅ Clean & Synchronous Archiving
+                ArchiveUploadedPdf(pdfPath, record.DocumentTitle, true);
             }
             else
             {
@@ -432,6 +425,40 @@ namespace Orchestrator.Phase3
         }
 
         // ── Shared helpers ────────────────────────────────────────────────────
+
+
+
+        private void ArchiveUploadedPdf(string sourcePath, string documentTitle, bool IsFileRose)
+        {
+            try
+            {
+                var archiveDir = IsFileRose
+                                   ?
+                                   _phisWorkspaceConfig.GetFileRoseArchivePath()
+                                    :
+                                    _phisWorkspaceConfig.GetConsentArchivePath();
+
+
+                var destinationPath = Path.Combine(archiveDir, $"{documentTitle}.pdf");
+
+                if (!Directory.Exists(archiveDir))
+                {
+                    Directory.CreateDirectory(archiveDir);
+                }
+
+                // Move is almost instant on the same drive. 
+                // Synchronous ensures no other process tries to read the file while moving.
+                File.Move(sourcePath, destinationPath, overwrite: true);
+                LoggerService.LogInformation($"   📂 Archived: {Path.GetFileName(destinationPath)}");
+            }
+            catch (Exception ex)
+            {
+                // We log a warning but don't fail the whole process. 
+                // The upload was successful, only the cleanup failed.
+                LoggerService.LogWarning($"   ⚠️  Archive failed for {documentTitle}: {ex.Message}");
+            }
+        }
+
 
         /// <summary>
         /// Marks a record as failed and records the reason so the user knows

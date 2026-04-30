@@ -113,6 +113,11 @@ namespace CsvProcessing
                 if (existingIds.Contains(s.ClientId)) continue;
 
 
+                ///when ClientId is found, we can be confident enough to mark it as "Found" (1).
+                ///if ClientIdStatus is not set, file rose will not be able to update it to "Found" (1) later, which will cause issues 
+                ///for the file rose extraction process that relies 
+                ///on this status to identify which records are ready for extraction.
+               
                 int clientIdStatus = string.IsNullOrWhiteSpace(s.ClientId)
                     ? (int)ConsentSyncCore.Models.ClientIdStatus.NeedsManualReview
                     : (int)ConsentSyncCore.Models.ClientIdStatus.Found;

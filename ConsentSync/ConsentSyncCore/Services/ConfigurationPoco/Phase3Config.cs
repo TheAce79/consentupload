@@ -50,8 +50,11 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         /// <summary>Derived from PhisWorkspace → 1_To_Upload → 1 Consent Upload</summary>
         public string ConsentPath { get; set; } = string.Empty;
 
+       
+
         /// <summary>Derived from PhisWorkspace → 1_To_Upload → 2 File Rose Upload</summary>
         public string FileRosePath { get; set; } = string.Empty;
+
     }
 
 

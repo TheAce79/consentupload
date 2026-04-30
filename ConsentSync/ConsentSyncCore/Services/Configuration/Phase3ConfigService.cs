@@ -30,7 +30,9 @@ namespace ConsentSyncCore.Services.Configuration
                     UploadCsvPath = GetCsvWorkspaceConfig().GetUploadCsvPath(),   // ← was ws.GetCsvPath()
                     UploadCsvFileName = phase3Section.GetValue<string>("Input:UploadCsvFileName") ?? "Upload_to_PHIS.csv",
                     ConsentPath = ws.GetConsentUploadPath(),
+                    
                     FileRosePath = ws.GetFileRoseUploadPath(),
+                   
                 },
 
                 Upload = new Phase3UploadConfig
