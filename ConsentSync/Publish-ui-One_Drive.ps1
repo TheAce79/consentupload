@@ -20,19 +20,35 @@ dotnet publish "consentupload\ConsentSync\OrchestratorUi\OrchestratorUi.csproj" 
 Copy-Item "consentupload\ConsentSync\ConsentSyncCore\appsettings.json" `
   "$oneDrivePath\appsettings.json" -Force
 
+
+# 5 — FORCE "Testing: Enabled" to false for Production Release
+Write-Host "🔧 Patching appsettings.json to disable Testing Mode..." -ForegroundColor Yellow
+
+$settingsPath =  "$env:UserProfile\OneDrive\Phis\Publish-Output\appsettings.json" 
+$settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+
+# Force the specific flag to false
+$settings.Phase3.Testing.Enabled = $false
+
+# Convert back to JSON and save (with UTF8 to preserve your French accents!)
+$settings | ConvertTo-Json -Depth 20 | Out-File $settingsPath -Encoding utf8
+
+Write-Host "✅ UI published and Testing Mode forced to FALSE" -ForegroundColor Green
+
+
 Write-Host "`n✅ Build complete! Folder is here: $oneDrivePath" -ForegroundColor Cyan
 
 
 # ... (Previous code for Publish and Copy-Item remains the same)
 
-# 5. Define the Zip path
+# 6. Define the Zip path
 $zipFileName = "ConsentSync_Release_$(Get-Date -Format 'yyyyMMdd').zip"
 $zipPath = Join-Path -Path (Split-Path $oneDrivePath -Parent) -ChildPath $zipFileName
 
-# 6. Remove old zip if it exists to avoid appending
+# 7. Remove old zip if it exists to avoid appending
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 
-# 7. Zip the contents of the Publish-Output folder
+# 8. Zip the contents of the Publish-Output folder
 Write-Host "🗜️ Zipping files..." -ForegroundColor Yellow
 Compress-Archive -Path "$oneDrivePath\*" -DestinationPath $zipPath -Force
 
