@@ -149,5 +149,25 @@ namespace ConsentSyncCore.Services
                 LoggerService.LogWarning($"   ❌ Failed  : {label} → {ex.Message}");
             }
         }
+
+
+        public static bool IsFileAvailable(string filePath)
+        {
+            if (!File.Exists(filePath)) return true; // Can't be "in use" if it doesn't exist
+
+            try
+            {
+                // Try to open the file with exclusive access
+                using (FileStream stream = File.Open(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    return true; // We got access!
+                }
+            }
+            catch (IOException)
+            {
+                // This catch specifically catches "File is being used by another process"
+                return false;
+            }
+        }
     }
 }

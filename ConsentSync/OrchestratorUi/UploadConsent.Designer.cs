@@ -24,6 +24,7 @@ namespace OrchestratorUi
             bt_Upload = new Button();
             bt_AppendFileRose = new Button();
             grpConfig = new GroupBox();
+            bt_ScanPdfOcr = new Button();
             bt_ScanPdf = new Button();
             lb_Dir = new Label();
             txt_BaseDir = new TextBox();
@@ -49,7 +50,6 @@ namespace OrchestratorUi
             gb_UploadPhis = new GroupBox();
             pb_Phase3 = new ProgressBar();
             lbl_Phase3Progress = new Label();
-            bt_ScanPdfOcr = new Button();
             grpConfig.SuspendLayout();
             gb_Normalise.SuspendLayout();
             gb_Phase1.SuspendLayout();
@@ -64,7 +64,7 @@ namespace OrchestratorUi
             bt_ValidatePdf.FlatStyle = FlatStyle.Flat;
             bt_ValidatePdf.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             bt_ValidatePdf.ForeColor = Color.White;
-            bt_ValidatePdf.Location = new Point(6, 60);
+            bt_ValidatePdf.Location = new Point(12, 60);
             bt_ValidatePdf.Name = "bt_ValidatePdf";
             bt_ValidatePdf.Size = new Size(270, 38);
             bt_ValidatePdf.TabIndex = 0;
@@ -80,7 +80,7 @@ namespace OrchestratorUi
             bt_GenerateCsv.FlatStyle = FlatStyle.Flat;
             bt_GenerateCsv.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             bt_GenerateCsv.ForeColor = Color.White;
-            bt_GenerateCsv.Location = new Point(6, 104);
+            bt_GenerateCsv.Location = new Point(12, 175);
             bt_GenerateCsv.Name = "bt_GenerateCsv";
             bt_GenerateCsv.Size = new Size(270, 38);
             bt_GenerateCsv.TabIndex = 1;
@@ -96,9 +96,9 @@ namespace OrchestratorUi
             bt_Upload.FlatStyle = FlatStyle.Flat;
             bt_Upload.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             bt_Upload.ForeColor = Color.White;
-            bt_Upload.Location = new Point(6, 99);
+            bt_Upload.Location = new Point(20, 60);
             bt_Upload.Name = "bt_Upload";
-            bt_Upload.Size = new Size(228, 48);
+            bt_Upload.Size = new Size(228, 41);
             bt_Upload.TabIndex = 0;
             bt_Upload.Text = "⬆️  Upload Consent & FileRose to PHIS";
             toolTip1.SetToolTip(bt_Upload, resources.GetString("bt_Upload.ToolTip"));
@@ -112,7 +112,7 @@ namespace OrchestratorUi
             bt_AppendFileRose.FlatStyle = FlatStyle.Flat;
             bt_AppendFileRose.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             bt_AppendFileRose.ForeColor = Color.White;
-            bt_AppendFileRose.Location = new Point(6, 157);
+            bt_AppendFileRose.Location = new Point(12, 231);
             bt_AppendFileRose.Name = "bt_AppendFileRose";
             bt_AppendFileRose.Size = new Size(270, 38);
             bt_AppendFileRose.TabIndex = 2;
@@ -124,7 +124,6 @@ namespace OrchestratorUi
             // grpConfig
             // 
             grpConfig.Controls.Add(bt_ScanPdfOcr);
-            grpConfig.Controls.Add(bt_ScanPdf);
             grpConfig.Controls.Add(lb_Dir);
             grpConfig.Controls.Add(txt_BaseDir);
             grpConfig.Controls.Add(btn_BrowseDir);
@@ -138,19 +137,32 @@ namespace OrchestratorUi
             grpConfig.Controls.Add(btn_PortableChrome);
             grpConfig.Location = new Point(12, 12);
             grpConfig.Name = "grpConfig";
-            grpConfig.Size = new Size(440, 341);
+            grpConfig.Size = new Size(440, 418);
             grpConfig.TabIndex = 0;
             grpConfig.TabStop = false;
             grpConfig.Text = "Configuration";
+            // 
+            // bt_ScanPdfOcr
+            // 
+            bt_ScanPdfOcr.BackColor = Color.SeaGreen;
+            bt_ScanPdfOcr.FlatStyle = FlatStyle.Flat;
+            bt_ScanPdfOcr.ForeColor = Color.White;
+            bt_ScanPdfOcr.Location = new Point(6, 285);
+            bt_ScanPdfOcr.Name = "bt_ScanPdfOcr";
+            bt_ScanPdfOcr.Size = new Size(202, 35);
+            bt_ScanPdfOcr.TabIndex = 13;
+            bt_ScanPdfOcr.Text = "\U0001f9ea  Scanned PDF OCR";
+            bt_ScanPdfOcr.UseVisualStyleBackColor = false;
+            bt_ScanPdfOcr.Click += bt_ScanPdfOcr_Click;
             // 
             // bt_ScanPdf
             // 
             bt_ScanPdf.BackColor = Color.SeaGreen;
             bt_ScanPdf.FlatStyle = FlatStyle.Flat;
             bt_ScanPdf.ForeColor = Color.White;
-            bt_ScanPdf.Location = new Point(6, 232);
+            bt_ScanPdf.Location = new Point(12, 117);
             bt_ScanPdf.Name = "bt_ScanPdf";
-            bt_ScanPdf.Size = new Size(202, 35);
+            bt_ScanPdf.Size = new Size(270, 35);
             bt_ScanPdf.TabIndex = 12;
             bt_ScanPdf.Text = "\U0001f9ea  Scanned PDF → CSV ";
             bt_ScanPdf.UseVisualStyleBackColor = false;
@@ -266,11 +278,11 @@ namespace OrchestratorUi
             rtxt_Log.BackColor = Color.Black;
             rtxt_Log.Font = new Font("Consolas", 9F);
             rtxt_Log.ForeColor = Color.LimeGreen;
-            rtxt_Log.Location = new Point(12, 359);
+            rtxt_Log.Location = new Point(12, 451);
             rtxt_Log.Name = "rtxt_Log";
             rtxt_Log.ReadOnly = true;
             rtxt_Log.ScrollBars = RichTextBoxScrollBars.Vertical;
-            rtxt_Log.Size = new Size(1007, 218);
+            rtxt_Log.Size = new Size(1032, 240);
             rtxt_Log.TabIndex = 1;
             rtxt_Log.Text = "";
             // 
@@ -359,11 +371,12 @@ namespace OrchestratorUi
             // gb_PreUpload
             // 
             gb_PreUpload.Controls.Add(bt_AppendFileRose);
+            gb_PreUpload.Controls.Add(bt_ScanPdf);
             gb_PreUpload.Controls.Add(bt_ValidatePdf);
             gb_PreUpload.Controls.Add(bt_GenerateCsv);
             gb_PreUpload.Location = new Point(468, 140);
             gb_PreUpload.Name = "gb_PreUpload";
-            gb_PreUpload.Size = new Size(300, 213);
+            gb_PreUpload.Size = new Size(300, 290);
             gb_PreUpload.TabIndex = 3;
             gb_PreUpload.TabStop = false;
             gb_PreUpload.Text = "Phase 2 — PDF Validation & Upload Preparation";
@@ -375,14 +388,14 @@ namespace OrchestratorUi
             gb_UploadPhis.Controls.Add(lbl_Phase3Progress);
             gb_UploadPhis.Location = new Point(790, 140);
             gb_UploadPhis.Name = "gb_UploadPhis";
-            gb_UploadPhis.Size = new Size(254, 213);
+            gb_UploadPhis.Size = new Size(254, 290);
             gb_UploadPhis.TabIndex = 4;
             gb_UploadPhis.TabStop = false;
             gb_UploadPhis.Text = "Phase 3 — PHIS Document Upload";
             // 
             // pb_Phase3
             // 
-            pb_Phase3.Location = new Point(6, 181);
+            pb_Phase3.Location = new Point(12, 118);
             pb_Phase3.Name = "pb_Phase3";
             pb_Phase3.Size = new Size(228, 14);
             pb_Phase3.Style = ProgressBarStyle.Continuous;
@@ -392,30 +405,17 @@ namespace OrchestratorUi
             // 
             lbl_Phase3Progress.Font = new Font("Segoe UI", 8F);
             lbl_Phase3Progress.ForeColor = Color.FromArgb(140, 30, 30);
-            lbl_Phase3Progress.Location = new Point(6, 104);
+            lbl_Phase3Progress.Location = new Point(12, 136);
             lbl_Phase3Progress.Name = "lbl_Phase3Progress";
-            lbl_Phase3Progress.Size = new Size(228, 18);
+            lbl_Phase3Progress.Size = new Size(228, 24);
             lbl_Phase3Progress.TabIndex = 2;
             lbl_Phase3Progress.TextAlign = ContentAlignment.MiddleCenter;
-            // 
-            // bt_ScanPdfOcr
-            // 
-            bt_ScanPdfOcr.BackColor = Color.SeaGreen;
-            bt_ScanPdfOcr.FlatStyle = FlatStyle.Flat;
-            bt_ScanPdfOcr.ForeColor = Color.White;
-            bt_ScanPdfOcr.Location = new Point(6, 285);
-            bt_ScanPdfOcr.Name = "bt_ScanPdfOcr";
-            bt_ScanPdfOcr.Size = new Size(202, 35);
-            bt_ScanPdfOcr.TabIndex = 13;
-            bt_ScanPdfOcr.Text = "\U0001f9ea  Scanned PDF OCR";
-            bt_ScanPdfOcr.UseVisualStyleBackColor = false;
-            bt_ScanPdfOcr.Click += bt_ScanPdfOcr_Click;
             // 
             // UploadConsent
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(1065, 589);
+            ClientSize = new Size(1065, 703);
             Controls.Add(gb_UploadPhis);
             Controls.Add(gb_PreUpload);
             Controls.Add(gb_Phase1);

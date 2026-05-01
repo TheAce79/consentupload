@@ -1,6 +1,7 @@
 ﻿using ConsentSyncCore.Services;
 using ConsentSyncCore.Services.Browser;
 using ConsentSyncCore.Services.Configuration;
+using ConsentSyncCore.Services.ConfigurationPoco;
 using ConsentSyncCore.Services.Phis;
 using CsvProcessing;
 using Microsoft.Extensions.Configuration;
@@ -10,6 +11,7 @@ using Orchestrator.Phase1;
 using Orchestrator.Phase2;
 using Orchestrator.Phase3;
 using Orchestrator.PrePhase3;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using static Orchestrator.BulkPdfExtraction;
@@ -119,6 +121,16 @@ namespace OrchestratorUi
 
             try
             {
+
+                var outputCsvFullPath = ConfigurationService.GetOutputCsvFullPath();
+                if (!WorkspaceInitializer.IsFileAvailable(outputCsvFullPath))
+                {
+                    MessageBox.Show(this,
+                        $"The system cannot update the Client id:\n\"{Path.GetFileName(outputCsvFullPath)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
                 if (!PreFlightChecks())
                 {
                     lbl_Phase1Progress.Text = "";   // ✅ clear on early exit
@@ -512,6 +524,7 @@ namespace OrchestratorUi
         }
 
         // ── Button 2: Process CSV ─────────────────────────────────────
+
         private async void btn_ProcessCsv_Click(object sender, EventArgs e)
         {
             btn_ProcessCsv.Enabled = false;
@@ -527,22 +540,43 @@ namespace OrchestratorUi
                 var inputFile = Path.Combine(inputCsvFolder, csvConfig.InputCsvFileName);
                 var processedFile = Path.Combine(processedFolder, csvConfig.OutputCsvFileName);
 
+                // 1. Check if ANY file exists
                 if (!File.Exists(inputFile) && !File.Exists(processedFile))
                 {
                     MessageBox.Show(
                         this,
-                        $"No CSV file was found.\n\nPlease drop \"{csvConfig.InputCsvFileName}\" into:\n\n{inputCsvFolder}",
-                        "No CSV Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        $"The system cannot find the required CSV files.\n\nPlease ensure the file \"{csvConfig.InputCsvFileName}\" is placed in the following folder:\n\n{inputCsvFolder}",
+                        "Source File Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
 
+                // 2. Check for Excel locks on Input File
+                if (File.Exists(inputFile) && !WorkspaceInitializer.IsFileAvailable(inputFile))
+                {
+                    MessageBox.Show(
+                        this,
+                        $"The source file is currently locked:\n\"{Path.GetFileName(inputFile)}\"\n\nPlease close this file in Excel or any other program and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // 3. Check for Excel locks on Processed File
+                if (File.Exists(processedFile) && !WorkspaceInitializer.IsFileAvailable(processedFile))
+                {
+                    MessageBox.Show(
+                        this,
+                        $"The output file is currently locked:\n\"{Path.GetFileName(processedFile)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // 4. Existing file/Data Loss Logic
                 if (File.Exists(processedFile))
                 {
                     var fi = new FileInfo(processedFile);
-
-                    // ── Check if Phase 1 work would be lost ──────────
                     bool hasPhase1Work = false;
                     int clientIdsFound = 0;
+
                     try
                     {
                         var repo = new StudentCsvRepository(config);
@@ -550,30 +584,30 @@ namespace OrchestratorUi
                         clientIdsFound = existing.Count(s => !string.IsNullOrWhiteSpace(s.ClientId));
                         hasPhase1Work = clientIdsFound > 0;
                     }
-                    catch { /* non-fatal — fall through to standard prompt */ }
+                    catch { /* Ignore error during read-ahead */ }
 
-                    string warningExtra = hasPhase1Work
-                        ? $"\n\n⚠️  WARNING — DATA LOSS RISK:\n" +
-                          $"  Phase 1 found {clientIdsFound} Client ID(s) that will be permanently erased.\n" +
-                          $"  DuplicateResolved flags will also be reset.\n" +
-                          $"  You will need to re-run Phase 1 from scratch."
-                        : string.Empty;
+                    string title = hasPhase1Work ? "⚠️ Data Overwrite Warning" : "Overwrite Existing Data?";
+                    string mainMessage = $"A processed CSV already exists from a previous run:\n\n" +
+                                         $"File: {Path.GetFileName(processedFile)}\n" +
+                                         $"Last Modified: {fi.LastWriteTime:yyyy-MM-dd HH:mm}\n" +
+                                         $"Size: {fi.Length / 1024.0:F1} KB";
 
-                    var ans = MessageBox.Show(
-                        this,
-                        $"A processed CSV already exists:\n\n{processedFile}\n\n" +
-                        $"  Last modified : {fi.LastWriteTime:yyyy-MM-dd HH:mm}\n" +
-                        $"  Size          : {fi.Length / 1024.0:F1} KB\n" +
-                        warningExtra +
-                        $"\n\nDo you want to re-process and overwrite it?",
-                        hasPhase1Work ? "⚠️  Data Loss Warning" : "Processed CSV Exists",
+                    if (hasPhase1Work)
+                    {
+                        mainMessage += $"\n\nCRITICAL: This file contains {clientIdsFound} resolved Client ID(s) from Phase 1. " +
+                                       $"If you continue, ALL resolved IDs and manual corrections will be erased, and you will need to re-run Phase 1.";
+                    }
+
+                    mainMessage += "\n\nDo you want to re-process the raw data and overwrite this file?";
+
+                    var ans = MessageBox.Show(this, mainMessage, title,
                         MessageBoxButtons.YesNo,
-                        hasPhase1Work ? MessageBoxIcon.Warning : MessageBoxIcon.Question);
+                        hasPhase1Work ? MessageBoxIcon.Error : MessageBoxIcon.Question);
 
                     if (ans == DialogResult.No)
                     {
-                        await Task.Run(() =>
-                        {
+                        // Logic to show existing stats without re-processing
+                        await Task.Run(() => {
                             var repo = new StudentCsvRepository(config);
                             repo.PreviewProcessedCsv(3);
                             repo.DisplayStatistics();
@@ -582,9 +616,9 @@ namespace OrchestratorUi
                     }
                 }
 
-
+                // 5. Execution
                 LoggerService.LogInformation("\n" + new string('═', 60));
-                LoggerService.LogInformation("📋 PRE-PHASE: CSV Processing");
+                LoggerService.LogInformation("📋 STARTING: CSV Data Harmonization");
                 LoggerService.LogInformation(new string('═', 60));
 
                 await Task.Run(() =>
@@ -595,14 +629,14 @@ namespace OrchestratorUi
                     repo.DisplayStatistics();
                 });
 
-                MessageBox.Show(this, "✅ CSV processing completed successfully.\n\nSee the log for a preview and statistics.",
-                    "Processing Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, "✅ The CSV has been successfully processed and harmonized.\n\nYou may now proceed to Phase 1 (PHIS Search).",
+                    "Process Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
                 LoggerService.LogError($"❌ CSV processing failed: {ex.Message}", ex);
-                MessageBox.Show(this, $"❌ An unexpected error occurred:\n\n{ex.Message}",
-                    "Processing Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, $"An unexpected error occurred during processing:\n\n{ex.Message}",
+                    "Processing Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -610,6 +644,7 @@ namespace OrchestratorUi
                 btn_ProcessCsv.Text = "📋 Process CSV";
             }
         }
+
 
         // ── Portable Chrome ───────────────────────────────────────────
 
@@ -791,7 +826,6 @@ namespace OrchestratorUi
 
         // ── Phase 2: Validate PDFs against student records ────────────
 
-        // ── Phase 2: Validate PDFs against student records ────────────
         private async void bt_ValidatePdf_Click(object sender, EventArgs e)
         {
             bt_ValidatePdf.Enabled = false;
@@ -799,105 +833,112 @@ namespace OrchestratorUi
 
             try
             {
-                // ── Guard: Phase 1 must be complete ──────────────────
-                if (!await CheckAllRowsProcessedAsync("PDF Validation"))
+                
+                var outputCsvFullPath = ConfigurationService.GetOutputCsvFullPath();
+
+                var phase2Config = ConfigurationService.GetPhase2Config();
+                string validationCsv = Path.Combine(phase2Config.ValidationCsvPath, phase2Config.ValidationResultsCsv);
+
+                var prePhase3Config = ConfigurationService.GetPrePhase3Config();
+                var uploadCsv = Path.Combine(prePhase3Config.OutputPath, phase2Config.UploadCsv);
+
+               
+
+                if (!WorkspaceInitializer.IsFileAvailable(outputCsvFullPath))
+                {
+                    MessageBox.Show(this,
+                        $"The system cannot update the validation results:\n\"{Path.GetFileName(outputCsvFullPath)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
+                }
 
-                // ── Duplicate pre-check ───────────────────────────────
-                if (!await CheckUnresolvedDuplicatesAsync("PDF Validation"))
+                if (!WorkspaceInitializer.IsFileAvailable(validationCsv))
+                {
+                    MessageBox.Show(this,
+                        $"The system cannot update the validation results:\n\"{Path.GetFileName(validationCsv)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
+                }
 
-                var config = ConfigurationService.GetConfiguration();
+                
 
+                // 2. Pre-flight Guards
+                if (!await CheckAllRowsProcessedAsync("PDF Validation")) return;
+                if (!await CheckUnresolvedDuplicatesAsync("PDF Validation")) return;
+
+                // 3. Execution
                 LoggerService.LogInformation("\n" + new string('═', 60));
-                LoggerService.LogInformation("🔍 PHASE 2 — PDF Validation");
+                LoggerService.LogInformation("🔍 PHASE 2: Cross-Referencing PDFs with Records");
                 LoggerService.LogInformation(new string('═', 60));
 
                 var phase2Result = await Task.Run(async () =>
                 {
-                    var orchestrator = new Phase2Orchestrator(config);
+                    var orchestrator = new Phase2Orchestrator(ConfigurationService.GetConfiguration());
                     return await orchestrator.RunAsync();
                 });
 
                 if (phase2Result.HasErrors)
                 {
-                    LoggerService.LogError("❌ Phase 2 completed with errors.");
-                    MessageBox.Show(
-                        this,
-                        "❌ PDF Validation encountered errors and could not complete.\n\n" +
-                        "Please check the log panel for details.",
-                        "Validation Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(this,
+                        "The validation process encountered a technical error and could not finish.\n\nPlease review the Log Panel for specific error details.",
+                        "Process Interrupted", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
 
+                // 4. Result Processing
                 var bulkPdfConfig = ConfigurationService.GetBulkPdfExtractionConfig();
                 var errorFolder = phase2Result.SessionErrorDir ?? bulkPdfConfig.GetErrorPath();
+                var hasUnmatched = phase2Result.FailedToMatch > 0;
 
-                LoggerService.LogInformation("\n" + new string('═', 60));
-                LoggerService.LogInformation("📊 VALIDATION SUMMARY");
-                LoggerService.LogInformation(new string('═', 60));
-                LoggerService.LogInformation($"   📄 Total PDFs found      : {phase2Result.TotalPdfs}");
-                LoggerService.LogInformation($"   ✅ Matched to student    : {phase2Result.SuccessfullyProcessed}");
-                LoggerService.LogInformation($"   ⚠️  Unmatched (errors)   : {phase2Result.FailedToMatch}");
-
-                // ── Detect ClientId-only files that were matched this run ─────
-                // These are files the user manually renamed to {ClientId}.pdf.
-                // Phase 2 validates them but does NOT move them to 1 Consent Upload —
-                // that is PrePhase3's job.  Warn the user explicitly so they know
-                // they must also click Generate Upload CSV.
+                // Check for the "Manual ClientId Rename" scenario
                 var pdfSourcePath = bulkPdfConfig.GetOutputReadyPath();
                 bool hasClientIdFilesReady = Directory.Exists(pdfSourcePath) &&
                     Directory.GetFiles(pdfSourcePath, "*.pdf")
-                        .Any(f =>
-                        {
+                        .Any(f => {
                             var stem = Path.GetFileNameWithoutExtension(f).Trim();
-                            if (stem.Contains('_')) return false;
-                            if (long.TryParse(stem, out _)) return stem.Length >= 4;
-                            return true;
+                            return !stem.Contains('_') && long.TryParse(stem, out _) && stem.Length >= 4;
                         });
 
-                if (phase2Result.FailedToMatch > 0)
-                {
-                    LoggerService.LogWarning($"\n   ⚠️  {phase2Result.FailedToMatch} unmatched PDF(s) copied to:");
-                    LoggerService.LogWarning($"       {errorFolder}");
+                // 5. Final Professional Summary Message
+                StringBuilder msg = new StringBuilder();
+                msg.AppendLine("🔍 PDF Validation Summary:");
+                msg.AppendLine($"   📄 Total PDFs Scanned  : {phase2Result.TotalPdfs}");
+                msg.AppendLine($"   ✅ Successfully Matched : {phase2Result.SuccessfullyProcessed}");
+                msg.AppendLine($"   ⚠️  Unmatched (Errors)  : {phase2Result.FailedToMatch}");
 
-                    foreach (var err in phase2Result.ErrorMessages)
-                        LoggerService.LogWarning($"      • {err}");
+                if (hasUnmatched)
+                {
+                    msg.AppendLine($"\n⚠️ Action Required:");
+                    msg.AppendLine($"{phase2Result.FailedToMatch} file(s) could not be matched and were moved to:");
+                    msg.AppendLine($"\"{errorFolder}\"");
+                    msg.AppendLine("\nPlease correct these files and re-run validation.");
+                }
+                else
+                {
+                    msg.AppendLine("\n✅ Success: All PDF files were matched to student records.");
                 }
 
-                var hasUnmatched = phase2Result.FailedToMatch > 0;
+                if (hasClientIdFilesReady)
+                {
+                    msg.AppendLine("\n📋 Note: Manually renamed files detected.");
+                    msg.AppendLine("Please click 'Generate Upload CSV' to move these to the final upload folder.");
+                }
+                else if (!hasUnmatched)
+                {
+                    msg.AppendLine("\nYou may now proceed to 'Generate Upload CSV'.");
+                }
 
-                // ── Build message ─────────────────────────────────────────────
-                string clientIdNote = hasClientIdFilesReady
-                    ? "\n\n📋 Manually renamed file(s) detected (e.g. 12345.pdf).\n" +
-                      "   Validation is complete — you MUST also click\n" +
-                      "   📄 Generate Upload CSV  to move them to the upload folder."
-                    : string.Empty;
-
-                MessageBox.Show(
-                    this,
-                    $"🔍 PDF Validation complete.\n\n" +
-                    $"  📄 Total PDFs          : {phase2Result.TotalPdfs}\n" +
-                    $"  ✅ Matched             : {phase2Result.SuccessfullyProcessed}\n" +
-                    $"  ⚠️  Unmatched (errors) : {phase2Result.FailedToMatch}\n" +
-                    (hasUnmatched
-                        ? $"\n⚠️  Unmatched PDFs have been copied to:\n  {errorFolder}\n\nReview and correct them, then re-run validation."
-                        : "\n✅ All PDFs matched.") +
-                    clientIdNote +
-                    (!hasUnmatched && !hasClientIdFilesReady
-                        ? "\n\nYou may now click  📄 Generate Upload CSV."
-                        : string.Empty),
-                    hasUnmatched ? "Validation — Review Required" : "Validation Successful",
+                MessageBox.Show(this, msg.ToString(),
+                    hasUnmatched ? "Validation Complete - Review Required" : "Validation Successful",
                     MessageBoxButtons.OK,
                     hasUnmatched ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+
             }
             catch (Exception ex)
             {
-                LoggerService.LogError($"❌ Unexpected error during validation: {ex.Message}", ex);
-                MessageBox.Show(
-                    this,
-                    $"❌ An unexpected error occurred:\n\n{ex.Message}\n\nCheck the log panel for details.",
-                    "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                LoggerService.LogError($"❌ Critical Error: {ex.Message}", ex);
+                MessageBox.Show(this, $"An unexpected error occurred:\n\n{ex.Message}",
+                    "Critical Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -916,6 +957,40 @@ namespace OrchestratorUi
 
             try
             {
+                var outputCsvFullPath = ConfigurationService.GetOutputCsvFullPath();
+
+                var phase2Config = ConfigurationService.GetPhase2Config();
+                string validationCsv = Path.Combine(phase2Config.ValidationCsvPath, phase2Config.ValidationResultsCsv);
+
+                var prePhase3Config = ConfigurationService.GetPrePhase3Config();
+                var uploadCsv = Path.Combine(prePhase3Config.OutputPath, phase2Config.UploadCsv);
+
+                if (!WorkspaceInitializer.IsFileAvailable(outputCsvFullPath))
+                {
+                    MessageBox.Show(this,
+                        $"The system cannot read from the input csv file:\n\"{Path.GetFileName(outputCsvFullPath)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!WorkspaceInitializer.IsFileAvailable(validationCsv))
+                {
+                    MessageBox.Show(this,
+                        $"The system cannot update the upload CSV file:\n\"{Path.GetFileName(validationCsv)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+
+                if (!WorkspaceInitializer.IsFileAvailable(uploadCsv))
+                {
+                    MessageBox.Show(this,
+                        $"The system cannot update the upload CSV file:\n\"{Path.GetFileName(uploadCsv)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+
                 // ── Guard: Phase 1 must be complete ──────────────────
                 if (!await CheckAllRowsProcessedAsync("PDF Validation"))
                     return;
@@ -1060,6 +1135,41 @@ namespace OrchestratorUi
 
             try
             {
+                var outputCsvFullPath = ConfigurationService.GetOutputCsvFullPath();
+
+                var phase2Config = ConfigurationService.GetPhase2Config();
+                string validationCsv = Path.Combine(phase2Config.ValidationCsvPath, phase2Config.ValidationResultsCsv);
+
+                var prePhase3Config = ConfigurationService.GetPrePhase3Config();
+                var uploadCsv = Path.Combine(prePhase3Config.OutputPath, phase2Config.UploadCsv);
+
+                if (!WorkspaceInitializer.IsFileAvailable(outputCsvFullPath))
+                {
+                    MessageBox.Show(this,
+                        $"The system cannot read from the input csv file:\n\"{Path.GetFileName(outputCsvFullPath)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!WorkspaceInitializer.IsFileAvailable(validationCsv))
+                {
+                    MessageBox.Show(this,
+                        $"The system cannot update the upload CSV file:\n\"{Path.GetFileName(validationCsv)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+
+                if (!WorkspaceInitializer.IsFileAvailable(uploadCsv))
+                {
+                    MessageBox.Show(this,
+                        $"The system cannot update the upload CSV file:\n\"{Path.GetFileName(uploadCsv)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+
+
                 // ── Guard: Phase 1 must be complete ──────────────────
                 if (!await CheckAllRowsProcessedAsync("PDF Validation"))
                     return;
@@ -1282,6 +1392,34 @@ namespace OrchestratorUi
 
             try
             {
+
+               
+
+                var phase2Config = ConfigurationService.GetPhase2Config();
+                string validationCsv = Path.Combine(phase2Config.ValidationCsvPath, phase2Config.ValidationResultsCsv);
+
+                var prePhase3Config = ConfigurationService.GetPrePhase3Config();
+                var uploadCsv = Path.Combine(prePhase3Config.OutputPath, phase2Config.UploadCsv);
+
+               
+
+                if (!WorkspaceInitializer.IsFileAvailable(validationCsv))
+                {
+                    MessageBox.Show(this,
+                        $"The system cannot update the upload CSV file:\n\"{Path.GetFileName(validationCsv)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+
+                if (!WorkspaceInitializer.IsFileAvailable(uploadCsv))
+                {
+                    MessageBox.Show(this,
+                        $"The system cannot update the upload CSV file:\n\"{Path.GetFileName(uploadCsv)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
                 // ── Guard: Phase 1 must be complete ──────────────────
                 if (!await CheckAllRowsProcessedAsync("PDF Validation"))
                     return;
@@ -1792,12 +1930,54 @@ namespace OrchestratorUi
 
         private void bt_ScanPdf_Click(object sender, EventArgs e)
         {
+
+
+            var outputCsvFullPath = ConfigurationService.GetOutputCsvFullPath();
+            if (!WorkspaceInitializer.IsFileAvailable(outputCsvFullPath))
+            {
+                MessageBox.Show(this,
+                    $"The system cannot read from the input csv file:\n\"{Path.GetFileName(outputCsvFullPath)}\"\n\nPlease close this file in Excel and try again.",
+                    "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var phase2Config = ConfigurationService.GetPhase2Config();
+            string validationCsv = Path.Combine(phase2Config.ValidationCsvPath, phase2Config.ValidationResultsCsv);
+
+            if (!WorkspaceInitializer.IsFileAvailable(validationCsv))
+            {
+                MessageBox.Show(this,
+                    $"The system cannot update the validation results:\n\"{Path.GetFileName(validationCsv)}\"\n\nPlease close this file in Excel and try again.",
+                    "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             // Pass 'true' for Bypass mode (Filename = ID)
             _ = ExecuteScannedWorkflowAsync(bt_ScanPdf, "Processing Scanned PDFs...", true);
         }
 
         private void bt_ScanPdfOcr_Click(object sender, EventArgs e)
         {
+            var outputCsvFullPath = ConfigurationService.GetOutputCsvFullPath();
+            if (!WorkspaceInitializer.IsFileAvailable(outputCsvFullPath))
+            {
+                MessageBox.Show(this,
+                    $"The system cannot read from the input csv file:\n\"{Path.GetFileName(outputCsvFullPath)}\"\n\nPlease close this file in Excel and try again.",
+                    "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var phase2Config = ConfigurationService.GetPhase2Config();
+            string validationCsv = Path.Combine(phase2Config.ValidationCsvPath, phase2Config.ValidationResultsCsv);
+
+            if (!WorkspaceInitializer.IsFileAvailable(validationCsv))
+            {
+                MessageBox.Show(this,
+                    $"The system cannot update the validation results:\n\"{Path.GetFileName(validationCsv)}\"\n\nPlease close this file in Excel and try again.",
+                    "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             // Pass 'false' for OCR mode
             _ = ExecuteScannedWorkflowAsync(bt_ScanPdfOcr, "Processing Scanned PDFs (OCR)...", false);
         }
