@@ -27,7 +27,8 @@ Write-Host "🔧 Patching appsettings.json to disable Testing Mode..." -Foregrou
 $settingsPath =  "$env:UserProfile\OneDrive\Phis\Publish-Output\appsettings.json" 
 $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
 
-# Force the specific flag to false
+# Force both safety flags to false
+$settings.DevMode = $false
 $settings.Phase3.Testing.Enabled = $false
 
 # Convert back to JSON and save (with UTF8 to preserve your French accents!)

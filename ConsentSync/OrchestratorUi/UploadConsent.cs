@@ -89,7 +89,9 @@ namespace OrchestratorUi
 
             // ── Show bt_test only when Phase3:Testing:Enabled = true ──
             var config = ConfigurationService.GetConfiguration();
-            bt_ScanPdf.Visible = config.GetValue<bool>("Phase3:Testing:Enabled");
+
+            bt_ScanPdf.Visible = ConfigurationService.gDevMode;
+            bt_ScanPdfOcr.Visible = ConfigurationService.gDevMode;
 
             RefreshChromeButtonState();
         }
@@ -593,13 +595,13 @@ namespace OrchestratorUi
                     repo.DisplayStatistics();
                 });
 
-                MessageBox.Show(this,"✅ CSV processing completed successfully.\n\nSee the log for a preview and statistics.",
+                MessageBox.Show(this, "✅ CSV processing completed successfully.\n\nSee the log for a preview and statistics.",
                     "Processing Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
                 LoggerService.LogError($"❌ CSV processing failed: {ex.Message}", ex);
-                MessageBox.Show(this,$"❌ An unexpected error occurred:\n\n{ex.Message}",
+                MessageBox.Show(this, $"❌ An unexpected error occurred:\n\n{ex.Message}",
                     "Processing Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
@@ -703,7 +705,7 @@ namespace OrchestratorUi
                 }
                 else
                 {
-                    MessageBox.Show(this,"❌ Download failed.\nCheck the log for details.",
+                    MessageBox.Show(this, "❌ Download failed.\nCheck the log for details.",
                         "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
@@ -756,12 +758,12 @@ namespace OrchestratorUi
 
         private void btn_SaveConfig_Click(object sender, EventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(txt_BaseDir.Text)) { MessageBox.Show(this,"❌ Base Directory cannot be empty.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (string.IsNullOrWhiteSpace(txt_SchoolName.Text)) { MessageBox.Show(this,"❌ School Name cannot be empty.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (!int.TryParse(txtBox_BatchSize.Text, out int batchSize) || batchSize < 1) { MessageBox.Show(this,"❌ Batch Size must be a number greater than 0.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (string.IsNullOrWhiteSpace(txt_BaseDir.Text)) { MessageBox.Show(this, "❌ Base Directory cannot be empty.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (string.IsNullOrWhiteSpace(txt_SchoolName.Text)) { MessageBox.Show(this, "❌ School Name cannot be empty.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (!int.TryParse(txtBox_BatchSize.Text, out int batchSize) || batchSize < 1) { MessageBox.Show(this, "❌ Batch Size must be a number greater than 0.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
             var dirError = WorkspaceInitializer.ValidateBaseDirectory(txt_BaseDir.Text);
-            if (dirError != null) { MessageBox.Show(this,$"❌ {dirError}", "Directory Error", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+            if (dirError != null) { MessageBox.Show(this, $"❌ {dirError}", "Directory Error", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
 
             try
             {
@@ -781,9 +783,9 @@ namespace OrchestratorUi
 
                 ConfigurationService.ReloadConfiguration();
                 WorkspaceInitializer.EnsureAllFoldersExist();
-                MessageBox.Show(this,$"✅ Configuration saved!\n\n  Base Dir : {txt_BaseDir.Text}\n  School   : {txt_SchoolName.Text}\n  Grade    : {cb_Grade.SelectedItem}\n  Batch    : {batchSize}", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, $"✅ Configuration saved!\n\n  Base Dir : {txt_BaseDir.Text}\n  School   : {txt_SchoolName.Text}\n  Grade    : {cb_Grade.SelectedItem}\n  Batch    : {batchSize}", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            catch (Exception ex) { MessageBox.Show(this,$"❌ Failed to save:\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            catch (Exception ex) { MessageBox.Show(this, $"❌ Failed to save:\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
 
 
@@ -1230,7 +1232,7 @@ namespace OrchestratorUi
             catch (Exception ex)
             {
                 LoggerService.LogError($"❌ Unexpected error in FileRose append: {ex.Message}", ex);
-                MessageBox.Show(this,$"❌ Unexpected error:\n\n{ex.Message}",
+                MessageBox.Show(this, $"❌ Unexpected error:\n\n{ex.Message}",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
@@ -1714,43 +1716,6 @@ namespace OrchestratorUi
         }
 
 
-        private void bt_ScanPdf_Click(object sender, EventArgs e)
-        {
-            bt_ScanPdf.Enabled = false;
-            bt_ScanPdf.Text = "⏳ Processing Scanned PDFs...";
-
-            LoggerService.LogInformation("\n🧪 Starting Scanned PDF Workflow...");
-
-            // ✅ Only one Task.Run is needed.
-            Task.Run(() =>
-            {
-                var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
-                string inputPath = bulkConfig.GetInputScannedPath();
-
-                // 1. First, OCR anything new in the folder
-                // This call is synchronous inside the Task, so it blocks the background thread (correctly)
-                ProcessScannedCsv.ProcessScannedFolder(bulkConfig.IsClientIdAsFileName);
-
-                // 2. Then, Finalize anything that now has a ClientID
-                var promoted = ProcessScannedCsv.FinalizeAndPromoteScannedPdfs(inputPath);
-
-                LoggerService.LogInformation($"✅ Scanned process complete. {promoted.Count} students promoted to Validation Results.");
-            })
-            .ContinueWith(_ =>
-            {
-                // This only executes once the code inside the Task.Run above is finished
-                this.InvokeIfRequired(() =>
-                {
-                    bt_ScanPdf.Enabled = true;
-                    bt_ScanPdf.Text = "🧪 Process Scanned PDFs (Test)";
-
-                    MessageBox.Show(this, "Processing complete. Check the logs for details.",
-                        "Scanned PDFs Processed", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                });
-            });
-        }
-
-
         // ── Guard: all rows must be processed before Phase 2 or Phase 3 ──
         /// <summary>
         /// Returns <c>true</c> if it is safe to proceed (no NotProcessed rows remain).
@@ -1821,6 +1786,66 @@ namespace OrchestratorUi
                 return true;
             }
         }
+
+
+       
+
+        private void bt_ScanPdf_Click(object sender, EventArgs e)
+        {
+            // Pass 'true' for Bypass mode (Filename = ID)
+            _ = ExecuteScannedWorkflowAsync(bt_ScanPdf, "Processing Scanned PDFs...", true);
+        }
+
+        private void bt_ScanPdfOcr_Click(object sender, EventArgs e)
+        {
+            // Pass 'false' for OCR mode
+            _ = ExecuteScannedWorkflowAsync(bt_ScanPdfOcr, "Processing Scanned PDFs (OCR)...", false);
+        }
+
+        /// <summary>
+        /// Unified background handler for Scanned PDF workflows.
+        /// </summary>
+        private async Task ExecuteScannedWorkflowAsync(Button btn, string loadingText, bool useFilenameAsId)
+        {
+            string originalText = btn.Text;
+            btn.Enabled = false;
+            btn.Text = $"⏳ {loadingText}";
+
+            LoggerService.LogInformation($"\n🧪 Starting Scanned PDF Workflow (BypassMode: {useFilenameAsId})...");
+
+            try
+            {
+                await Task.Run(() =>
+                {
+                    var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+                    string inputPath = bulkConfig.GetInputScannedPath();
+
+                    // 1. Process the folder (Bypass or OCR)
+                    ProcessScannedCsv.ProcessScannedFolder(useFilenameAsId);
+
+                    // 2. Finalize and move to Master Validation
+                    var promoted = ProcessScannedCsv.FinalizeAndPromoteScannedPdfs(inputPath);
+
+                    LoggerService.LogInformation($"✅ Scanned process complete. {promoted.Count} students promoted.");
+                });
+
+                MessageBox.Show(this, "Processing complete. Check the logs for details.",
+                    "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError($"❌ Workflow failed: {ex.Message}");
+                MessageBox.Show(this, $"An error occurred: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                btn.Enabled = true;
+                btn.Text = originalText;
+            }
+        }
+
+
+
     }
 
     internal static class ControlExtensions

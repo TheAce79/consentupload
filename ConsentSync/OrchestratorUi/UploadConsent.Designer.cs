@@ -49,6 +49,7 @@ namespace OrchestratorUi
             gb_UploadPhis = new GroupBox();
             pb_Phase3 = new ProgressBar();
             lbl_Phase3Progress = new Label();
+            bt_ScanPdfOcr = new Button();
             grpConfig.SuspendLayout();
             gb_Normalise.SuspendLayout();
             gb_Phase1.SuspendLayout();
@@ -122,6 +123,7 @@ namespace OrchestratorUi
             // 
             // grpConfig
             // 
+            grpConfig.Controls.Add(bt_ScanPdfOcr);
             grpConfig.Controls.Add(bt_ScanPdf);
             grpConfig.Controls.Add(lb_Dir);
             grpConfig.Controls.Add(txt_BaseDir);
@@ -396,6 +398,19 @@ namespace OrchestratorUi
             lbl_Phase3Progress.TabIndex = 2;
             lbl_Phase3Progress.TextAlign = ContentAlignment.MiddleCenter;
             // 
+            // bt_ScanPdfOcr
+            // 
+            bt_ScanPdfOcr.BackColor = Color.SeaGreen;
+            bt_ScanPdfOcr.FlatStyle = FlatStyle.Flat;
+            bt_ScanPdfOcr.ForeColor = Color.White;
+            bt_ScanPdfOcr.Location = new Point(6, 285);
+            bt_ScanPdfOcr.Name = "bt_ScanPdfOcr";
+            bt_ScanPdfOcr.Size = new Size(202, 35);
+            bt_ScanPdfOcr.TabIndex = 13;
+            bt_ScanPdfOcr.Text = "\U0001f9ea  Scanned PDF OCR";
+            bt_ScanPdfOcr.UseVisualStyleBackColor = false;
+            bt_ScanPdfOcr.Click += bt_ScanPdfOcr_Click;
+            // 
             // UploadConsent
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
@@ -451,5 +466,6 @@ namespace OrchestratorUi
         private ProgressBar pb_Phase3;
         private Label lbl_Phase3Progress;
         private Button bt_ScanPdf;
+        private Button bt_ScanPdfOcr;
     }
 }

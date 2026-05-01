@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 namespace ConsentSyncCore.Services.ConfigurationPoco
 {
 
+
+
     /// <summary>
     /// School context configuration (shared across all phases)
     /// </summary>

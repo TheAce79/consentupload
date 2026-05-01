@@ -11,6 +11,8 @@ namespace ConsentSyncCore.Services.Configuration
         private static string? _resolvedConfigDir;
         private static IDisposable? _changeToken;
 
+        public static bool gDevMode { get; private set; }
+
         public static IConfiguration GetConfiguration()
         {
             if (_config != null) return _config;
@@ -73,6 +75,8 @@ namespace ConsentSyncCore.Services.Configuration
                 .Build();
 
             _baseDirectory = _config["BaseDirectory"] ?? "C:\\PHIS";
+
+            gDevMode = _config.GetValue<bool>("DevMode");
 
             // ✅ No file watcher needed — dispose any lingering token from previous loads
             _changeToken?.Dispose();

@@ -36,7 +36,9 @@ namespace Orchestrator.Phase3
         private readonly PhisWorkspaceConfig _phisWorkspaceConfig;
 
         private readonly ILogger<Phase3Orchestrator> _logger;
-       
+
+
+        
 
         public Phase3Orchestrator(
             IConfiguration? config = null,
@@ -503,7 +505,7 @@ namespace Orchestrator.Phase3
             var allRecords = csv.GetRecords<UploadRecord>().ToList();
             List<UploadRecord> records;
 
-            if (_phase3Config.Testing.Enabled)
+            if (ConfigurationService.gDevMode && _phase3Config.Testing.Enabled)
             {
                 LoggerService.LogInformation("\n   🧪 TESTING MODE");
                 records = allRecords;
