@@ -92,7 +92,7 @@ namespace OrchestratorUi
             // ── Show bt_test only when Phase3:Testing:Enabled = true ──
             var config = ConfigurationService.GetConfiguration();
 
-            bt_ScanPdf.Visible = ConfigurationService.gDevMode;
+            //bt_ScanPdf.Visible = ConfigurationService.gDevMode;
             bt_ScanPdfOcr.Visible = ConfigurationService.gDevMode;
 
             RefreshChromeButtonState();
@@ -607,7 +607,8 @@ namespace OrchestratorUi
                     if (ans == DialogResult.No)
                     {
                         // Logic to show existing stats without re-processing
-                        await Task.Run(() => {
+                        await Task.Run(() =>
+                        {
                             var repo = new StudentCsvRepository(config);
                             repo.PreviewProcessedCsv(3);
                             repo.DisplayStatistics();
@@ -833,7 +834,7 @@ namespace OrchestratorUi
 
             try
             {
-                
+
                 var outputCsvFullPath = ConfigurationService.GetOutputCsvFullPath();
 
                 var phase2Config = ConfigurationService.GetPhase2Config();
@@ -842,7 +843,7 @@ namespace OrchestratorUi
                 var prePhase3Config = ConfigurationService.GetPrePhase3Config();
                 var uploadCsv = Path.Combine(prePhase3Config.OutputPath, phase2Config.UploadCsv);
 
-               
+
 
                 if (!WorkspaceInitializer.IsFileAvailable(outputCsvFullPath))
                 {
@@ -860,7 +861,7 @@ namespace OrchestratorUi
                     return;
                 }
 
-                
+
 
                 // 2. Pre-flight Guards
                 if (!await CheckAllRowsProcessedAsync("PDF Validation")) return;
@@ -894,7 +895,8 @@ namespace OrchestratorUi
                 var pdfSourcePath = bulkPdfConfig.GetOutputReadyPath();
                 bool hasClientIdFilesReady = Directory.Exists(pdfSourcePath) &&
                     Directory.GetFiles(pdfSourcePath, "*.pdf")
-                        .Any(f => {
+                        .Any(f =>
+                        {
                             var stem = Path.GetFileNameWithoutExtension(f).Trim();
                             return !stem.Contains('_') && long.TryParse(stem, out _) && stem.Length >= 4;
                         });
@@ -1393,7 +1395,7 @@ namespace OrchestratorUi
             try
             {
 
-               
+
 
                 var phase2Config = ConfigurationService.GetPhase2Config();
                 string validationCsv = Path.Combine(phase2Config.ValidationCsvPath, phase2Config.ValidationResultsCsv);
@@ -1401,7 +1403,7 @@ namespace OrchestratorUi
                 var prePhase3Config = ConfigurationService.GetPrePhase3Config();
                 var uploadCsv = Path.Combine(prePhase3Config.OutputPath, phase2Config.UploadCsv);
 
-               
+
 
                 if (!WorkspaceInitializer.IsFileAvailable(validationCsv))
                 {
@@ -1926,7 +1928,7 @@ namespace OrchestratorUi
         }
 
 
-       
+
 
         private void bt_ScanPdf_Click(object sender, EventArgs e)
         {
@@ -1955,6 +1957,7 @@ namespace OrchestratorUi
             // Pass 'true' for Bypass mode (Filename = ID)
             _ = ExecuteScannedWorkflowAsync(bt_ScanPdf, "Processing Scanned PDFs...", true);
         }
+
 
         private void bt_ScanPdfOcr_Click(object sender, EventArgs e)
         {
@@ -2024,8 +2027,15 @@ namespace OrchestratorUi
             }
         }
 
+        private void button1_Click(object sender, EventArgs e)
+        {
 
+        }
 
+        private void cb_Grade_SelectedIndexChanged(object sender, EventArgs e)
+        {
+
+        }
     }
 
     internal static class ControlExtensions

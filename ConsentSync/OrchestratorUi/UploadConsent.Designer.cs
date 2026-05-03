@@ -24,19 +24,15 @@ namespace OrchestratorUi
             bt_Upload = new Button();
             bt_AppendFileRose = new Button();
             grpConfig = new GroupBox();
-            bt_ScanPdfOcr = new Button();
-            bt_ScanPdf = new Button();
-            lb_Dir = new Label();
-            txt_BaseDir = new TextBox();
-            btn_BrowseDir = new Button();
             cb_Grade = new ComboBox();
             lb_Grade = new Label();
             txt_SchoolName = new TextBox();
             lb_School = new Label();
             txtBox_BatchSize = new TextBox();
             label1 = new Label();
-            btn_SaveConfig = new Button();
-            btn_PortableChrome = new Button();
+            bt_Save = new Button();
+            bt_ScanPdfOcr = new Button();
+            bt_ScanPdf = new Button();
             rtxt_Log = new RichTextBox();
             folderBrowserDialog1 = new FolderBrowserDialog();
             gb_Normalise = new GroupBox();
@@ -50,11 +46,17 @@ namespace OrchestratorUi
             gb_UploadPhis = new GroupBox();
             pb_Phase3 = new ProgressBar();
             lbl_Phase3Progress = new Label();
+            groupBox1 = new GroupBox();
+            btn_PortableChrome = new Button();
+            lb_Dir = new Label();
+            txt_BaseDir = new TextBox();
+            btn_BrowseDir = new Button();
             grpConfig.SuspendLayout();
             gb_Normalise.SuspendLayout();
             gb_Phase1.SuspendLayout();
             gb_PreUpload.SuspendLayout();
             gb_UploadPhis.SuspendLayout();
+            groupBox1.SuspendLayout();
             SuspendLayout();
             // 
             // bt_ValidatePdf
@@ -123,31 +125,90 @@ namespace OrchestratorUi
             // 
             // grpConfig
             // 
-            grpConfig.Controls.Add(bt_ScanPdfOcr);
-            grpConfig.Controls.Add(lb_Dir);
-            grpConfig.Controls.Add(txt_BaseDir);
-            grpConfig.Controls.Add(btn_BrowseDir);
             grpConfig.Controls.Add(cb_Grade);
             grpConfig.Controls.Add(lb_Grade);
             grpConfig.Controls.Add(txt_SchoolName);
             grpConfig.Controls.Add(lb_School);
             grpConfig.Controls.Add(txtBox_BatchSize);
             grpConfig.Controls.Add(label1);
-            grpConfig.Controls.Add(btn_SaveConfig);
-            grpConfig.Controls.Add(btn_PortableChrome);
-            grpConfig.Location = new Point(12, 12);
+            grpConfig.Location = new Point(50, 154);
             grpConfig.Name = "grpConfig";
-            grpConfig.Size = new Size(440, 418);
+            grpConfig.Size = new Size(412, 176);
             grpConfig.TabIndex = 0;
             grpConfig.TabStop = false;
-            grpConfig.Text = "Configuration";
+            grpConfig.Text = "School Context";
+            // 
+            // cb_Grade
+            // 
+            cb_Grade.DropDownStyle = ComboBoxStyle.DropDownList;
+            cb_Grade.FormattingEnabled = true;
+            cb_Grade.Location = new Point(125, 122);
+            cb_Grade.Name = "cb_Grade";
+            cb_Grade.Size = new Size(151, 28);
+            cb_Grade.TabIndex = 6;
+            // 
+            // lb_Grade
+            // 
+            lb_Grade.AutoSize = true;
+            lb_Grade.Location = new Point(6, 118);
+            lb_Grade.Name = "lb_Grade";
+            lb_Grade.Size = new Size(49, 20);
+            lb_Grade.TabIndex = 5;
+            lb_Grade.Text = "Grade";
+            // 
+            // txt_SchoolName
+            // 
+            txt_SchoolName.Location = new Point(125, 78);
+            txt_SchoolName.Name = "txt_SchoolName";
+            txt_SchoolName.Size = new Size(151, 27);
+            txt_SchoolName.TabIndex = 4;
+            // 
+            // lb_School
+            // 
+            lb_School.AutoSize = true;
+            lb_School.Location = new Point(6, 78);
+            lb_School.Name = "lb_School";
+            lb_School.Size = new Size(98, 20);
+            lb_School.TabIndex = 3;
+            lb_School.Text = "School Name";
+            // 
+            // txtBox_BatchSize
+            // 
+            txtBox_BatchSize.Location = new Point(125, 39);
+            txtBox_BatchSize.Name = "txtBox_BatchSize";
+            txtBox_BatchSize.Size = new Size(151, 27);
+            txtBox_BatchSize.TabIndex = 2;
+            txtBox_BatchSize.TextChanged += txtBox_BatchSize_TextChanged;
+            txtBox_BatchSize.KeyPress += txtBox_BatchSize_KeyPress;
+            // 
+            // label1
+            // 
+            label1.AutoSize = true;
+            label1.Location = new Point(6, 46);
+            label1.Name = "label1";
+            label1.Size = new Size(77, 20);
+            label1.TabIndex = 1;
+            label1.Text = "Batch Size";
+            // 
+            // bt_Save
+            // 
+            bt_Save.BackColor = Color.SeaGreen;
+            bt_Save.FlatStyle = FlatStyle.Flat;
+            bt_Save.ForeColor = Color.White;
+            bt_Save.Location = new Point(56, 360);
+            bt_Save.Name = "bt_Save";
+            bt_Save.Size = new Size(126, 32);
+            bt_Save.TabIndex = 15;
+            bt_Save.Text = "💾 Save Configuration";
+            bt_Save.UseVisualStyleBackColor = false;
+            bt_Save.Click += btn_SaveConfig_Click;
             // 
             // bt_ScanPdfOcr
             // 
             bt_ScanPdfOcr.BackColor = Color.SeaGreen;
             bt_ScanPdfOcr.FlatStyle = FlatStyle.Flat;
             bt_ScanPdfOcr.ForeColor = Color.White;
-            bt_ScanPdfOcr.Location = new Point(6, 285);
+            bt_ScanPdfOcr.Location = new Point(203, 357);
             bt_ScanPdfOcr.Name = "bt_ScanPdfOcr";
             bt_ScanPdfOcr.Size = new Size(202, 35);
             bt_ScanPdfOcr.TabIndex = 13;
@@ -167,111 +228,6 @@ namespace OrchestratorUi
             bt_ScanPdf.Text = "\U0001f9ea  Scanned PDF → CSV ";
             bt_ScanPdf.UseVisualStyleBackColor = false;
             bt_ScanPdf.Click += bt_ScanPdf_Click;
-            // 
-            // lb_Dir
-            // 
-            lb_Dir.AutoSize = true;
-            lb_Dir.Location = new Point(6, 33);
-            lb_Dir.Name = "lb_Dir";
-            lb_Dir.Size = new Size(64, 20);
-            lb_Dir.TabIndex = 7;
-            lb_Dir.Text = "Base Dir";
-            // 
-            // txt_BaseDir
-            // 
-            txt_BaseDir.Location = new Point(116, 30);
-            txt_BaseDir.Name = "txt_BaseDir";
-            txt_BaseDir.ReadOnly = true;
-            txt_BaseDir.Size = new Size(200, 27);
-            txt_BaseDir.TabIndex = 8;
-            // 
-            // btn_BrowseDir
-            // 
-            btn_BrowseDir.Location = new Point(322, 29);
-            btn_BrowseDir.Name = "btn_BrowseDir";
-            btn_BrowseDir.Size = new Size(90, 27);
-            btn_BrowseDir.TabIndex = 9;
-            btn_BrowseDir.Text = "📁 Browse";
-            btn_BrowseDir.UseVisualStyleBackColor = true;
-            btn_BrowseDir.Click += btn_BrowseDir_Click;
-            // 
-            // cb_Grade
-            // 
-            cb_Grade.DropDownStyle = ComboBoxStyle.DropDownList;
-            cb_Grade.FormattingEnabled = true;
-            cb_Grade.Location = new Point(116, 175);
-            cb_Grade.Name = "cb_Grade";
-            cb_Grade.Size = new Size(151, 28);
-            cb_Grade.TabIndex = 6;
-            // 
-            // lb_Grade
-            // 
-            lb_Grade.AutoSize = true;
-            lb_Grade.Location = new Point(6, 178);
-            lb_Grade.Name = "lb_Grade";
-            lb_Grade.Size = new Size(49, 20);
-            lb_Grade.TabIndex = 5;
-            lb_Grade.Text = "Grade";
-            // 
-            // txt_SchoolName
-            // 
-            txt_SchoolName.Location = new Point(116, 130);
-            txt_SchoolName.Name = "txt_SchoolName";
-            txt_SchoolName.Size = new Size(151, 27);
-            txt_SchoolName.TabIndex = 4;
-            // 
-            // lb_School
-            // 
-            lb_School.AutoSize = true;
-            lb_School.Location = new Point(6, 130);
-            lb_School.Name = "lb_School";
-            lb_School.Size = new Size(98, 20);
-            lb_School.TabIndex = 3;
-            lb_School.Text = "School Name";
-            // 
-            // txtBox_BatchSize
-            // 
-            txtBox_BatchSize.Location = new Point(116, 86);
-            txtBox_BatchSize.Name = "txtBox_BatchSize";
-            txtBox_BatchSize.Size = new Size(151, 27);
-            txtBox_BatchSize.TabIndex = 2;
-            txtBox_BatchSize.TextChanged += txtBox_BatchSize_TextChanged;
-            txtBox_BatchSize.KeyPress += txtBox_BatchSize_KeyPress;
-            // 
-            // label1
-            // 
-            label1.AutoSize = true;
-            label1.Location = new Point(6, 86);
-            label1.Name = "label1";
-            label1.Size = new Size(77, 20);
-            label1.TabIndex = 1;
-            label1.Text = "Batch Size";
-            // 
-            // btn_SaveConfig
-            // 
-            btn_SaveConfig.BackColor = Color.SeaGreen;
-            btn_SaveConfig.FlatStyle = FlatStyle.Flat;
-            btn_SaveConfig.ForeColor = Color.White;
-            btn_SaveConfig.Location = new Point(286, 86);
-            btn_SaveConfig.Name = "btn_SaveConfig";
-            btn_SaveConfig.Size = new Size(126, 32);
-            btn_SaveConfig.TabIndex = 10;
-            btn_SaveConfig.Text = "💾 Save Configuration";
-            btn_SaveConfig.UseVisualStyleBackColor = false;
-            btn_SaveConfig.Click += btn_SaveConfig_Click;
-            // 
-            // btn_PortableChrome
-            // 
-            btn_PortableChrome.BackColor = Color.SteelBlue;
-            btn_PortableChrome.FlatStyle = FlatStyle.Flat;
-            btn_PortableChrome.ForeColor = Color.White;
-            btn_PortableChrome.Location = new Point(286, 130);
-            btn_PortableChrome.Name = "btn_PortableChrome";
-            btn_PortableChrome.Size = new Size(126, 32);
-            btn_PortableChrome.TabIndex = 11;
-            btn_PortableChrome.Text = "🌐 Download Portable Chrome";
-            btn_PortableChrome.UseVisualStyleBackColor = false;
-            btn_PortableChrome.Click += btn_PortableChrome_Click;
             // 
             // rtxt_Log
             // 
@@ -411,11 +367,67 @@ namespace OrchestratorUi
             lbl_Phase3Progress.TabIndex = 2;
             lbl_Phase3Progress.TextAlign = ContentAlignment.MiddleCenter;
             // 
+            // groupBox1
+            // 
+            groupBox1.Controls.Add(btn_PortableChrome);
+            groupBox1.Controls.Add(lb_Dir);
+            groupBox1.Controls.Add(txt_BaseDir);
+            groupBox1.Controls.Add(btn_BrowseDir);
+            groupBox1.Location = new Point(50, 12);
+            groupBox1.Name = "groupBox1";
+            groupBox1.Size = new Size(412, 136);
+            groupBox1.TabIndex = 3;
+            groupBox1.TabStop = false;
+            groupBox1.Text = "Configuraration";
+            // 
+            // btn_PortableChrome
+            // 
+            btn_PortableChrome.BackColor = Color.SteelBlue;
+            btn_PortableChrome.FlatStyle = FlatStyle.Flat;
+            btn_PortableChrome.ForeColor = Color.White;
+            btn_PortableChrome.Location = new Point(87, 80);
+            btn_PortableChrome.Name = "btn_PortableChrome";
+            btn_PortableChrome.Size = new Size(126, 32);
+            btn_PortableChrome.TabIndex = 13;
+            btn_PortableChrome.Text = "🌐 Download Portable Chrome";
+            btn_PortableChrome.UseVisualStyleBackColor = false;
+            btn_PortableChrome.Click += btn_PortableChrome_Click;
+            // 
+            // lb_Dir
+            // 
+            lb_Dir.AutoSize = true;
+            lb_Dir.Location = new Point(6, 38);
+            lb_Dir.Name = "lb_Dir";
+            lb_Dir.Size = new Size(64, 20);
+            lb_Dir.TabIndex = 10;
+            lb_Dir.Text = "Base Dir";
+            // 
+            // txt_BaseDir
+            // 
+            txt_BaseDir.Location = new Point(76, 38);
+            txt_BaseDir.Name = "txt_BaseDir";
+            txt_BaseDir.ReadOnly = true;
+            txt_BaseDir.Size = new Size(200, 27);
+            txt_BaseDir.TabIndex = 11;
+            // 
+            // btn_BrowseDir
+            // 
+            btn_BrowseDir.Location = new Point(286, 38);
+            btn_BrowseDir.Name = "btn_BrowseDir";
+            btn_BrowseDir.Size = new Size(90, 27);
+            btn_BrowseDir.TabIndex = 12;
+            btn_BrowseDir.Text = "📁 Browse";
+            btn_BrowseDir.UseVisualStyleBackColor = true;
+            btn_BrowseDir.Click += btn_BrowseDir_Click;
+            // 
             // UploadConsent
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(1065, 703);
+            Controls.Add(bt_ScanPdfOcr);
+            Controls.Add(bt_Save);
+            Controls.Add(groupBox1);
             Controls.Add(gb_UploadPhis);
             Controls.Add(gb_PreUpload);
             Controls.Add(gb_Phase1);
@@ -430,6 +442,8 @@ namespace OrchestratorUi
             gb_Phase1.ResumeLayout(false);
             gb_PreUpload.ResumeLayout(false);
             gb_UploadPhis.ResumeLayout(false);
+            groupBox1.ResumeLayout(false);
+            groupBox1.PerformLayout();
             ResumeLayout(false);
         }
 
@@ -442,11 +456,6 @@ namespace OrchestratorUi
         private Label lb_School;
         private Label lb_Grade;
         private ComboBox cb_Grade;
-        private Label lb_Dir;
-        private TextBox txt_BaseDir;
-        private Button btn_BrowseDir;
-        private Button btn_SaveConfig;
-        private Button btn_PortableChrome;
         private RichTextBox rtxt_Log;
         private FolderBrowserDialog folderBrowserDialog1;
         private GroupBox gb_Normalise;
@@ -467,5 +476,11 @@ namespace OrchestratorUi
         private Label lbl_Phase3Progress;
         private Button bt_ScanPdf;
         private Button bt_ScanPdfOcr;
+        private GroupBox groupBox1;
+        private Button bt_Save;
+        private Button btn_PortableChrome;
+        private Label lb_Dir;
+        private TextBox txt_BaseDir;
+        private Button btn_BrowseDir;
     }
 }

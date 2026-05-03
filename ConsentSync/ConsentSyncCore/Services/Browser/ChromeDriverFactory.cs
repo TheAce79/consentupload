@@ -5,6 +5,7 @@ using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Net;
 using System.Text.Json;
 
 namespace ConsentSyncCore.Services.Browser
@@ -71,8 +72,22 @@ namespace ConsentSyncCore.Services.Browser
                 using var http = new System.Net.Http.HttpClient();
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("ConsentSync/1.0");
 
+
+
                 var json = await http.GetStringAsync(
-                    _chromeConfig.PortableChromeVersionsJsonUrl, cancellationToken);
+                            _chromeConfig.PortableChromeVersionsJsonUrl, cancellationToken);
+
+                var simulateFailure = false; // Set to true to test fallback instructions
+
+                if (simulateFailure)
+                {
+                    json = await http.GetStringAsync(
+                        "https://invalid-url-for-testing.com/versions.json", cancellationToken);
+                }
+
+
+
+
 
                 using var doc = JsonDocument.Parse(json);
                 var channels = doc.RootElement.GetProperty("channels");
@@ -481,7 +496,8 @@ namespace ConsentSyncCore.Services.Browser
                 progress?.Invoke($"⬇️  Downloading ChromeDriver {chromeVersion}...");
                 progress?.Invoke($"   URL: {downloadUrl}");
 
-                using var http = new System.Net.Http.HttpClient();
+                var handler = new HttpClientHandler { UseProxy = true, Proxy = WebRequest.DefaultWebProxy };
+                using var http = new HttpClient(handler);
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("ConsentSync/1.0");
 
                 byte[] bytes;
@@ -561,15 +577,15 @@ namespace ConsentSyncCore.Services.Browser
                         var manualUrl = downloadUrl
                             ?? $"https://storage.googleapis.com/chrome-for-testing-public/{chromeVersion}/win64/chromedriver-win64.zip";
 
-                        progress?.Invoke("");
-                        progress?.Invoke("💡 MANUAL INSTALL — no admin rights needed:");
-                        progress?.Invoke($"   Chrome version detected : {chromeVersion}");
-                        progress?.Invoke($"   1. Open this URL in your browser and download the ZIP:");
-                        progress?.Invoke($"      {manualUrl}");
-                        progress?.Invoke($"   2. Open the ZIP → go into the  chromedriver-win64  folder");
-                        progress?.Invoke($"   3. Copy  chromedriver.exe  into:");
-                        progress?.Invoke($"      {_chromeConfig.ChromeDriverPath}");
-                        progress?.Invoke($"   4. Click '🔄 Update ChromeDriver' again to verify.");
+                        progress?.Invoke($"❌ Automatic download failed. (Network/Firewall restriction detected)");
+
+                        // Provide a clickable link in the UI if possible, or clear text for documentation
+                        progress?.Invoke("\n🛑 FIREWALL DETECTED: Vitalité security prevents automatic downloads.");
+                        progress?.Invoke("Follow these steps to update manually:");
+                        progress?.Invoke($"1. Open Chrome and paste this URL: {manualUrl}");
+                        progress?.Invoke($"2. Download the ZIP file.");
+                        progress?.Invoke($"3. Open the ZIP -> Open folder 'chromedriver-win64' -> Copy 'chromedriver.exe' to:");
+                        progress?.Invoke($"   📂 {_chromeConfig.ChromeDriverPath}");
                     }
                 }
                 catch { /* non-fatal */ }
