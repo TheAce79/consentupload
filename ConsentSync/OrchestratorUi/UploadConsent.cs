@@ -2,6 +2,7 @@
 using ConsentSyncCore.Services.Browser;
 using ConsentSyncCore.Services.Configuration;
 using ConsentSyncCore.Services.ConfigurationPoco;
+using ConsentSyncCore.Services.Pdf;
 using ConsentSyncCore.Services.Phis;
 using CsvProcessing;
 using Microsoft.Extensions.Configuration;
@@ -1504,6 +1505,7 @@ namespace OrchestratorUi
                     LoggerService.LogWarning("   ⏸️  Batch limit reached — run again to continue.");
                 LoggerService.LogInformation(new string('═', 60));
 
+
                 if (phase3Result.BatchLimitReached)
                 {
                     var answer = MessageBox.Show(
@@ -1524,13 +1526,24 @@ namespace OrchestratorUi
                         return;
                     }
                 }
+                else if (phase3Result.AlreadyComplete)
+                {
+                    MessageBox.Show(
+                        this,
+                        "ℹ️  All records are already verified on PHIS.\n\n" +
+                        "Nothing new was uploaded — the Upload CSV is fully complete.\n\n" +
+                        "If you expected uploads, check that:\n" +
+                        "  • Phase 3:Testing:Enabled is set correctly in appsettings.json\n" +
+                        "  • The Upload CSV has rows with VerifStatus = 0 (NotProcessed)",
+                        "Already Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
                 else if (phase3Result.IsSuccessful)
                 {
                     MessageBox.Show(
                         this,
                         $"✅ All documents uploaded successfully to PHIS.\n\n" +
-                        $"  ✅ Successful uploads : {phase3Result.SuccessfulUploads}\n" +
-                        $"  📋 Total records     : {phase3Result.TotalRecords}\n\n" +
+                        $"  ✅ Uploaded this run : {phase3Result.SuccessfulUploads}\n" +
+                        $"  📋 Attempted        : {phase3Result.TotalRecords}\n\n" +
                         "The upload process is complete.",
                         "Upload Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
@@ -1539,12 +1552,15 @@ namespace OrchestratorUi
                     MessageBox.Show(
                         this,
                         $"⚠️  Upload completed with errors.\n\n" +
-                        $"  ✅ Successful : {phase3Result.SuccessfulUploads}\n" +
-                        $"  ❌ Failed     : {phase3Result.TotalRecords - phase3Result.SuccessfulUploads}\n\n" +
+                        $"  ✅ Uploaded  : {phase3Result.SuccessfulUploads}\n" +
+                        $"  ❌ Failed    : {phase3Result.TotalRecords - phase3Result.SuccessfulUploads}\n\n" +
                         "Check the log panel for details on failed records.",
                         "Upload Completed with Errors",
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
+
+
+
             }
             catch (InvalidOperationException ex)
             {
@@ -2036,6 +2052,66 @@ namespace OrchestratorUi
         {
 
         }
+
+
+        private void bt_PdfMerge_Click(object sender, EventArgs e)
+        {
+            var svc = new PdfMergeService();
+
+            string outputFileName = tx_PdfOutputFileName.Text.Trim();
+
+            if (string.IsNullOrWhiteSpace(outputFileName))
+            {
+                MessageBox.Show(this,
+                    "Please enter a valid output file name (e.g. 'merged.pdf').",
+                    "Invalid File Name", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!outputFileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                outputFileName += ".pdf";
+
+            using var fbd = new FolderBrowserDialog();
+            fbd.Description = "Select the folder containing PDFs to merge";
+            if (fbd.ShowDialog() != DialogResult.OK || string.IsNullOrWhiteSpace(fbd.SelectedPath))
+            {
+                MessageBox.Show(this,
+                    "No folder selected. Please select a folder containing PDFs to merge.",
+                    "Folder Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var result = svc.MergePdf(fbd.SelectedPath, outputFileName);
+
+            if (result.Success)
+            {
+                LoggerService.LogInformation($"✅ {result.TotalPagesMerged} pages merged → {result.OutputPath}");
+
+                string skippedNote = result.SkippedFiles.Count > 0
+                    ? $"\n\n⚠️  {result.SkippedFiles.Count} file(s) were skipped (locked or unreadable):\n" +
+                      string.Join("\n", result.SkippedFiles.Select(f => $"  • {f}"))
+                    : string.Empty;
+
+                MessageBox.Show(this,
+                    $"✅ Merge complete.\n\n" +
+                    $"  📄 Files merged  : {result.FilesmergedCount}\n" +
+                    $"  📋 Total pages   : {result.TotalPagesMerged}\n" +
+                    $"  💾 Output        : {result.OutputPath}" +
+                    skippedNote,
+                    "Merge Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                // ✅ FIX: was silently swallowed before
+                LoggerService.LogWarning($"❌ PDF merge failed: {result.ErrorMessage}");
+                MessageBox.Show(this,
+                    $"❌ Merge failed.\n\n{result.ErrorMessage}\n\nCheck the log panel for details.",
+                    "Merge Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+
+
     }
 
     internal static class ControlExtensions

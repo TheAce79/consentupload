@@ -51,6 +51,8 @@ namespace OrchestratorUi
             lb_Dir = new Label();
             txt_BaseDir = new TextBox();
             btn_BrowseDir = new Button();
+            bt_PdfMerge = new Button();
+            tx_PdfOutputFileName = new TextBox();
             grpConfig.SuspendLayout();
             gb_Normalise.SuspendLayout();
             gb_Phase1.SuspendLayout();
@@ -98,9 +100,9 @@ namespace OrchestratorUi
             bt_Upload.FlatStyle = FlatStyle.Flat;
             bt_Upload.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             bt_Upload.ForeColor = Color.White;
-            bt_Upload.Location = new Point(20, 60);
+            bt_Upload.Location = new Point(12, 60);
             bt_Upload.Name = "bt_Upload";
-            bt_Upload.Size = new Size(228, 41);
+            bt_Upload.Size = new Size(275, 41);
             bt_Upload.TabIndex = 0;
             bt_Upload.Text = "⬆️  Upload Consent & FileRose to PHIS";
             toolTip1.SetToolTip(bt_Upload, resources.GetString("bt_Upload.ToolTip"));
@@ -234,11 +236,11 @@ namespace OrchestratorUi
             rtxt_Log.BackColor = Color.Black;
             rtxt_Log.Font = new Font("Consolas", 9F);
             rtxt_Log.ForeColor = Color.LimeGreen;
-            rtxt_Log.Location = new Point(12, 451);
+            rtxt_Log.Location = new Point(12, 473);
             rtxt_Log.Name = "rtxt_Log";
             rtxt_Log.ReadOnly = true;
             rtxt_Log.ScrollBars = RichTextBoxScrollBars.Vertical;
-            rtxt_Log.Size = new Size(1032, 240);
+            rtxt_Log.Size = new Size(1094, 218);
             rtxt_Log.TabIndex = 1;
             rtxt_Log.Text = "";
             // 
@@ -286,7 +288,7 @@ namespace OrchestratorUi
             gb_Phase1.Controls.Add(lbl_Phase1Progress);
             gb_Phase1.Location = new Point(790, 12);
             gb_Phase1.Name = "gb_Phase1";
-            gb_Phase1.Size = new Size(254, 120);
+            gb_Phase1.Size = new Size(316, 120);
             gb_Phase1.TabIndex = 3;
             gb_Phase1.TabStop = false;
             gb_Phase1.Text = "Phase 1 — PHIS Client ID Search";
@@ -344,7 +346,7 @@ namespace OrchestratorUi
             gb_UploadPhis.Controls.Add(lbl_Phase3Progress);
             gb_UploadPhis.Location = new Point(790, 140);
             gb_UploadPhis.Name = "gb_UploadPhis";
-            gb_UploadPhis.Size = new Size(254, 290);
+            gb_UploadPhis.Size = new Size(316, 290);
             gb_UploadPhis.TabIndex = 4;
             gb_UploadPhis.TabStop = false;
             gb_UploadPhis.Text = "Phase 3 — PHIS Document Upload";
@@ -353,7 +355,7 @@ namespace OrchestratorUi
             // 
             pb_Phase3.Location = new Point(12, 118);
             pb_Phase3.Name = "pb_Phase3";
-            pb_Phase3.Size = new Size(228, 14);
+            pb_Phase3.Size = new Size(274, 14);
             pb_Phase3.Style = ProgressBarStyle.Continuous;
             pb_Phase3.TabIndex = 1;
             // 
@@ -420,11 +422,36 @@ namespace OrchestratorUi
             btn_BrowseDir.UseVisualStyleBackColor = true;
             btn_BrowseDir.Click += btn_BrowseDir_Click;
             // 
+            // bt_PdfMerge
+            // 
+            bt_PdfMerge.BackColor = Color.FromArgb(70, 100, 140);
+            bt_PdfMerge.FlatAppearance.BorderColor = Color.FromArgb(50, 75, 110);
+            bt_PdfMerge.FlatStyle = FlatStyle.Flat;
+            bt_PdfMerge.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            bt_PdfMerge.ForeColor = Color.White;
+            bt_PdfMerge.Location = new Point(203, 403);
+            bt_PdfMerge.Name = "bt_PdfMerge";
+            bt_PdfMerge.Size = new Size(130, 27);
+            bt_PdfMerge.TabIndex = 14;
+            bt_PdfMerge.Text = "🔀 Merge PDFs";
+            bt_PdfMerge.UseVisualStyleBackColor = false;
+            bt_PdfMerge.Click += bt_PdfMerge_Click;
+            // 
+            // tx_PdfOutputFileName
+            // 
+            tx_PdfOutputFileName.Location = new Point(56, 403);
+            tx_PdfOutputFileName.Name = "tx_PdfOutputFileName";
+            tx_PdfOutputFileName.PlaceholderText = "merged.pdf";
+            tx_PdfOutputFileName.Size = new Size(140, 27);
+            tx_PdfOutputFileName.TabIndex = 14;
+            // 
             // UploadConsent
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(1065, 703);
+            ClientSize = new Size(1137, 706);
+            Controls.Add(bt_PdfMerge);
+            Controls.Add(tx_PdfOutputFileName);
             Controls.Add(bt_ScanPdfOcr);
             Controls.Add(bt_Save);
             Controls.Add(groupBox1);
@@ -445,6 +472,7 @@ namespace OrchestratorUi
             groupBox1.ResumeLayout(false);
             groupBox1.PerformLayout();
             ResumeLayout(false);
+            PerformLayout();
         }
 
         #endregion
@@ -482,5 +510,7 @@ namespace OrchestratorUi
         private Label lb_Dir;
         private TextBox txt_BaseDir;
         private Button btn_BrowseDir;
+        private Button bt_PdfMerge;
+        private TextBox tx_PdfOutputFileName;
     }
 }

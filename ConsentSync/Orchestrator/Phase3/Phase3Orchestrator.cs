@@ -58,7 +58,6 @@ namespace Orchestrator.Phase3
         }
 
 
-
         public async Task<Phase3Result> RunAsync(IProgress<Phase3Progress>? progress = null)
         {
             LoggerService.LogInformation("╔════════════════════════════════════════════════════════╗");
@@ -72,7 +71,6 @@ namespace Orchestrator.Phase3
                 // ── Step 1: Load Upload_to_PHIS.csv ───────────────────────────
                 LoggerService.LogInformation("📋 Step 1: Loading Upload_to_PHIS.csv...");
                 var uploadRecords = LoadUploadCsv();
-                result.TotalRecords = uploadRecords.Count;
                 LoggerService.LogInformation(
                     $"   ✅ Loaded {uploadRecords.Count} upload records " +
                     $"({uploadRecords.Count(r => !r.IsFeuilleRose)} consent, " +
@@ -99,13 +97,19 @@ namespace Orchestrator.Phase3
                 var recordsToProcess = pending.Take(batchSize).ToList();
                 bool batchTruncated = recordsToProcess.Count < pending.Count;
 
-                LoggerService.LogInformation($"   ✅ Pending         : {pending.Count}");
-                LoggerService.LogInformation($"   ⏭️  Already done    : {alreadyVerified}");
+                // ✅ BUG 2 FIX: TotalRecords reflects what was actually attempted this run,
+                //    not the entire CSV. The old code set this to uploadRecords.Count (e.g. 360)
+                //    which made the UI summary misleading.
+                result.TotalRecords = recordsToProcess.Count;
+
+                LoggerService.LogInformation($"   📋 In scope      : {uploadRecords.Count}");
+                LoggerService.LogInformation($"   ✅ Pending        : {pending.Count}");
+                LoggerService.LogInformation($"   ⏭️  Already done  : {alreadyVerified}");
 
                 if (batchTruncated)
                 {
                     LoggerService.LogInformation(
-                        $"   ⚙️  Batch mode      : processing {recordsToProcess.Count} of {pending.Count} " +
+                        $"   ⚙️  Batch mode    : processing {recordsToProcess.Count} of {pending.Count} " +
                         $"(BatchSize = {phisConfig.BatchSize})");
                     LoggerService.LogInformation(
                         "   ℹ️  Re-run Phase 3 to continue with the next batch.");
@@ -113,7 +117,10 @@ namespace Orchestrator.Phase3
 
                 if (recordsToProcess.Count == 0)
                 {
-                    LoggerService.LogInformation("\n✅ All records already verified!");
+                    LoggerService.LogInformation("\n✅ All records already verified — nothing to upload.");
+                    // ✅ BUG 3 FIX: Mark as complete so the UI can distinguish
+                    //    "nothing left to do" from "just uploaded everything".
+                    result.AlreadyComplete = true;
                     return result;
                 }
 
@@ -167,9 +174,11 @@ namespace Orchestrator.Phase3
                             }
                             else if (record.VerifStatus == UploadVerificationStatus.Success)
                             {
-                                // Already existed on PHIS — counted as skip, not failure
+                                // ✅ BUG 4 FIX: "Already existed on PHIS" is a skip, NOT an upload.
+                                //    Old code incremented result.SuccessfulUploads here, inflating
+                                //    the count and causing the UI to report false totals.
                                 skipCount++;
-                                result.SuccessfulUploads++;
+                                // Do NOT increment result.SuccessfulUploads — it only counts fresh uploads.
                             }
                             else
                             {
@@ -218,12 +227,10 @@ namespace Orchestrator.Phase3
                 }
                 finally
                 {
-                    // ── Guaranteed flush — fires even on fatal exception or session break ──
                     LoggerService.LogInformation("\n💾 Final CSV flush...");
                     SaveUploadCsv(uploadRecords);
                 }
 
-                // ── Batch-complete notice ─────────────────────────────────────
                 if (batchTruncated)
                 {
                     int remaining = pending.Count - recordsToProcess.Count;
@@ -233,7 +240,6 @@ namespace Orchestrator.Phase3
                     result.BatchLimitReached = true;
                 }
 
-                // ── Step 5: Summary ───────────────────────────────────────────
                 DisplaySummary(result, successCount, skipCount, failureCount,
                     uploadRecords.Count, alreadyVerified);
 
@@ -246,6 +252,12 @@ namespace Orchestrator.Phase3
                 return result;
             }
         }
+
+
+
+
+
+
 
         // ── Consent upload (existing logic, extracted to own method) ──────────
 
@@ -475,7 +487,6 @@ namespace Orchestrator.Phase3
         }
 
         // ── CSV I/O (unchanged) ───────────────────────────────────────────────
-
         private List<UploadRecord> LoadUploadCsv()
         {
             var csvPath = Path.Combine(
@@ -495,7 +506,6 @@ namespace Orchestrator.Phase3
                 PrepareHeaderForMatch = args => args.Header.ToLower().Replace(" ", "")
             };
 
-            // ✅ Use the centralized service for priority encoding
             var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
 
             using var reader = new StreamReader(csvPath, targetEncoding);
@@ -505,32 +515,44 @@ namespace Orchestrator.Phase3
             var allRecords = csv.GetRecords<UploadRecord>().ToList();
             List<UploadRecord> records;
 
-            if (ConfigurationService.gDevMode && _phase3Config.Testing.Enabled)
+            // ✅ BUG 1 FIX: Removed `gDevMode &&` — Testing.Enabled alone controls the filter.
+            //    The old double-gate silently bypassed testing whenever DevMode = false,
+            //    causing ALL records (e.g. 360) to be loaded and processed instead of the
+            //    intended small test subset.
+            if (_phase3Config.Testing.Enabled)
             {
-                LoggerService.LogInformation("\n   🧪 TESTING MODE");
+                LoggerService.LogWarning("\n   🧪 TESTING MODE ACTIVE — this is NOT a production run");
                 records = allRecords;
 
                 if (_phase3Config.Testing.TestClientIds?.Length > 0)
                 {
+                    var testIds = _phase3Config.Testing.TestClientIds
+                        .Select(id => id.Trim())
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
                     records = records
-                        .Where(r => _phase3Config.Testing.TestClientIds.Contains(r.ClientID))
+                        .Where(r => testIds.Contains(r.ClientID.Trim()))
                         .ToList();
-                    LoggerService.LogInformation(
-                        $"   🎯 Filtering to: {string.Join(", ", _phase3Config.Testing.TestClientIds)}");
+
+                    LoggerService.LogWarning(
+                        $"   🎯 Filtering to TestClientIds: {string.Join(", ", _phase3Config.Testing.TestClientIds)}");
                 }
 
                 if (_phase3Config.Testing.MaxRecordsToProcess > 0 &&
                     records.Count > _phase3Config.Testing.MaxRecordsToProcess)
                 {
                     records = records.Take(_phase3Config.Testing.MaxRecordsToProcess).ToList();
-                    LoggerService.LogInformation(
-                        $"   ⚠️  Limited to {_phase3Config.Testing.MaxRecordsToProcess} records");
+                    LoggerService.LogWarning(
+                        $"   ✂️  Capped at {_phase3Config.Testing.MaxRecordsToProcess} record(s) (MaxRecordsToProcess).");
                 }
+
+                LoggerService.LogWarning(
+                    $"   ⚠️  {records.Count} of {allRecords.Count} total record(s) in scope for this test run.");
             }
             else
             {
                 records = allRecords;
-                LoggerService.LogInformation($"   ✅ Loaded {records.Count} records (Production)");
+                LoggerService.LogInformation($"   ✅ Loaded {records.Count} records (Production mode)");
             }
 
             records = records
@@ -544,6 +566,12 @@ namespace Orchestrator.Phase3
 
             return records;
         }
+
+
+
+
+
+
 
         // ── One-at-a-time CSV write guard ─────────────────────────────────────
         // Prevents two concurrent Phase 3 windows from interleaving reads/writes.

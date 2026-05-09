@@ -348,53 +348,119 @@ namespace ConsentSyncCore.Services.Phis
         }
 
 
-        /// <summary>
-        /// Upload a document on the Add New Document page.
-        /// Steps:
-        ///   1. Set file path in the file input
-        ///   2. Click "Upload File" and wait for confirmation
-        ///   3. Fill Document Title and Description
-        ///   4. Click Submit
-        ///   5. Verify success
-        /// </summary>
-        /// <param name="pdfPath">Full path to the PDF file to upload</param>
-        /// <param name="documentTitle">Value for the Document Title field (record.DocumentTitle)</param>
-        /// <param name="description">Value for the Description textarea (record.Description)</param>
-        /// <returns>True if the document was submitted successfully</returns>
         public async Task<bool> UploadDocumentAsync(string pdfPath, string documentTitle, string description)
         {
+            const int maxAttempts = 2;
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                bool isRetry = attempt > 1;
+
+                if (isRetry)
+                {
+                    LoggerService.LogWarning(
+                        $"   🔄 Retry attempt {attempt}/{maxAttempts} — navigating to fresh page to reset PrimeFaces state...");
+
+                    // ── Force a full navigation to the search page ────────────
+                    // This is exactly what restarting Chrome does: it gives the
+                    // PrimeFaces FileUpload component a clean ViewState/server state.
+                    try
+                    {
+                        await EnsureOnSearchPageAsync();
+                        await Task.Delay(_phisConfig.PageLoadDelayMs);
+                        LoggerService.LogInformation("   ✅ Fresh page loaded — retrying upload.");
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggerService.LogWarning($"   ⚠️  Could not navigate to fresh page: {ex.Message}");
+                        return false;
+                    }
+                }
+
+                bool result = await TryUploadOnceAsync(pdfPath, documentTitle, description, attempt, maxAttempts);
+
+                if (result)
+                    return true;
+
+                if (attempt == maxAttempts)
+                {
+                    LoggerService.LogWarning(
+                        $"   ❌ All {maxAttempts} upload attempt(s) failed for '{documentTitle}'.\n" +
+                        "      VerifStatus stays NotProcessed — re-run Phase 3 to continue.");
+                    return false;
+                }
+
+                // Small cooldown before retry
+                await Task.Delay(1500);
+            }
+
+            return false;
+        }
+
+
+
+        /// <summary>
+        /// Single upload attempt. Called by UploadDocumentAsync — do not call directly.
+        /// </summary>
+        private async Task<bool> TryUploadOnceAsync(
+             string pdfPath, string documentTitle, string description,
+             int attempt, int maxAttempts)
+        {
+            string attemptLabel = maxAttempts > 1 ? $" (attempt {attempt}/{maxAttempts})" : string.Empty;
+
             try
             {
-                LoggerService.LogInformation($"   📤 Starting document upload...");
+                LoggerService.LogInformation($"   📤 Starting document upload{attemptLabel}...");
                 LoggerService.LogInformation($"      File:  {Path.GetFileName(pdfPath)}");
                 LoggerService.LogInformation($"      Title: {documentTitle}");
                 LoggerService.LogInformation($"      Desc:  {description}");
 
+                // ── Guard 1: PDF must exist and not be locked ─────────────────
                 if (!File.Exists(pdfPath))
                 {
-                    LoggerService.LogInformation($"   ❌ PDF file not found: {pdfPath}");
+                    LoggerService.LogWarning($"   ❌ PDF file not found: {pdfPath}");
                     return false;
                 }
 
-                // ── STEP 1: Set file path in the hidden <input type="file"> ──────────────
+                // ✅ ENHANCEMENT 3: Detect file lock (e.g. archiving still in progress)
+                try
+                {
+                    using var probe = File.Open(pdfPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                }
+                catch (IOException)
+                {
+                    LoggerService.LogWarning(
+                        $"   ❌ PDF is locked by another process: {Path.GetFileName(pdfPath)}\n" +
+                        "      Skipping — record stays NotProcessed for retry.");
+                    return false;
+                }
+
+                // ✅ ENHANCEMENT 1: Verify session is alive before touching the form
+                if (!_sessionManager.EnsureSessionValid())
+                {
+                    LoggerService.LogWarning(
+                        $"   ❌ PHIS session expired before upload{attemptLabel} — stopping.");
+                    return false;
+                }
+
+                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+
+                // ── STEP 1: Set file path ─────────────────────────────────────
                 const string fileInputId = "addNewDocumentForm:sectionAddNewDocumentDefault:fileuploadInput";
 
                 _wait.Until(d => d.FindElements(By.Id(fileInputId)).Count > 0);
                 var fileInput = _driver.FindElement(By.Id(fileInputId));
 
-                // Make the file input visible/interactable so SendKeys works
-                IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
-                js.ExecuteScript("arguments[0].style.display='block'; arguments[0].style.visibility='visible'; arguments[0].removeAttribute('disabled');", fileInput);
-
+                js.ExecuteScript(
+                    "arguments[0].style.display='block'; arguments[0].style.visibility='visible'; arguments[0].removeAttribute('disabled');",
+                    fileInput);
                 fileInput.SendKeys(pdfPath);
                 LoggerService.LogInformation($"   ✅ File path set");
 
-                // Trigger the onchange handler so the Upload File button becomes enabled
                 js.ExecuteScript("onChangeFileUploadAction();");
-
                 await Task.Delay(500);
 
-                // ── STEP 2: Click "Upload File" ───────────────────────────────────────────
+                // ── STEP 2: Click "Upload File" ───────────────────────────────
                 const string uploadBtnId = "addNewDocumentForm:sectionAddNewDocumentDefault:buttonUploadFile";
 
                 _wait.Until(d =>
@@ -407,10 +473,11 @@ namespace ConsentSyncCore.Services.Phis
                 js.ExecuteScript("arguments[0].click();", uploadButton);
                 LoggerService.LogInformation($"   ✅ 'Upload File' button clicked");
 
-                // Wait for the progress refresher to show the uploaded filename
                 await Task.Delay(_phisConfig.PageLoadDelayMs * 2);
 
+                // ── STEP 3: Verify server accepted the file ───────────────────
                 const string progressRefresherId = "addNewDocumentForm:sectionAddNewDocumentDefault:progressRefresher";
+
                 try
                 {
                     _wait.Until(d =>
@@ -418,7 +485,6 @@ namespace ConsentSyncCore.Services.Phis
                         var refresher = d.FindElements(By.Id(progressRefresherId));
                         if (refresher.Count == 0) return false;
                         var text = refresher[0].Text;
-                        // The span shows "File uploaded: <filename>" after a successful upload
                         return text.Contains("File uploaded", StringComparison.OrdinalIgnoreCase)
                             || text.Contains(Path.GetFileName(pdfPath), StringComparison.OrdinalIgnoreCase);
                     });
@@ -426,28 +492,67 @@ namespace ConsentSyncCore.Services.Phis
                 }
                 catch (WebDriverTimeoutException)
                 {
-                    LoggerService.LogInformation($"   ⚠️  Upload confirmation timed out – continuing anyway");
+                    var pageErrors = _driver.FindElements(
+                        By.CssSelector(".errorMessage, .ui-messages-error-detail, .sysMessages .errorMessage"));
+
+                    if (pageErrors.Count > 0)
+                    {
+                        var errorText = string.Join("; ",
+                            pageErrors.Select(e => e.Text.Trim()).Where(t => !string.IsNullOrEmpty(t)));
+                        LoggerService.LogWarning(
+                            $"   ❌ Server rejected file upload{attemptLabel} — PHIS error: {errorText}\n" +
+                            "      Stale PrimeFaces component detected (invalid java.util.List).");
+                        return false;
+                    }
+
+                    LoggerService.LogWarning(
+                        $"   ⚠️  Upload confirmation timed out{attemptLabel} — no server error detected. Proceeding cautiously.");
                 }
 
-                // ── STEP 3: Fill Document Title ───────────────────────────────────────────
+                // ── STEP 4: Fill Document Title ───────────────────────────────
+                // ✅ ENHANCEMENT 2: Catch StaleElementReferenceException — the DOM
+                //    can refresh after the server processes the file upload, making
+                //    previously found elements stale. Re-locate before interacting.
                 const string titleFieldId = "addNewDocumentForm:sectionAddNewDocumentDefault:newDocumentTitle";
+                try
+                {
+                    _wait.Until(d => d.FindElements(By.Id(titleFieldId)).Count > 0);
+                    var titleField = _driver.FindElement(By.Id(titleFieldId));
+                    titleField.Clear();
+                    titleField.SendKeys(documentTitle);
+                    LoggerService.LogInformation($"   ✅ Document title filled: '{documentTitle}'");
+                }
+                catch (StaleElementReferenceException)
+                {
+                    LoggerService.LogWarning("   ⚠️  Title field went stale — re-locating and retrying...");
+                    await Task.Delay(500);
+                    var titleField = _driver.FindElement(By.Id(titleFieldId));
+                    titleField.Clear();
+                    titleField.SendKeys(documentTitle);
+                    LoggerService.LogInformation($"   ✅ Document title filled (after re-locate): '{documentTitle}'");
+                }
 
-                _wait.Until(d => d.FindElements(By.Id(titleFieldId)).Count > 0);
-                var titleField = _driver.FindElement(By.Id(titleFieldId));
-                titleField.Clear();
-                titleField.SendKeys(documentTitle);
-                LoggerService.LogInformation($"   ✅ Document title filled: '{documentTitle}'");
-
-                // ── STEP 4: Fill Description ──────────────────────────────────────────────
+                // ── STEP 5: Fill Description ──────────────────────────────────
                 const string descFieldId = "addNewDocumentForm:sectionAddNewDocumentDefault:documentDescription";
+                try
+                {
+                    _wait.Until(d => d.FindElements(By.Id(descFieldId)).Count > 0);
+                    var descField = _driver.FindElement(By.Id(descFieldId));
+                    descField.Clear();
+                    descField.SendKeys(description);
+                    LoggerService.LogInformation($"   ✅ Description filled: '{description}'");
+                }
+                catch (StaleElementReferenceException)
+                {
+                    LoggerService.LogWarning("   ⚠️  Description field went stale — re-locating and retrying...");
+                    await Task.Delay(500);
+                    var descField = _driver.FindElement(By.Id(descFieldId));
+                    descField.Clear();
+                    descField.SendKeys(description);
+                    LoggerService.LogInformation($"   ✅ Description filled (after re-locate): '{description}'");
+                }
 
-                _wait.Until(d => d.FindElements(By.Id(descFieldId)).Count > 0);
-                var descField = _driver.FindElement(By.Id(descFieldId));
-                descField.Clear();
-                descField.SendKeys(description);
-                LoggerService.LogInformation($"   ✅ Description filled: '{description}'");
-
-                // ── STEP 5: Click Submit ──────────────────────────────────────────────────
+                // ── STEP 6: Click Submit ──────────────────────────────────────
                 const string submitBtnId = "addNewDocumentForm:sectionAddNewDocumentDefault:cmdBtnSave2";
 
                 _wait.Until(d =>
@@ -457,55 +562,69 @@ namespace ConsentSyncCore.Services.Phis
                 });
 
                 var submitButton = _driver.FindElement(By.Id(submitBtnId));
-
-                // Prevent the file input from re-uploading on submit (mirrors onclick="disableFileUpload()")
                 js.ExecuteScript("disableFileUpload();");
                 js.ExecuteScript("arguments[0].click();", submitButton);
                 LoggerService.LogInformation($"   ✅ Submit button clicked");
 
-                // ── STEP 6: Verify success ────────────────────────────────────────────────
+                // ── STEP 7: Verify success ────────────────────────────────────
                 await Task.Delay(_phisConfig.PageLoadDelayMs * 2);
 
                 try
                 {
-                    // After a successful submit the page redirects back to the Context Documents list
                     _wait.Until(d =>
                     {
-                        // Success: back on the document list page
                         var listLinks = d.FindElements(By.XPath("//a[contains(@id,'viewtitleLink')]"));
                         if (listLinks.Count > 0) return true;
 
-                        // Also accept remaining on Document Management without an error message
-                        var errorMessages = d.FindElements(By.CssSelector(".errorMessage, .sysMessages .errorMessage"));
+                        var errorMessages = d.FindElements(
+                            By.CssSelector(".errorMessage, .sysMessages .errorMessage"));
                         return errorMessages.Count == 0 && d.Title.Contains("Panorama");
                     });
 
-                    LoggerService.LogInformation($"   ✅ Document submitted successfully!");
+                    LoggerService.LogInformation($"   ✅ Document submitted successfully{attemptLabel}!");
                     _sessionManager.UpdateActivity();
                     return true;
                 }
                 catch (WebDriverTimeoutException)
                 {
-                    // Check for visible error messages on the page
                     var errors = _driver.FindElements(By.CssSelector(".errorMessage"));
                     if (errors.Count > 0)
                     {
-                        var errorText = string.Join("; ", errors.Select(e => e.Text.Trim()).Where(t => !string.IsNullOrEmpty(t)));
-                        LoggerService.LogInformation($"   ❌ Submit failed – page errors: {errorText}");
+                        var errorText = string.Join("; ",
+                            errors.Select(e => e.Text.Trim()).Where(t => !string.IsNullOrEmpty(t)));
+                        LoggerService.LogWarning($"   ❌ Submit failed{attemptLabel} – page errors: {errorText}");
                         return false;
                     }
 
-                    LoggerService.LogInformation($"   ⚠️  Submit verification timed out – assuming success");
-                    _sessionManager.UpdateActivity();
-                    return true;
+                    // ✅ ENHANCEMENT 4: Submit verification timed out but no error shown.
+                    //    PHIS sometimes accepts silently without redirecting (partial page update).
+                    //    Confirm by checking the document list directly.
+                    LoggerService.LogWarning(
+                        $"   ⚠️  Submit verification timed out{attemptLabel} — checking document list to confirm...");
+
+                    bool confirmedViaList = await CheckIfDocumentExistsAsync(documentTitle);
+                    if (confirmedViaList)
+                    {
+                        LoggerService.LogInformation(
+                            $"   ✅ Document confirmed in PHIS document list — upload successful.");
+                        _sessionManager.UpdateActivity();
+                        return true;
+                    }
+
+                    LoggerService.LogWarning(
+                        "   ⚠️  Document NOT found in list after timeout — treating as failure for safety.");
+                    return false;
                 }
             }
             catch (Exception ex)
             {
-                LoggerService.LogInformation($"   ❌ Upload error: {ex.Message}");
-                LoggerService.LogInformation($"      Stack: {ex.StackTrace}");
+                LoggerService.LogWarning($"   ❌ Upload error{attemptLabel}: {ex.Message}");
+                LoggerService.LogWarning($"      Stack: {ex.StackTrace}");
                 return false;
             }
         }
+
+
+
     }
 }

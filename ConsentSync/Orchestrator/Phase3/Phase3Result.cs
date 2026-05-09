@@ -13,14 +13,15 @@ namespace Orchestrator.Phase3
         public int TotalRecords { get; set; }
         public int SuccessfulUploads { get; set; }
         public bool HasErrors { get; set; }
-        public bool IsSuccessful => !HasErrors;
 
-        /// <summary>
-        /// True when the run was stopped because BatchSize was reached.
-        /// Records with VerifStatus = NotProcessed will be picked up
-        /// automatically on the next run.
-        /// </summary>
+        // ✅ BUG 3 FIX: IsSuccessful now means uploads actually completed,
+        //    not just "no exception was thrown".
+        public bool IsSuccessful => !HasErrors && !BatchLimitReached && !AlreadyComplete && TotalRecords > 0;
+
         public bool BatchLimitReached { get; set; }
+
+        /// <summary>True when all records were already verified — nothing was uploaded this run.</summary>
+        public bool AlreadyComplete { get; set; }
 
         public List<string> ErrorMessages { get; set; } = new();
 
