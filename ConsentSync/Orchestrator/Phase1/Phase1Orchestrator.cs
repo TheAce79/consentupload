@@ -392,6 +392,19 @@ namespace Orchestrator.Phase1
         {
             try
             {
+                // ── Guard: blank DOB cannot be searched on PHIS ───────────────
+                if (string.IsNullOrWhiteSpace(student.DateOfBirth))
+                {
+                    LoggerService.LogWarning(
+                        $"   ⚠️  Skipping — DateOfBirth is blank for: " +
+                        $"{student.FirstName} {student.LastName}. " +
+                        "Fix the value in immunizations_processed.csv and re-run Phase 1.");
+                    student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
+                    student.BestMatch = "BLANK_DOB";
+                    result.ManualReviewCount++;
+                    return false;
+                }
+
                 // Search PHIS by DOB
                 var searchResult = await _searchService!.SearchByDobAsync(
                     student.DateOfBirth,

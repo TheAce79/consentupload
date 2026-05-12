@@ -5,41 +5,47 @@ using CsvHelper.Configuration;
 namespace CsvProcessing
 {
     /// <summary>
-    /// CsvHelper mapping for StudentRecord
-    /// Maps CSV column names to class properties
+    /// CsvHelper mapping for StudentRecord.
+    /// Each .Name() call accepts multiple aliases so the map works for both
+    /// English-header CSVs (Lewisville) and French-header CSVs (Antonine-Maillet)
+    /// without requiring appsettings.json changes per deployment.
     /// </summary>
     public sealed class StudentRecordMap : ClassMap<StudentRecord>
     {
         public StudentRecordMap()
         {
-            Map(m => m.LastName).Name("Last Name");
-            Map(m => m.FirstName).Name("First Name");
-            Map(m => m.School).Name("School");
-            Map(m => m.Grade).Name("Grade");
-            Map(m => m.DateOfBirth).Name("Date of Birth");
-            Map(m => m.MedicareNumber).Name("Medicare Number");
-            Map(m => m.ConsentStatus).Name("Consent Status");
+            // ── Bilingual core columns ────────────────────────────────────────
+            Map(m => m.LastName).Name("Last Name", "Nom de famille", "Nom");
+            Map(m => m.FirstName).Name("First Name", "Prénom", "Prenom");
+            Map(m => m.DateOfBirth).Name("Date of Birth", "Date de naissance", "DOB");
+            Map(m => m.MedicareNumber).Name("Medicare Number", "No d'assurance-maladie", "Numéro d'assurance maladie", "No assurance maladie");
+            Map(m => m.ConsentStatus).Name("Consent Status", "Statut de consentement");
+            Map(m => m.School).Name("School", "École", "Ecole");
+            Map(m => m.Grade).Name("Grade", "Année", "Annee", "Niveau");
+
+            // ── Vaccine columns ───────────────────────────────────────────────
             Map(m => m.Tdap).Name("Tdap");
             Map(m => m.HPV).Name("HPV");
-            Map(m => m.ClientId).Name("ClientId");
-            Map(m => m.IsFileRoseDefault).Name("IsFileRoseDefault")
-                .TypeConverter<SafeBooleanConverter>(); // Use custom converter
 
-            // ✅ Optional so existing CSVs without this column load without error
+            // ── Phase 1 tracking columns (written by ProcessRawCsv) ───────────
+            Map(m => m.ClientId).Name("ClientId");
+            Map(m => m.ClientIdStatus).Name("ClientIdStatus")
+                .TypeConverter<ClientIdStatusConverter>();
+            Map(m => m.BestMatch).Name("BestMatch").Optional();
+
+            // ── Duplicate tracking columns ────────────────────────────────────
+            Map(m => m.IsFileRoseDefault).Name("IsFileRoseDefault")
+                .TypeConverter<SafeBooleanConverter>();
+
             Map(m => m.IsDuplicate).Name("IsDuplicate")
                 .TypeConverter<SafeBooleanConverter>()
                 .Optional();
 
-            // User sets this to true in the CSV after reviewing 5_Duplicate PDFs
             Map(m => m.DuplicateResolved).Name("DuplicateResolved")
                 .TypeConverter<SafeBooleanConverter>()
                 .Optional();
 
-            Map(m => m.ClientIdStatus).Name("ClientIdStatus")
-                .TypeConverter<ClientIdStatusConverter>();
-            Map(m => m.BestMatch).Name("BestMatch").Optional(); // Optional for backward compatibility
-
-            // ✅ Optional — not present in existing CSVs produced before scanned support
+            // ── Scanned PDF columns ───────────────────────────────────────────
             Map(m => m.IsScanPdf).Name("IsScanPdf")
                 .TypeConverter<SafeBooleanConverter>()
                 .Optional();
@@ -60,31 +66,18 @@ namespace CsvProcessing
     {
         public override object ConvertFromString(string? text, IReaderRow row, MemberMapData memberMapData)
         {
-            // Handle empty/null values
             if (string.IsNullOrWhiteSpace(text))
                 return false;
 
-            // Normalize the text
-            text = text.Trim().ToLowerInvariant();
-
-            // Handle common boolean representations
-            return text switch
+            return text.Trim().ToLowerInvariant() switch
             {
                 "true" or "1" or "yes" or "y" => true,
-                "false" or "0" or "no" or "n" => false,
-                _ => false // Default to false for any unrecognized value
+                _ => false
             };
         }
 
         public override string ConvertToString(object? value, IWriterRow row, MemberMapData memberMapData)
-        {
-            if (value is bool boolValue)
-            {
-                return boolValue.ToString().ToLowerInvariant();
-            }
-
-            return "false";
-        }
+            => value is bool b ? b.ToString().ToLowerInvariant() : "false";
     }
 
     /// <summary>
@@ -95,26 +88,10 @@ namespace CsvProcessing
         public override object ConvertFromString(string? text, IReaderRow row, MemberMapData memberMapData)
         {
             if (string.IsNullOrWhiteSpace(text)) return ClientIdStatus.NotProcessed;
-
-            if (int.TryParse(text, out int value))
-            {
-                return (ClientIdStatus)value;
-            }
-
-            return ClientIdStatus.NotProcessed;
+            return int.TryParse(text, out int value) ? (ClientIdStatus)value : ClientIdStatus.NotProcessed;
         }
 
         public override string ConvertToString(object? value, IWriterRow row, MemberMapData memberMapData)
-        {
-            if (value is ClientIdStatus status)
-            {
-                return ((int)status).ToString();
-            }
-
-            return "0";
-        }
+            => value is ClientIdStatus status ? ((int)status).ToString() : "0";
     }
-
-
-
 }

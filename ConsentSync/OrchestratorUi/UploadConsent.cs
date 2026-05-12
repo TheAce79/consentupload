@@ -319,6 +319,8 @@ namespace OrchestratorUi
             }
         }
 
+
+
         // ── Phase 1 runner ────────────────────────────────────────────
         private static async Task<(Phase1Result, IWebDriver?, PhisSessionManager?, PhisSearchService?)>
             RunPhase1Async(IConfiguration config)
@@ -623,10 +625,57 @@ namespace OrchestratorUi
                 LoggerService.LogInformation("📋 STARTING: CSV Data Harmonization");
                 LoggerService.LogInformation(new string('═', 60));
 
+
                 await Task.Run(() =>
                 {
                     var repo = new StudentCsvRepository(config);
                     repo.ProcessRawCsv();
+
+                    // ── Post-process sanity check: detect column mapping mismatch ──────
+                    var csvConfig = ConfigurationService.GetCsvConfig();
+                    var students = repo.ReadAll();
+                    int total = students.Count;
+
+                    if (total > 0)
+                    {
+                        int blankNames = students.Count(s =>
+                            string.IsNullOrWhiteSpace(s.LastName) &&
+                            string.IsNullOrWhiteSpace(s.FirstName));
+                        int blankDobs = students.Count(s => string.IsNullOrWhiteSpace(s.DateOfBirth));
+
+                        // If more than half are blank → almost certainly a column name mismatch
+                        if (blankNames > total / 2 || blankDobs > total / 2)
+                        {
+                            LoggerService.LogWarning(
+                                $"\n⚠️  COLUMN MAPPING MISMATCH DETECTED!\n" +
+                                $"   {blankNames}/{total} rows → blank Last/First Name\n" +
+                                $"   {blankDobs}/{total} rows → blank Date of Birth\n" +
+                                $"   Configured LastNameColumn    : \"{csvConfig.LastNameColumn}\"\n" +
+                                $"   Configured FirstNameColumn   : \"{csvConfig.FirstNameColumn}\"\n" +
+                                $"   Configured DateOfBirthColumn : \"{csvConfig.DateOfBirthColumn}\"\n" +
+                                "   These must exactly match the CSV headers (including French accents).\n" +
+                                "   Fix them in appsettings.json → CsvProcessing section, then re-run.");
+
+                            this.InvokeIfRequired(() =>
+                                MessageBox.Show(this,
+                                    $"⚠️  Column mapping mismatch detected!\n\n" +
+                                    $"  {blankNames} of {total} rows have blank names.\n" +
+                                    $"  {blankDobs} of {total} rows have blank dates.\n\n" +
+                                    "The column names in appsettings.json do not match\n" +
+                                    "the actual CSV headers.\n\n" +
+                                    "Current configuration:\n" +
+                                    $"  LastNameColumn    : \"{csvConfig.LastNameColumn}\"\n" +
+                                    $"  FirstNameColumn   : \"{csvConfig.FirstNameColumn}\"\n" +
+                                    $"  DateOfBirthColumn : \"{csvConfig.DateOfBirthColumn}\"\n\n" +
+                                    "Update these values in Settings to match your CSV headers\n" +
+                                    "(e.g. \"Nom de famille\", \"Prénom\", \"Date de naissance\")\n" +
+                                    "and click Process CSV again.\n\n" +
+                                    "⛔ Phase 1 WILL fail if you proceed without fixing this.",
+                                    "⚠️ Column Mapping Error — Action Required",
+                                    MessageBoxButtons.OK, MessageBoxIcon.Error));
+                        }
+                    }
+
                     repo.PreviewProcessedCsv(3);
                     repo.DisplayStatistics();
                 });
