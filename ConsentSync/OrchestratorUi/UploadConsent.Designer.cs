@@ -431,7 +431,7 @@ namespace OrchestratorUi
             bt_PdfMerge.ForeColor = Color.White;
             bt_PdfMerge.Location = new Point(203, 403);
             bt_PdfMerge.Name = "bt_PdfMerge";
-            bt_PdfMerge.Size = new Size(130, 27);
+            bt_PdfMerge.Size = new Size(141, 27);
             bt_PdfMerge.TabIndex = 14;
             bt_PdfMerge.Text = "🔀 Merge PDFs";
             bt_PdfMerge.UseVisualStyleBackColor = false;

@@ -1444,16 +1444,11 @@ namespace OrchestratorUi
 
             try
             {
-
-
-
                 var phase2Config = ConfigurationService.GetPhase2Config();
                 string validationCsv = Path.Combine(phase2Config.ValidationCsvPath, phase2Config.ValidationResultsCsv);
 
                 var prePhase3Config = ConfigurationService.GetPrePhase3Config();
                 var uploadCsv = Path.Combine(prePhase3Config.OutputPath, phase2Config.UploadCsv);
-
-
 
                 if (!WorkspaceInitializer.IsFileAvailable(validationCsv))
                 {
@@ -1463,7 +1458,6 @@ namespace OrchestratorUi
                     return;
                 }
 
-
                 if (!WorkspaceInitializer.IsFileAvailable(uploadCsv))
                 {
                     MessageBox.Show(this,
@@ -1472,11 +1466,9 @@ namespace OrchestratorUi
                     return;
                 }
 
-                // ── Guard: Phase 1 must be complete ──────────────────
                 if (!await CheckAllRowsProcessedAsync("PDF Validation"))
                     return;
 
-                // ── Duplicate pre-check ───────────────────────────────
                 if (!await CheckUnresolvedDuplicatesAsync("Upload to PHIS"))
                 {
                     lbl_Phase3Progress.Text = "";
@@ -1495,34 +1487,8 @@ namespace OrchestratorUi
                 LoggerService.LogInformation("⬆️  PHASE 3 — Upload Consent & FileRose to PHIS");
                 LoggerService.LogInformation(new string('═', 60));
 
-                if (_driver == null || _sessionManager == null || _phisSearchService == null)
-                {
-                    LoggerService.LogInformation("🌐 No active PHIS session — initializing Chrome...");
-                    var factory = new ChromeDriverFactory(config);
-                    _driver = factory.CreateDriver();
-
-                    var resultExtractor = new PhisResultExtractor(config);
-                    _sessionManager = new PhisSessionManager(_driver, config);
-                    _phisSearchService = new PhisSearchService(_driver, config, resultExtractor, _sessionManager);
-
-                    if (!_sessionManager.Login())
-                    {
-                        LoggerService.LogError("❌ PHIS login failed — cannot proceed with upload.");
-                        MessageBox.Show(
-                            this,
-                            "❌ Could not log into PHIS.\n\n" +
-                            "Ensure your credentials are correct and the PHIS portal is accessible,\n" +
-                            "then try again.",
-                            "Login Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return;
-                    }
-
-                    LoggerService.LogInformation("✅ PHIS session established.");
-                }
-                else
-                {
-                    LoggerService.LogInformation("✅ Reusing active PHIS session from Phase 1.");
-                }
+                // ── Ensure a live, fresh PHIS session ─────────────────
+                await EnsurePhisSessionAsync(config);
 
                 var progress = new Progress<Phase3Progress>(p =>
                 {
@@ -1536,13 +1502,7 @@ namespace OrchestratorUi
                     });
                 });
 
-                Phase3Result phase3Result = null!;
-                await Task.Run(async () =>
-                {
-                    var orchestrator = new Orchestrator.Phase3.Phase3Orchestrator(
-                        config, _driver!, _phisSearchService!, _sessionManager!);
-                    phase3Result = await orchestrator.RunAsync(progress);
-                });
+                Phase3Result phase3Result = await RunPhase3WithSessionResetAsync(config, progress);
 
                 LoggerService.LogInformation("\n" + new string('═', 60));
                 LoggerService.LogInformation("📊 UPLOAD SUMMARY");
@@ -1553,7 +1513,6 @@ namespace OrchestratorUi
                 if (phase3Result.BatchLimitReached)
                     LoggerService.LogWarning("   ⏸️  Batch limit reached — run again to continue.");
                 LoggerService.LogInformation(new string('═', 60));
-
 
                 if (phase3Result.BatchLimitReached)
                 {
@@ -1607,9 +1566,6 @@ namespace OrchestratorUi
                         "Upload Completed with Errors",
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
-
-
-
             }
             catch (InvalidOperationException ex)
             {
@@ -1648,6 +1604,137 @@ namespace OrchestratorUi
                 });
             }
         }
+
+
+
+        /// <summary>
+        /// Creates a new PHIS Chrome session if one does not already exist,
+        /// or if the existing session is no longer valid.
+        /// </summary>
+        private async Task EnsurePhisSessionAsync(IConfiguration config)
+        {
+            bool sessionStale = _driver == null
+                             || _sessionManager == null
+                             || _phisSearchService == null
+                             || _sessionManager.IsSessionExpired();
+
+            if (!sessionStale)
+            {
+                LoggerService.LogInformation("✅ Reusing active PHIS session from Phase 1.");
+                return;
+            }
+
+            await Task.Run(() => ResetPhisSession(config));
+        }
+
+        /// <summary>
+        /// Tears down any existing PHIS Chrome session and builds a completely
+        /// fresh one. This is the in-code equivalent of the manual
+        /// "close everything and relaunch" workaround for PHIS Error 500
+        /// (stale JSF view-state / ServletException).
+        /// </summary>
+        private void ResetPhisSession(IConfiguration config)
+        {
+            // ── Dispose stale session ─────────────────────────────────
+            if (_driver != null)
+            {
+                LoggerService.LogInformation("♻️  Disposing stale PHIS session...");
+                try { _driver.Quit(); _driver.Dispose(); }
+                catch (Exception ex) { LoggerService.LogWarning($"   ⚠️  Dispose warning: {ex.Message}"); }
+                finally
+                {
+                    _driver = null;
+                    _sessionManager = null;
+                    _phisSearchService = null;
+                }
+            }
+
+            // ── Create fresh session ──────────────────────────────────
+            LoggerService.LogInformation("🌐 Initializing fresh PHIS Chrome session...");
+            var factory = new ChromeDriverFactory(config);
+            _driver = factory.CreateDriver();
+
+            var resultExtractor = new PhisResultExtractor(config);
+            _sessionManager = new PhisSessionManager(_driver, config);
+            _phisSearchService = new PhisSearchService(_driver, config, resultExtractor, _sessionManager);
+
+            if (!_sessionManager.Login())
+                throw new InvalidOperationException(
+                    "PHIS login failed after session reset. " +
+                    "Check your credentials and network connectivity.");
+
+            LoggerService.LogInformation("✅ Fresh PHIS session established.");
+        }
+
+
+        /// <summary>
+        /// Runs Phase 3. If the run fails with a PHIS server-side error
+        /// (e.g. Error 500 / stale view-state), the session is reset once
+        /// and the orchestrator is retried automatically.
+        /// </summary>
+        private async Task<Phase3Result> RunPhase3WithSessionResetAsync(
+            IConfiguration config,
+            IProgress<Phase3Progress> progress)
+        {
+            const int maxAttempts = 2;
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
+                {
+                    Phase3Result result = null!;
+                    await Task.Run(async () =>
+                    {
+                        var orchestrator = new Orchestrator.Phase3.Phase3Orchestrator(
+                            config, _driver!, _phisSearchService!, _sessionManager!);
+                        result = await orchestrator.RunAsync(progress);
+                    });
+
+                    return result;
+                }
+                catch (Exception ex) when (attempt < maxAttempts && IsStaleSessionException(ex))
+                {
+                    LoggerService.LogWarning(
+                        $"⚠️  PHIS session fault detected (attempt {attempt}/{maxAttempts}): {ex.Message}");
+                    LoggerService.LogInformation("♻️  Resetting PHIS session and retrying...");
+
+                    await Task.Run(() => ResetPhisSession(config));
+                }
+            }
+
+            // Should not be reached, but satisfies the compiler.
+            throw new InvalidOperationException("Phase 3 failed after session reset — see log for details.");
+        }
+
+
+        /// <summary>
+        /// Returns true for exceptions that indicate a stale PHIS server-side
+        /// view-state (Error 500 / javax.servlet.ServletException) or a dead
+        /// WebDriver session — both of which are resolved by a fresh login.
+        /// </summary>
+        private static bool IsStaleSessionException(Exception ex)
+        {
+            // Walk the full exception chain (including InnerException)
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                var msg = current.Message;
+
+                if (msg.Contains("500", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("ServletException", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("view expired", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("session", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("stale element", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("invalid session id", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("no such window", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+
 
 
         private void txtBox_BatchSize_KeyPress(object sender, KeyPressEventArgs e)
