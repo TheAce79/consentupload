@@ -53,6 +53,8 @@ namespace OrchestratorUi
             btn_BrowseDir = new Button();
             bt_PdfMerge = new Button();
             tx_PdfOutputFileName = new TextBox();
+            bt_PdfSplit = new Button();
+            tx_PdfSplitPages = new TextBox();
             grpConfig.SuspendLayout();
             gb_Normalise.SuspendLayout();
             gb_Phase1.SuspendLayout();
@@ -445,11 +447,36 @@ namespace OrchestratorUi
             tx_PdfOutputFileName.Size = new Size(140, 27);
             tx_PdfOutputFileName.TabIndex = 14;
             // 
+            // bt_PdfSplit
+            // 
+            bt_PdfSplit.BackColor = Color.FromArgb(70, 100, 140);
+            bt_PdfSplit.FlatAppearance.BorderColor = Color.FromArgb(50, 75, 110);
+            bt_PdfSplit.FlatStyle = FlatStyle.Flat;
+            bt_PdfSplit.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            bt_PdfSplit.ForeColor = Color.White;
+            bt_PdfSplit.Location = new Point(203, 441);
+            bt_PdfSplit.Name = "bt_PdfSplit";
+            bt_PdfSplit.Size = new Size(141, 32);
+            bt_PdfSplit.TabIndex = 15;
+            bt_PdfSplit.Text = "✂ Split PDF";
+            bt_PdfSplit.UseVisualStyleBackColor = false;
+            bt_PdfSplit.Click += bt_PdfSplit_Click;
+            // 
+            // tx_PdfSplitPages
+            // 
+            tx_PdfSplitPages.Location = new Point(56, 441);
+            tx_PdfSplitPages.Name = "tx_PdfSplitPages";
+            tx_PdfSplitPages.PlaceholderText = "pages/file";
+            tx_PdfSplitPages.Size = new Size(140, 27);
+            tx_PdfSplitPages.TabIndex = 15;
+            // 
             // UploadConsent
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(1137, 706);
+            Controls.Add(bt_PdfSplit);
+            Controls.Add(tx_PdfSplitPages);
             Controls.Add(bt_PdfMerge);
             Controls.Add(tx_PdfOutputFileName);
             Controls.Add(bt_ScanPdfOcr);
@@ -512,5 +539,7 @@ namespace OrchestratorUi
         private Button btn_BrowseDir;
         private Button bt_PdfMerge;
         private TextBox tx_PdfOutputFileName;
+        private Button bt_PdfSplit;
+        private TextBox tx_PdfSplitPages;
     }
 }

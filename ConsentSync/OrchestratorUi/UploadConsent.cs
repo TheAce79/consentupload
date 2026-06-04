@@ -95,6 +95,9 @@ namespace OrchestratorUi
 
             //bt_ScanPdf.Visible = ConfigurationService.gDevMode;
             bt_ScanPdfOcr.Visible = ConfigurationService.gDevMode;
+            tx_PdfSplitPages.Text = Math.Max(
+                1,
+                ConfigurationService.GetBulkPdfExtractionConfig().PagesPerConsent).ToString();
 
             RefreshChromeButtonState();
         }
@@ -2243,6 +2246,106 @@ namespace OrchestratorUi
                 MessageBox.Show(this,
                     $"❌ Merge failed.\n\n{result.ErrorMessage}\n\nCheck the log panel for details.",
                     "Merge Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private async void bt_PdfSplit_Click(object sender, EventArgs e)
+        {
+            string originalText = bt_PdfSplit.Text;
+            bt_PdfSplit.Enabled = false;
+            bt_PdfSplit.Text = "⏳ Splitting...";
+
+            try
+            {
+                if (!int.TryParse(tx_PdfSplitPages.Text.Trim(), out int pagesPerFile) || pagesPerFile < 1)
+                {
+                    MessageBox.Show(this,
+                        "Please enter a valid number of pages per split file.",
+                        "Invalid Page Count", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                using var ofd = new OpenFileDialog
+                {
+                    Title = "Select the PDF to split",
+                    Filter = "PDF files (*.pdf)|*.pdf",
+                    Multiselect = false,
+                    CheckFileExists = true
+                };
+
+                if (ofd.ShowDialog() != DialogResult.OK || string.IsNullOrWhiteSpace(ofd.FileName))
+                {
+                    MessageBox.Show(this,
+                        "No PDF selected. Please choose a PDF file to split.",
+                        "PDF Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                using var fbd = new FolderBrowserDialog();
+                fbd.Description = "Select the folder where split PDFs will be saved";
+                if (fbd.ShowDialog() != DialogResult.OK || string.IsNullOrWhiteSpace(fbd.SelectedPath))
+                {
+                    MessageBox.Show(this,
+                        "No output folder selected. Please choose a folder for the split PDFs.",
+                        "Folder Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var splitService = new PdfSplitService();
+                var bulkConfig = ConfigurationService.GetBulkPdfExtractionConfig();
+                string inputPdfPath = ofd.FileName;
+                string outputDirectory = fbd.SelectedPath;
+                string filePrefix = Path.GetFileNameWithoutExtension(inputPdfPath);
+                int startPage = Math.Max(1, bulkConfig.StartPage);
+
+                LoggerService.LogInformation(
+                    $"✂ Starting PDF split: {Path.GetFileName(inputPdfPath)} " +
+                    $"({pagesPerFile} page(s) per file, start page {startPage})");
+
+                var result = await Task.Run(() => splitService.SplitPdfByPages(
+                    inputPdfPath,
+                    outputDirectory,
+                    pagesPerFile,
+                    startPage,
+                    filePrefix));
+
+                if (result.Success)
+                {
+                    LoggerService.LogInformation(
+                        $"✅ PDF split complete — {result.FilesCreated} file(s) created in {result.OutputDirectory}");
+
+                    string skippedNote = result.SkippedFiles.Count > 0
+                        ? $"\n\n⚠️  {result.SkippedFiles.Count} file(s) were skipped because they already exist:\n" +
+                          string.Join("\n", result.SkippedFiles.Select(f => $"  • {f}"))
+                        : string.Empty;
+
+                    MessageBox.Show(this,
+                        $"✅ Split complete.\n\n" +
+                        $"  📄 Files created : {result.FilesCreated}\n" +
+                        $"  📋 Total pages   : {result.TotalPagesRead}\n" +
+                        $"  💾 Output folder : {result.OutputDirectory}" +
+                        skippedNote,
+                        "Split Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    LoggerService.LogWarning($"❌ PDF split failed: {result.ErrorMessage}");
+                    MessageBox.Show(this,
+                        $"❌ Split failed.\n\n{result.ErrorMessage}\n\nCheck the log panel for details.",
+                        "Split Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError($"❌ PDF split failed unexpectedly: {ex.Message}", ex);
+                MessageBox.Show(this,
+                    $"❌ Split failed.\n\n{ex.Message}\n\nCheck the log panel for details.",
+                    "Split Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                bt_PdfSplit.Enabled = true;
+                bt_PdfSplit.Text = originalText;
             }
         }
 
