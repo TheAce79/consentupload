@@ -1034,6 +1034,9 @@ namespace ConsentSyncCore.Services.Phis
                 // Wait for the page to fully load after navigation
                 await Task.Delay(2000); // Give time for the table to load
 
+                // Expand the table so rows beyond page 1 are visible before searching.
+                await EnsureAllConsentRowsDisplayedAsync();
+
                 // First attempt: Search with current filters (Active only by default)
                 int matchingRowIndex = await FindConsentDirectiveRowAsync(phisAntigen);
 
@@ -1053,8 +1056,7 @@ namespace ConsentSyncCore.Services.Phis
 
                      LoggerService.LogInformation($"   ✅ Filter applied successfully");
 
-                    // Wait for table to refresh after filter (important!)
-                    await Task.Delay(_phisConfig.AjaxWaitMs * 3); // Extra time for AJAX and table refresh
+                    await EnsureAllConsentRowsDisplayedAsync();
 
                     // Second attempt: Search with Active + Inactive filters
                     matchingRowIndex = await FindConsentDirectiveRowAsync(phisAntigen);
@@ -1165,72 +1167,81 @@ namespace ConsentSyncCore.Services.Phis
             try
             {
                  LoggerService.LogInformation($"      🔄 Trying AJAX method to apply filter...");
-
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
-                // Get the current ViewState
-                var viewState = (string)js.ExecuteScript(@"
-            return document.querySelector('input[name=""javax.faces.ViewState""]')?.value || '';
-        ") ?? "";
+                var ajaxScript = @"
+            try {
+                console.log('Sending AJAX filter request...');
 
-                if (string.IsNullOrEmpty(viewState))
-                {
-                     LoggerService.LogInformation($"      ⚠️  Could not get ViewState");
+                var appendParam = function(params, name, value) {
+                    params.push({ name: name, value: value == null ? '' : value });
+                };
+                var getValueById = function(id) {
+                    var element = document.getElementById(id);
+                    return element ? element.value || '' : '';
+                };
+                var getCheckedValues = function(prefix) {
+                    return Array.from(document.querySelectorAll('input[id^=""' + prefix + '""]:checked'))
+                        .map(function(input) { return input.value || input.getAttribute('value') || ''; })
+                        .filter(function(value) { return !!value; });
+                };
+
+                var viewState = document.querySelector('input[name=""javax.faces.ViewState""]')?.value || '';
+                var rowsSelect = document.querySelector('select[name=""consentForm:ConsentDataTable:dataTable_rppDD""]');
+                var rowsValue = rowsSelect && rowsSelect.value ? rowsSelect.value : '130';
+                var activeFilters = getCheckedValues('consentForm:ConsentDataTable:dataTable:activeFilter:');
+
+                if (activeFilters.indexOf('Active') === -1) {
+                    activeFilters.unshift('Active');
+                }
+                if (activeFilters.indexOf('Inactive') === -1) {
+                    activeFilters.push('Inactive');
                 }
 
-                // Build the filter AJAX request matching your network trace
-                var ajaxScript = $@"
-            try {{
-                console.log('Sending AJAX filter request...');
-                
-                // Create FormData to match the exact network trace
-                var formData = new FormData();
-                formData.append('javax.faces.partial.ajax', 'true');
-                formData.append('javax.faces.source', 'consentForm:ConsentDataTable:dataTable');
-                formData.append('primefaces.ignoreautoupdate', 'true');
-                formData.append('javax.faces.partial.execute', 'consentForm:ConsentDataTable:dataTable');
-                formData.append('javax.faces.partial.render', 'consentForm:ConsentDataTable:rowActionsPanel consentForm:ConsentDataTable:dataTable');
-                formData.append('javax.faces.behavior.event', 'filter');
-                formData.append('javax.faces.partial.event', 'filter');
-                formData.append('consentForm:ConsentDataTable:dataTable_filtering', 'true');
-                formData.append('consentForm:ConsentDataTable:dataTable_encodeFeature', 'true');
-                
-                // Filter form fields
-                formData.append('consentForm:ConsentDataTable:dataTable:statusFilter_focus', '');
-                formData.append('consentForm:ConsentDataTable:dataTable:statusFilter', 'Confirmed');
-                formData.append('consentForm:ConsentDataTable:dataTable:instructionFilter_focus', '');
-                formData.append('consentForm:ConsentDataTable:dataTable:antigenFilter_focus', '');
-                formData.append('consentForm:ConsentDataTable:dataTable:activeFilter_focus', '');
-                
-                // Critical: append Active and Inactive as separate entries
-                formData.append('consentForm:ConsentDataTable:dataTable:activeFilter', 'Active');
-                formData.append('consentForm:ConsentDataTable:dataTable:activeFilter', 'Inactive');
-                
-                formData.append('consentForm:ConsentDataTable:dataTable_rppDD', '10');
-                formData.append('consentForm:ConsentDataTable:dataTable_selection', '');
-                formData.append('javax.faces.ViewState', '{viewState}');
-                
-                // Send via PrimeFaces if available, otherwise use fetch
-                if (typeof PrimeFaces !== 'undefined' && PrimeFaces.ajax) {{
-                    PrimeFaces.ajax.Request.handle({{
+                var params = [];
+                appendParam(params, 'javax.faces.partial.ajax', 'true');
+                appendParam(params, 'javax.faces.source', 'consentForm:ConsentDataTable:dataTable');
+                appendParam(params, 'primefaces.ignoreautoupdate', 'true');
+                appendParam(params, 'javax.faces.partial.execute', 'consentForm:ConsentDataTable:dataTable');
+                appendParam(params, 'javax.faces.partial.render', 'consentForm:ConsentDataTable:rowActionsPanel consentForm:ConsentDataTable:dataTable');
+                appendParam(params, 'javax.faces.behavior.event', 'filter');
+                appendParam(params, 'javax.faces.partial.event', 'filter');
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable_filtering', 'true');
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable_encodeFeature', 'true');
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable:statusFilter_focus', getValueById('consentForm:ConsentDataTable:dataTable:statusFilter_focus'));
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable:statusFilter', getValueById('consentForm:ConsentDataTable:dataTable:statusFilter'));
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable:instructionFilter_focus', getValueById('consentForm:ConsentDataTable:dataTable:instructionFilter_focus'));
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable:antigenFilter_focus', getValueById('consentForm:ConsentDataTable:dataTable:antigenFilter_focus'));
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable:activeFilter_focus', getValueById('consentForm:ConsentDataTable:dataTable:activeFilter_focus'));
+
+                activeFilters.forEach(function(value) {
+                    appendParam(params, 'consentForm:ConsentDataTable:dataTable:activeFilter', value);
+                });
+
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable_rppDD', rowsValue);
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable_selection', getValueById('consentForm:ConsentDataTable:dataTable_selection'));
+                appendParam(params, 'javax.faces.ViewState', viewState);
+
+                if (typeof PrimeFaces !== 'undefined' && PrimeFaces.ajax) {
+                    PrimeFaces.ajax.Request.handle({
                         source: 'consentForm:ConsentDataTable:dataTable',
                         process: 'consentForm:ConsentDataTable:dataTable',
                         update: 'consentForm:ConsentDataTable:rowActionsPanel consentForm:ConsentDataTable:dataTable',
                         formId: 'consentForm',
-                        params: Object.fromEntries(formData.entries()),
-                        oncomplete: function(xhr, status, args) {{
+                        params: params,
+                        oncomplete: function(xhr, status, args) {
                             console.log('AJAX filter complete. Status:', status);
-                        }}
-                    }});
+                        }
+                    });
                     return true;
-                }} else {{
-                    console.error('PrimeFaces not available');
-                    return false;
-                }}
-            }} catch (error) {{
+                }
+
+                console.error('PrimeFaces not available');
+                return false;
+            } catch (error) {
                 console.error('AJAX error:', error);
                 return false;
-            }}
+            }
         ";
 
                 var ajaxResult = js.ExecuteScript(ajaxScript);
@@ -1456,7 +1467,8 @@ namespace ConsentSyncCore.Services.Phis
                     await Task.Delay(_phisConfig.AjaxWaitMs);
 
                     // Verify the checkbox is visually checked
-                    var isVisuallyChecked = checkboxBox.GetAttribute("class").Contains("ui-state-active");
+                    var checkboxClasses = checkboxBox.GetAttribute("class") ?? string.Empty;
+                    var isVisuallyChecked = checkboxClasses.Contains("ui-state-active");
                     var isInputChecked = checkboxInput.Selected || checkboxInput.GetAttribute("checked") == "checked";
 
                      LoggerService.LogInformation($"      📊 Visual check: {isVisuallyChecked}, Input checked: {isInputChecked}");
@@ -1564,7 +1576,7 @@ namespace ConsentSyncCore.Services.Phis
         /// <summary>
         /// Select consent directive row using PrimeFaces AJAX request
         /// </summary>
-        private async Task<bool> SelectConsentDirectiveViaAjaxAsync(int rowIndex, string rowKey, string dataRi)
+        private async Task<bool> SelectConsentDirectiveViaAjaxAsync(int rowIndex, string? rowKey, string? dataRi)
         {
             try
             {
@@ -1573,36 +1585,57 @@ namespace ConsentSyncCore.Services.Phis
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
 
-                // Get ViewState
-                var viewState = (string)js.ExecuteScript(@"
-            return document.querySelector('input[name=""javax.faces.ViewState""]')?.value || '';
-        ") ?? "";
-
                 // Use rowKey if available, otherwise use rowIndex
                 var selectionKey = !string.IsNullOrEmpty(rowKey) ? rowKey : rowIndex.ToString();
 
                 var ajaxScript = $@"
             try {{
                 console.log('Sending row selection AJAX for row index {rowIndex}, key: {selectionKey}');
-                
-                var params = {{}};
-                params['javax.faces.partial.ajax'] = 'true';
-                params['javax.faces.source'] = 'consentForm:ConsentDataTable:dataTable';
-                params['javax.faces.partial.execute'] = 'consentForm:ConsentDataTable:dataTable';
-                params['javax.faces.partial.render'] = 'consentForm:ConsentDataTable:rowActionsPanel';
-                params['javax.faces.behavior.event'] = 'rowSelectCheckbox';
-                params['javax.faces.partial.event'] = 'rowSelectCheckbox';
-                params['consentForm:ConsentDataTable:dataTable_instantSelectedRowKey'] = '{selectionKey}';
-                params['consentForm:ConsentDataTable:dataTable:statusFilter_focus'] = '';
-                params['consentForm:ConsentDataTable:dataTable:statusFilter'] = 'Confirmed';
-                params['consentForm:ConsentDataTable:dataTable:instructionFilter_focus'] = '';
-                params['consentForm:ConsentDataTable:dataTable:antigenFilter_focus'] = '';
-                params['consentForm:ConsentDataTable:dataTable:activeFilter_focus'] = '';
-                params['consentForm:ConsentDataTable:dataTable:activeFilter'] = 'Active';
-                params['consentForm:ConsentDataTable:dataTable_checkbox'] = 'on';
-                params['consentForm:ConsentDataTable:dataTable_rppDD'] = '10';
-                params['consentForm:ConsentDataTable:dataTable_selection'] = '{selectionKey}';
-                params['javax.faces.ViewState'] = '{viewState}';
+
+                var appendParam = function(params, name, value) {{
+                    params.push({{ name: name, value: value == null ? '' : value }});
+                }};
+                var getValueById = function(id) {{
+                    var element = document.getElementById(id);
+                    return element ? element.value || '' : '';
+                }};
+                var getCheckedValues = function(prefix) {{
+                    return Array.from(document.querySelectorAll('input[id^=""' + prefix + '""]:checked'))
+                        .map(function(input) {{ return input.value || input.getAttribute('value') || ''; }})
+                        .filter(function(value) {{ return !!value; }});
+                }};
+
+                var viewState = document.querySelector('input[name=""javax.faces.ViewState""]')?.value || '';
+                var rowsSelect = document.querySelector('select[name=""consentForm:ConsentDataTable:dataTable_rppDD""]');
+                var rowsValue = rowsSelect && rowsSelect.value ? rowsSelect.value : '130';
+                var activeFilters = getCheckedValues('consentForm:ConsentDataTable:dataTable:activeFilter:');
+
+                if (activeFilters.length === 0) {{
+                    activeFilters.push('Active');
+                }}
+
+                var params = [];
+                appendParam(params, 'javax.faces.partial.ajax', 'true');
+                appendParam(params, 'javax.faces.source', 'consentForm:ConsentDataTable:dataTable');
+                appendParam(params, 'javax.faces.partial.execute', 'consentForm:ConsentDataTable:dataTable');
+                appendParam(params, 'javax.faces.partial.render', 'consentForm:ConsentDataTable:rowActionsPanel');
+                appendParam(params, 'javax.faces.behavior.event', 'rowSelectCheckbox');
+                appendParam(params, 'javax.faces.partial.event', 'rowSelectCheckbox');
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable_instantSelectedRowKey', '{selectionKey}');
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable:statusFilter_focus', getValueById('consentForm:ConsentDataTable:dataTable:statusFilter_focus'));
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable:statusFilter', getValueById('consentForm:ConsentDataTable:dataTable:statusFilter'));
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable:instructionFilter_focus', getValueById('consentForm:ConsentDataTable:dataTable:instructionFilter_focus'));
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable:antigenFilter_focus', getValueById('consentForm:ConsentDataTable:dataTable:antigenFilter_focus'));
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable:activeFilter_focus', getValueById('consentForm:ConsentDataTable:dataTable:activeFilter_focus'));
+
+                activeFilters.forEach(function(value) {{
+                    appendParam(params, 'consentForm:ConsentDataTable:dataTable:activeFilter', value);
+                }});
+
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable_checkbox', 'on');
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable_rppDD', rowsValue);
+                appendParam(params, 'consentForm:ConsentDataTable:dataTable_selection', '{selectionKey}');
+                appendParam(params, 'javax.faces.ViewState', viewState);
 
                 PrimeFaces.ajax.Request.handle({{
                     source: 'consentForm:ConsentDataTable:dataTable',
@@ -1667,7 +1700,7 @@ namespace ConsentSyncCore.Services.Phis
                 if (documentsButton.Count > 0)
                 {
                     var isDisabled = documentsButton[0].GetAttribute("disabled");
-                    var classes = documentsButton[0].GetAttribute("class");
+                    var classes = documentsButton[0].GetAttribute("class") ?? string.Empty;
 
                     bool isEnabled = string.IsNullOrEmpty(isDisabled) && !classes.Contains("ui-state-disabled");
 
@@ -1699,6 +1732,213 @@ namespace ConsentSyncCore.Services.Phis
                  LoggerService.LogInformation($"      ⚠️  Verification error: {ex.Message}");
                 return false;
             }
+        }
+
+
+
+        private async Task EnsureAllConsentRowsDisplayedAsync()
+        {
+            const string rowsPerPageName = "consentForm:ConsentDataTable:dataTable_rppDD";
+            const string tableId = "consentForm:ConsentDataTable:dataTable_data";
+
+            try
+            {
+                _wait.Until(d => d.FindElements(By.Id(tableId)).Count > 0);
+
+                var rowsPerPageElement = _driver.FindElements(By.Name(rowsPerPageName)).FirstOrDefault();
+                if (rowsPerPageElement == null)
+                {
+                     LoggerService.LogInformation($"      ⚠️  Consent rows-per-page selector not found; continuing with visible rows only");
+                    return;
+                }
+
+                var currentRowsValue = GetSelectedConsentRowsPerPageValue(rowsPerPageElement);
+                var maxRowsValue = GetMaxConsentRowsPerPageValue(rowsPerPageElement);
+                var currentRowCount = GetConsentDirectiveRowCount();
+
+                if (string.Equals(currentRowsValue, maxRowsValue, StringComparison.OrdinalIgnoreCase))
+                {
+                     LoggerService.LogInformation($"      ℹ️  Consent rows already set to max ({maxRowsValue}); visible row count: {currentRowCount}");
+                    return;
+                }
+
+                 LoggerService.LogInformation($"      ⚙️  Expanding consent rows-per-page from {currentRowsValue} to {maxRowsValue}...");
+
+                bool widgetChangedRows = false;
+
+                try
+                {
+                    IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
+                    var jsResult = js.ExecuteScript(@"
+                var targetValue = arguments[0];
+                try {
+                    var tableWidget = typeof PF === 'function'
+                        ? PF('widget_consentForm_ConsentDataTable_dataTable')
+                        : (window.PrimeFaces && PrimeFaces.widgets
+                            ? PrimeFaces.widgets['widget_consentForm_ConsentDataTable_dataTable']
+                            : null);
+                    var rowsSelect = document.querySelector('select[name=""consentForm:ConsentDataTable:dataTable_rppDD""]');
+
+                    if (tableWidget && tableWidget.getPaginator && tableWidget.getPaginator()) {
+                        tableWidget.getPaginator().setRows(parseInt(targetValue, 10));
+                        return true;
+                    }
+
+                    if (rowsSelect) {
+                        rowsSelect.value = targetValue;
+                        rowsSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
+                    }
+
+                    return false;
+                } catch (error) {
+                    console.error('Could not expand consent rows-per-page', error);
+                    return false;
+                }", maxRowsValue);
+
+                    widgetChangedRows = jsResult is bool boolResult && boolResult;
+                }
+                catch (Exception ex)
+                {
+                     LoggerService.LogInformation($"      ⚠️  PrimeFaces rows-per-page update failed: {ex.Message}");
+                }
+
+                if (!widgetChangedRows)
+                {
+                    try
+                    {
+                        var select = new SelectElement(rowsPerPageElement);
+                        select.SelectByValue(maxRowsValue);
+                    }
+                    catch (NoSuchElementException)
+                    {
+                        var select = new SelectElement(rowsPerPageElement);
+                        select.SelectByText(maxRowsValue);
+                    }
+                }
+
+                await WaitForConsentTableExpansionAsync(maxRowsValue);
+
+                var expandedRowCount = GetConsentDirectiveRowCount();
+                 LoggerService.LogInformation($"      ✅ Consent rows-per-page now {maxRowsValue}; visible row count: {expandedRowCount}");
+            }
+            catch (Exception ex)
+            {
+                 LoggerService.LogInformation($"      ⚠️  Could not ensure all consent rows are displayed: {ex.Message}");
+            }
+        }
+
+
+
+        private async Task WaitForConsentTableExpansionAsync(string expectedRowsValue)
+        {
+            const string rowsPerPageName = "consentForm:ConsentDataTable:dataTable_rppDD";
+            const string tableId = "consentForm:ConsentDataTable:dataTable_data";
+
+            _wait.Until(d =>
+            {
+                var rowsPerPageElement = d.FindElements(By.Name(rowsPerPageName)).FirstOrDefault();
+                if (rowsPerPageElement == null)
+                {
+                    return false;
+                }
+
+                var selectedValue = GetSelectedConsentRowsPerPageValue(rowsPerPageElement);
+                if (!string.Equals(selectedValue, expectedRowsValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                return d.FindElements(By.Id(tableId)).Count > 0;
+            });
+
+            await Task.Delay(_phisConfig.AjaxWaitMs);
+            await Task.Delay(250);
+        }
+
+
+
+        private int GetConsentDirectiveRowCount()
+        {
+            var tbody = _driver.FindElements(By.Id("consentForm:ConsentDataTable:dataTable_data")).FirstOrDefault();
+            if (tbody == null)
+            {
+                return 0;
+            }
+
+            return tbody.FindElements(By.XPath(".//tr[@role='row']")).Count;
+        }
+
+
+
+        private static string GetSelectedConsentRowsPerPageValue(IWebElement rowsPerPageElement)
+        {
+            try
+            {
+                var select = new SelectElement(rowsPerPageElement);
+                var selectedOption = select.SelectedOption;
+                var selectedValue = selectedOption?.GetAttribute("value");
+
+                if (!string.IsNullOrWhiteSpace(selectedValue))
+                {
+                    return selectedValue.Trim();
+                }
+
+                if (!string.IsNullOrWhiteSpace(selectedOption?.Text))
+                {
+                    return selectedOption.Text.Trim();
+                }
+            }
+            catch
+            {
+                // Fall through to element value handling.
+            }
+
+            return rowsPerPageElement.GetAttribute("value")?.Trim() ?? "130";
+        }
+
+
+
+        private static string GetMaxConsentRowsPerPageValue(IWebElement rowsPerPageElement)
+        {
+            const string fallbackValue = "130";
+
+            try
+            {
+                var select = new SelectElement(rowsPerPageElement);
+                var numericOptionValues = select.Options
+                    .Select(option => option.GetAttribute("value")?.Trim())
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Select(value => int.TryParse(value, out var parsedValue)
+                        ? new KeyValuePair<string, int>(value!, parsedValue)
+                        : (KeyValuePair<string, int>?)null)
+                    .Where(option => option.HasValue)
+                    .Select(option => option!.Value)
+                    .ToList();
+
+                if (numericOptionValues.Count > 0)
+                {
+                    return numericOptionValues
+                        .OrderByDescending(option => option.Value)
+                        .First()
+                        .Key;
+                }
+
+                var lastOptionValue = select.Options
+                    .Select(option => option.GetAttribute("value")?.Trim())
+                    .LastOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
+                if (!string.IsNullOrWhiteSpace(lastOptionValue))
+                {
+                    return lastOptionValue;
+                }
+            }
+            catch
+            {
+                // Fall back to the known PHIS "ALL" value.
+            }
+
+            return fallbackValue;
         }
 
 
