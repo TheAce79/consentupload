@@ -13,8 +13,10 @@ using Orchestrator.Phase3;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace Orchestrator.Phase1
@@ -450,8 +452,16 @@ namespace Orchestrator.Phase1
 
                 if (!searchResult.Success)
                 {
-                     LoggerService.LogInformation($"   ❌ Search failed: {searchResult.ErrorMessage}");
+                    LoggerService.LogInformation($"   ❌ Search failed: {searchResult.ErrorMessage}");
                     student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
+                    student.BestMatch = ChooseBestManualReviewSuggestion(student.BestMatch, rosterSuggestion, null);
+
+                    if (!string.IsNullOrWhiteSpace(student.BestMatch))
+                    {
+                        LoggerService.LogInformation(
+                            $"   ⚠️  Search error / timeout - Preserving local roster suggestion: {student.BestMatch}");
+                    }
+
                     result.ErrorCount++;
                     return false;
                 }
@@ -547,23 +557,26 @@ namespace Orchestrator.Phase1
             student.ClientIdStatus = ClientIdStatus.NeedsManualReview;
             result.ManualReviewCount++;
 
-            // ✅ CRITICAL: Choose the BEST match from all attempts
-            // Priority: inverted live match (if exists) > local roster hint > original live suggestion
-            if (!string.IsNullOrEmpty(student.BestMatch))
+            // Prefer the strongest hint by score, with existing precedence used as the tiebreaker.
+            string? existingSuggestion = student.BestMatch;
+            string bestSuggestion = ChooseBestManualReviewSuggestion(existingSuggestion, fallbackSuggestion, originalSuggestion);
+
+            if (!string.IsNullOrEmpty(bestSuggestion))
             {
-                // Inverted search already saved a better match
-                LoggerService.LogInformation($"   ⚠️  Needs manual review - Best suggestion: {student.BestMatch}");
-            }
-            else if (!string.IsNullOrEmpty(fallbackSuggestion))
-            {
-                student.BestMatch = fallbackSuggestion;
-                LoggerService.LogInformation($"   ⚠️  Needs manual review - Local roster suggestion: {fallbackSuggestion}");
-            }
-            else if (!string.IsNullOrEmpty(originalSuggestion))
-            {
-                // Use original live-search match as suggestion
-                student.BestMatch = originalSuggestion;
-                LoggerService.LogInformation($"   ⚠️  Needs manual review - Best suggestion: {originalSuggestion}");
+                student.BestMatch = bestSuggestion;
+
+                if (!string.IsNullOrEmpty(existingSuggestion) && bestSuggestion == existingSuggestion)
+                {
+                    LoggerService.LogInformation($"   ⚠️  Needs manual review - Best suggestion: {bestSuggestion}");
+                }
+                else if (!string.IsNullOrEmpty(fallbackSuggestion) && bestSuggestion == fallbackSuggestion)
+                {
+                    LoggerService.LogInformation($"   ⚠️  Needs manual review - Local roster suggestion: {bestSuggestion}");
+                }
+                else
+                {
+                    LoggerService.LogInformation($"   ⚠️  Needs manual review - Best suggestion: {bestSuggestion}");
+                }
             }
             else
             {
@@ -573,6 +586,56 @@ namespace Orchestrator.Phase1
             }
 
             return false;
+        }
+
+        private static string ChooseBestManualReviewSuggestion(
+            string? existingSuggestion,
+            string? rosterSuggestion,
+            string? originalSuggestion)
+        {
+            string?[] suggestions = [existingSuggestion, rosterSuggestion, originalSuggestion];
+
+            var parseableSuggestions = suggestions
+                .Select((value, index) => new
+                {
+                    Value = value,
+                    Index = index,
+                    Score = TryParseSuggestionScore(value)
+                })
+                .Where(item => !string.IsNullOrWhiteSpace(item.Value) && item.Score.HasValue)
+                .ToList();
+
+            if (parseableSuggestions.Count > 0)
+            {
+                double bestScore = parseableSuggestions.Max(item => item.Score!.Value);
+
+                return parseableSuggestions
+                    .Where(item => Math.Abs(item.Score!.Value - bestScore) < 0.0001)
+                    .OrderBy(item => item.Index)
+                    .Select(item => item.Value!)
+                    .First();
+            }
+
+            return suggestions.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+        }
+
+        private static double? TryParseSuggestionScore(string? suggestion)
+        {
+            if (string.IsNullOrWhiteSpace(suggestion))
+            {
+                return null;
+            }
+
+            var matches = Regex.Matches(suggestion, @"(\d+(?:\.\d+)?)%");
+            if (matches.Count == 0)
+            {
+                return null;
+            }
+
+            string rawScore = matches[matches.Count - 1].Groups[1].Value;
+            return double.TryParse(rawScore, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedScore)
+                ? parsedScore
+                : null;
         }
 
 
