@@ -10,8 +10,7 @@ namespace ConsentSyncCore.Services.Matching
 {
     public class LocalRosterMatcher
     {
-        private const double AutoMatchThreshold = 95.0;
-        private const double SuggestionThreshold = 85.0;
+        private const double AutoMatchThreshold = 85.0;
         private const double UniqueMatchGapThreshold = 5.0;
         private const string RosterDateFormat = "yyyy MMM dd";
 
@@ -44,77 +43,28 @@ namespace ConsentSyncCore.Services.Matching
                 return new LocalRosterMatchResult();
             }
 
-            DateTime? studentDob = ParseStudentDob(student.DateOfBirth);
-            if (!studentDob.HasValue)
+            string studentFullName = BuildStudentFullName(student);
+            var candidates = BuildCandidates(student, studentFullName);
+
+            var nameMatch = TryMatchByName(candidates);
+            if (nameMatch.Matched)
             {
-                return new LocalRosterMatchResult();
+                return nameMatch;
             }
 
-            string[] inputTokens = TokenizeName($"{student.LastName} {student.FirstName}");
-
-            var candidates = new List<RosterCandidate>();
-
-            foreach (var row in _roster)
+            var exactDobMatch = TryMatchByExactDob(student, candidates);
+            if (exactDobMatch.Matched)
             {
-                DateTime? rosterDob = ParseRosterDob(row.DateOfBirth);
-                bool dobMatch = rosterDob.HasValue && IsExactOrInvertedDobMatch(studentDob.Value, rosterDob.Value);
-
-                var (rosterFirstName, rosterLastName) = SplitRosterName(row.ClientName);
-                double pairScore = _fuzzyMatcher.CalculateNameMatchScore(
-                    student.FirstName,
-                    student.LastName,
-                    rosterFirstName,
-                    rosterLastName);
-
-                string[] rosterTokens = TokenizeName(row.ClientName);
-                double tokenScore = CalculateTokenJaccard(inputTokens, rosterTokens) * 100.0;
-                double nameScore = Math.Max(pairScore, tokenScore);
-
-                candidates.Add(new RosterCandidate
-                {
-                    Row = row,
-                    NameScore = nameScore,
-                    DobMatch = dobMatch
-                });
+                return exactDobMatch;
             }
 
-            var dobCandidates = candidates
-                .Where(candidate => candidate.DobMatch)
-                .OrderByDescending(candidate => candidate.NameScore)
-                .ToList();
-
-            var bestDobCandidate = dobCandidates.FirstOrDefault();
-            if (bestDobCandidate != null && bestDobCandidate.NameScore >= AutoMatchThreshold)
+            var invertedDobMatch = TryMatchByInvertedDob(student, candidates);
+            if (invertedDobMatch.Matched)
             {
-                var secondDobCandidate = dobCandidates.Skip(1).FirstOrDefault();
-                bool isUniqueBest =
-                    secondDobCandidate == null ||
-                    bestDobCandidate.NameScore - secondDobCandidate.NameScore >= UniqueMatchGapThreshold;
-
-                if (isUniqueBest)
-                {
-                    return new LocalRosterMatchResult
-                    {
-                        Matched = true,
-                        ClientId = bestDobCandidate.Row.ClientId,
-                        NameScore = bestDobCandidate.NameScore
-                    };
-                }
+                return invertedDobMatch;
             }
 
-            var suggestionCandidate = bestDobCandidate
-                ?? candidates.OrderByDescending(candidate => candidate.NameScore).FirstOrDefault();
-
-            if (suggestionCandidate != null && suggestionCandidate.NameScore >= SuggestionThreshold)
-            {
-                return new LocalRosterMatchResult
-                {
-                    Suggestion = BuildSuggestion(suggestionCandidate),
-                    NameScore = suggestionCandidate.NameScore
-                };
-            }
-
-            return new LocalRosterMatchResult();
+            return BuildSuggestionResult(candidates);
         }
 
         private void LoadRoster()
@@ -162,6 +112,73 @@ namespace ConsentSyncCore.Services.Matching
             }
         }
 
+        public bool TryInvertDate(string rawDate, out DateTime invertedDate)
+        {
+            invertedDate = default;
+
+            DateTime? parsedDate = ParseStudentDob(rawDate);
+            if (!parsedDate.HasValue)
+            {
+                return false;
+            }
+
+            if (parsedDate.Value.Month == parsedDate.Value.Day)
+            {
+                return false;
+            }
+
+            try
+            {
+                invertedDate = new DateTime(
+                    parsedDate.Value.Year,
+                    parsedDate.Value.Day,
+                    parsedDate.Value.Month);
+                return true;
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return false;
+            }
+        }
+
+        public bool NameTokensMatch(string name1, string name2)
+        {
+            var tokens1 = TokenizeName(name1);
+            var tokens2 = TokenizeName(name2);
+
+            if (tokens1.Length == 0 || tokens2.Length == 0)
+            {
+                return false;
+            }
+
+            var set1 = new HashSet<string>(tokens1.Where(token => token.Length >= 2), StringComparer.Ordinal);
+            var set2 = new HashSet<string>(tokens2.Where(token => token.Length >= 2), StringComparer.Ordinal);
+            if (set1.Count == 0 || set2.Count == 0)
+            {
+                return false;
+            }
+
+            return set1.Overlaps(set2);
+        }
+
+        public double CalculateFuzzyScore(string studentFullName, string rosterClientName)
+        {
+            var (rosterFirstName, rosterLastName) = SplitRosterName(rosterClientName);
+            var (studentFirstName, studentLastName) = SplitStudentName(studentFullName);
+
+            double pairScore = _fuzzyMatcher.CalculateNameMatchScore(
+                studentFirstName,
+                studentLastName,
+                rosterFirstName,
+                rosterLastName);
+
+            string[] studentTokens = TokenizeName(studentFullName);
+            string[] rosterTokens = TokenizeName(rosterClientName);
+            double tokenScore = CalculateTokenJaccard(studentTokens, rosterTokens) * 100.0;
+
+            return Math.Max(pairScore, tokenScore);
+        }
+
         private DateTime? ParseStudentDob(string value)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -204,18 +221,6 @@ namespace ConsentSyncCore.Services.Matching
                 : null;
         }
 
-        private static bool IsExactOrInvertedDobMatch(DateTime studentDob, DateTime rosterDob)
-        {
-            if (studentDob.Date == rosterDob.Date)
-            {
-                return true;
-            }
-
-            return studentDob.Year == rosterDob.Year &&
-                   studentDob.Month == rosterDob.Day &&
-                   studentDob.Day == rosterDob.Month;
-        }
-
         private static (string firstName, string lastName) SplitRosterName(string clientName)
         {
             if (string.IsNullOrWhiteSpace(clientName))
@@ -230,6 +235,22 @@ namespace ConsentSyncCore.Services.Matching
             }
 
             var tokens = clientName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 1)
+            {
+                return (tokens[0], string.Empty);
+            }
+
+            return (string.Join(' ', tokens.Skip(1)), tokens[0]);
+        }
+
+        private static (string firstName, string lastName) SplitStudentName(string fullName)
+        {
+            if (string.IsNullOrWhiteSpace(fullName))
+            {
+                return (string.Empty, string.Empty);
+            }
+
+            var tokens = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (tokens.Length == 1)
             {
                 return (tokens[0], string.Empty);
@@ -293,14 +314,173 @@ namespace ConsentSyncCore.Services.Matching
 
         private static string BuildSuggestion(RosterCandidate candidate)
         {
-            return $"{candidate.Row.ClientName}#{candidate.Row.ClientId}#{candidate.NameScore:F1}%";
+            string matchMethod = DetermineSuggestionMatchMethod(candidate);
+            return $"{candidate.Row.ClientName} # {candidate.Row.ClientId} # {matchMethod} ({candidate.NameScore:F0}%)";
+        }
+
+        private static string BuildStudentFullName(StudentRecord student)
+        {
+            return $"{student.LastName} {student.FirstName}".Trim();
+        }
+
+        private List<RosterCandidate> BuildCandidates(StudentRecord student, string studentFullName)
+        {
+            var candidates = new List<RosterCandidate>(_roster.Count);
+            DateTime? studentDob = ParseStudentDob(student.DateOfBirth);
+            bool hasInvertedDob = TryInvertDate(student.DateOfBirth, out DateTime invertedDob);
+
+            foreach (var row in _roster)
+            {
+                DateTime? rosterDob = ParseRosterDob(row.DateOfBirth);
+
+                candidates.Add(new RosterCandidate
+                {
+                    Row = row,
+                    NameScore = CalculateFuzzyScore(studentFullName, row.ClientName),
+                    TokensMatch = NameTokensMatch(studentFullName, row.ClientName),
+                    RosterDob = rosterDob,
+                    ExactDobMatch = rosterDob.HasValue &&
+                                    studentDob.HasValue &&
+                                    rosterDob.Value.Date == studentDob.Value.Date,
+                    InvertedDobMatch = rosterDob.HasValue &&
+                                       hasInvertedDob &&
+                                       rosterDob.Value.Date == invertedDob.Date
+                });
+            }
+
+            return candidates;
+        }
+
+        private LocalRosterMatchResult TryMatchByName(List<RosterCandidate> candidates)
+        {
+            var ordered = candidates
+                .OrderByDescending(candidate => candidate.NameScore)
+                .ToList();
+
+            var bestCandidate = ordered.FirstOrDefault();
+            if (bestCandidate == null || bestCandidate.NameScore < AutoMatchThreshold)
+            {
+                return new LocalRosterMatchResult();
+            }
+
+            var secondCandidate = ordered.Skip(1).FirstOrDefault();
+            bool isUniqueBest =
+                secondCandidate == null ||
+                bestCandidate.NameScore - secondCandidate.NameScore >= UniqueMatchGapThreshold;
+
+            if (!isUniqueBest)
+            {
+                return new LocalRosterMatchResult();
+            }
+
+            return BuildMatchedResult(bestCandidate, "MassCSV_NameMatch");
+        }
+
+        private LocalRosterMatchResult TryMatchByExactDob(StudentRecord student, List<RosterCandidate> candidates)
+        {
+            DateTime? studentDob = ParseStudentDob(student.DateOfBirth);
+            if (!studentDob.HasValue)
+            {
+                return new LocalRosterMatchResult();
+            }
+
+            var matches = candidates
+                .Where(candidate => candidate.ExactDobMatch)
+                .OrderByDescending(candidate => candidate.NameScore)
+                .ToList();
+
+            if (matches.Count == 1)
+            {
+                return BuildMatchedResult(matches[0], "MassCSV_DOBMatch");
+            }
+
+            var tokenMatches = matches
+                .Where(candidate => candidate.TokensMatch)
+                .OrderByDescending(candidate => candidate.NameScore)
+                .ToList();
+
+            if (tokenMatches.Count == 1)
+            {
+                return BuildMatchedResult(tokenMatches[0], "MassCSV_DOBPlusNameMatch");
+            }
+
+            return new LocalRosterMatchResult();
+        }
+
+        private LocalRosterMatchResult TryMatchByInvertedDob(StudentRecord student, List<RosterCandidate> candidates)
+        {
+            if (!TryInvertDate(student.DateOfBirth, out DateTime invertedDate))
+            {
+                return new LocalRosterMatchResult();
+            }
+
+            var match = candidates
+                .Where(candidate => candidate.InvertedDobMatch && candidate.TokensMatch)
+                .OrderByDescending(candidate => candidate.NameScore)
+                .FirstOrDefault();
+
+            return match != null
+                ? BuildMatchedResult(match, "MassCSV_InvertedDOBMatch")
+                : new LocalRosterMatchResult();
+        }
+
+        private LocalRosterMatchResult BuildSuggestionResult(List<RosterCandidate> candidates)
+        {
+            var suggestionCandidate = candidates
+                .OrderByDescending(candidate => candidate.NameScore)
+                .FirstOrDefault();
+
+            if (suggestionCandidate == null)
+            {
+                return new LocalRosterMatchResult();
+            }
+
+            return new LocalRosterMatchResult
+            {
+                Suggestion = BuildSuggestion(suggestionCandidate),
+                NameScore = suggestionCandidate.NameScore
+            };
+        }
+
+        private static string DetermineSuggestionMatchMethod(RosterCandidate candidate)
+        {
+            if (candidate.ExactDobMatch && candidate.TokensMatch)
+            {
+                return "MassCSV_DOBPlusNameMatch";
+            }
+
+            if (candidate.ExactDobMatch)
+            {
+                return "MassCSV_DOBMatch";
+            }
+
+            if (candidate.InvertedDobMatch && candidate.TokensMatch)
+            {
+                return "MassCSV_InvertedDOBMatch";
+            }
+
+            return "MassCSV_NameMatch";
+        }
+
+        private static LocalRosterMatchResult BuildMatchedResult(RosterCandidate candidate, string matchMethod)
+        {
+            return new LocalRosterMatchResult
+            {
+                Matched = true,
+                ClientId = candidate.Row.ClientId,
+                MatchMethod = matchMethod,
+                NameScore = candidate.NameScore
+            };
         }
 
         private sealed class RosterCandidate
         {
             public required MassImmunisationRosterRecord Row { get; init; }
             public double NameScore { get; init; }
-            public bool DobMatch { get; init; }
+            public bool TokensMatch { get; init; }
+            public DateTime? RosterDob { get; init; }
+            public bool ExactDobMatch { get; init; }
+            public bool InvertedDobMatch { get; init; }
         }
     }
 }

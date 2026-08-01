@@ -429,7 +429,7 @@ namespace Orchestrator.Phase1
 
                         LoggerService.LogInformation(
                             $"   ✅ Client ID found locally in mass_immunisation.csv: {rosterMatch.ClientId} " +
-                            $"(score: {rosterMatch.NameScore:F1}%)");
+                            $"via {rosterMatch.MatchMethod} (score: {rosterMatch.NameScore:F1}%)");
                         return true;
                     }
 
@@ -469,7 +469,7 @@ namespace Orchestrator.Phase1
                 if (bestMatch == null)
                 {
                      LoggerService.LogInformation($"   ⚠️  No confident match found");
-                    return await TryFallbackSearchesAsync(student, result);
+                    return await TryFallbackSearchesAsync(student, result, fallbackSuggestion: rosterSuggestion);
                 }
 
                 // Check if score meets threshold
@@ -548,22 +548,22 @@ namespace Orchestrator.Phase1
             result.ManualReviewCount++;
 
             // ✅ CRITICAL: Choose the BEST match from all attempts
-            // Priority: inverted match (if exists) > original match
+            // Priority: inverted live match (if exists) > local roster hint > original live suggestion
             if (!string.IsNullOrEmpty(student.BestMatch))
             {
                 // Inverted search already saved a better match
                 LoggerService.LogInformation($"   ⚠️  Needs manual review - Best suggestion: {student.BestMatch}");
             }
-            else if (!string.IsNullOrEmpty(originalSuggestion))
-            {
-                // Use original match as suggestion
-                student.BestMatch = originalSuggestion;
-                LoggerService.LogInformation($"   ⚠️  Needs manual review - Best suggestion: {originalSuggestion}");
-            }
             else if (!string.IsNullOrEmpty(fallbackSuggestion))
             {
                 student.BestMatch = fallbackSuggestion;
                 LoggerService.LogInformation($"   ⚠️  Needs manual review - Local roster suggestion: {fallbackSuggestion}");
+            }
+            else if (!string.IsNullOrEmpty(originalSuggestion))
+            {
+                // Use original live-search match as suggestion
+                student.BestMatch = originalSuggestion;
+                LoggerService.LogInformation($"   ⚠️  Needs manual review - Best suggestion: {originalSuggestion}");
             }
             else
             {
