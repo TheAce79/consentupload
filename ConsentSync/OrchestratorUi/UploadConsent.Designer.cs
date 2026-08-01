@@ -39,6 +39,7 @@ namespace OrchestratorUi
             btn_ExtractBulk = new Button();
             btn_ProcessCsv = new Button();
             gb_Phase1 = new GroupBox();
+            btn_ExportMassImms = new Button();
             bt_SearchClientId = new Button();
             pb_Phase1 = new ProgressBar();
             lbl_Phase1Progress = new Label();
@@ -285,6 +286,7 @@ namespace OrchestratorUi
             // 
             // gb_Phase1
             // 
+            gb_Phase1.Controls.Add(btn_ExportMassImms);
             gb_Phase1.Controls.Add(bt_SearchClientId);
             gb_Phase1.Controls.Add(pb_Phase1);
             gb_Phase1.Controls.Add(lbl_Phase1Progress);
@@ -302,19 +304,34 @@ namespace OrchestratorUi
             bt_SearchClientId.FlatStyle = FlatStyle.Flat;
             bt_SearchClientId.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             bt_SearchClientId.ForeColor = Color.White;
-            bt_SearchClientId.Location = new Point(12, 28);
+            bt_SearchClientId.Location = new Point(164, 28);
             bt_SearchClientId.Name = "bt_SearchClientId";
-            bt_SearchClientId.Size = new Size(228, 38);
-            bt_SearchClientId.TabIndex = 0;
+            bt_SearchClientId.Size = new Size(140, 38);
+            bt_SearchClientId.TabIndex = 1;
             bt_SearchClientId.Text = "🔍 Search Client IDs on PHIS";
             bt_SearchClientId.UseVisualStyleBackColor = false;
             bt_SearchClientId.Click += bt_SearchClientId_Click;
+            // 
+            // btn_ExportMassImms
+            // 
+            btn_ExportMassImms.BackColor = Color.DarkSlateBlue;
+            btn_ExportMassImms.FlatAppearance.BorderColor = Color.FromArgb(48, 60, 120);
+            btn_ExportMassImms.FlatStyle = FlatStyle.Flat;
+            btn_ExportMassImms.Font = new Font("Segoe UI", 8.25F, FontStyle.Bold);
+            btn_ExportMassImms.ForeColor = Color.White;
+            btn_ExportMassImms.Location = new Point(12, 28);
+            btn_ExportMassImms.Name = "btn_ExportMassImms";
+            btn_ExportMassImms.Size = new Size(146, 38);
+            btn_ExportMassImms.TabIndex = 0;
+            btn_ExportMassImms.Text = "📋 Export Mass Imms Roster to CSV";
+            btn_ExportMassImms.UseVisualStyleBackColor = false;
+            btn_ExportMassImms.Click += btn_ExportMassImms_Click;
             // 
             // pb_Phase1
             // 
             pb_Phase1.Location = new Point(12, 76);
             pb_Phase1.Name = "pb_Phase1";
-            pb_Phase1.Size = new Size(228, 14);
+            pb_Phase1.Size = new Size(292, 14);
             pb_Phase1.Style = ProgressBarStyle.Continuous;
             pb_Phase1.TabIndex = 1;
             // 
@@ -324,7 +341,7 @@ namespace OrchestratorUi
             lbl_Phase1Progress.ForeColor = Color.FromArgb(0, 90, 160);
             lbl_Phase1Progress.Location = new Point(12, 94);
             lbl_Phase1Progress.Name = "lbl_Phase1Progress";
-            lbl_Phase1Progress.Size = new Size(228, 18);
+            lbl_Phase1Progress.Size = new Size(292, 18);
             lbl_Phase1Progress.TabIndex = 2;
             lbl_Phase1Progress.TextAlign = ContentAlignment.MiddleCenter;
             // 
@@ -517,6 +534,7 @@ namespace OrchestratorUi
         private Button btn_ExtractBulk;
         private Button btn_ProcessCsv;
         private GroupBox gb_Phase1;
+        private Button btn_ExportMassImms;
         private Button bt_SearchClientId;
         private ProgressBar pb_Phase1;
         private Label lbl_Phase1Progress;

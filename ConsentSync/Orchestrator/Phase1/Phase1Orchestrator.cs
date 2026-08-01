@@ -37,6 +37,7 @@ namespace Orchestrator.Phase1
         private PhisSearchService? _searchService;
         private PhisResultExtractor? _resultExtractor;
         private FuzzyMatcher? _fuzzyMatcher;
+        private LocalRosterMatcher? _localRosterMatcher;
 
         private readonly Phase1Config _phase1Config;
         private readonly PhisConfig _phisConfig;
@@ -127,6 +128,16 @@ namespace Orchestrator.Phase1
                     LoggerService.LogInformation($"   ♻️  Pre-assigned ClientId to {autoAssignedBefore} duplicate(s) from previous run");
                     allStudents = _csvRepo.ReadAll();
                     _currentStudentList = allStudents;
+                }
+
+                _localRosterMatcher = new LocalRosterMatcher(_config);
+                if (_localRosterMatcher.HasRoster)
+                {
+                    LoggerService.LogInformation($"   📋 Local roster ready — {_localRosterMatcher.RosterCount} row(s) available for Phase 1 pre-match");
+                }
+                else
+                {
+                    LoggerService.LogInformation("   ℹ️  No local roster available — Phase 1 will use standard live PHIS search");
                 }
 
                 // ── Step 2: Build search queue ────────────────────────────────
@@ -405,6 +416,31 @@ namespace Orchestrator.Phase1
                     return false;
                 }
 
+                string? rosterSuggestion = null;
+                if (_localRosterMatcher?.HasRoster == true)
+                {
+                    var rosterMatch = _localRosterMatcher.MatchStudent(student);
+                    if (rosterMatch.Matched)
+                    {
+                        student.ClientId = rosterMatch.ClientId;
+                        student.ClientIdStatus = ClientIdStatus.Found;
+                        student.BestMatch = string.Empty;
+                        result.FoundCount++;
+
+                        LoggerService.LogInformation(
+                            $"   ✅ Client ID found locally in mass_immunisation.csv: {rosterMatch.ClientId} " +
+                            $"(score: {rosterMatch.NameScore:F1}%)");
+                        return true;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(rosterMatch.Suggestion))
+                    {
+                        rosterSuggestion = rosterMatch.Suggestion;
+                        LoggerService.LogInformation(
+                            $"   ℹ️  Local roster candidate available if live PHIS search fails: {rosterSuggestion}");
+                    }
+                }
+
                 // Search PHIS by DOB
                 var searchResult = await _searchService!.SearchByDobAsync(
                     student.DateOfBirth,
@@ -424,7 +460,7 @@ namespace Orchestrator.Phase1
                 if (!searchResult.HasResults)
                 {
                      LoggerService.LogInformation($"   ⚠️  No results found");
-                    return await TryFallbackSearchesAsync(student, result);
+                    return await TryFallbackSearchesAsync(student, result, fallbackSuggestion: rosterSuggestion);
                 }
 
                 // Find best match using fuzzy matcher
@@ -454,7 +490,7 @@ namespace Orchestrator.Phase1
                 {
                      LoggerService.LogInformation($"   ⚠️  Score too low: {score:F2}% (threshold: {threshold}%)");
                     // ✅ Pass original best match to fallback searches
-                    return await TryFallbackSearchesAsync(student, result, suggestion, bestMatch, score);
+                    return await TryFallbackSearchesAsync(student, result, suggestion, bestMatch, score, rosterSuggestion);
                 }
             }
             catch (Exception ex)
@@ -482,7 +518,8 @@ namespace Orchestrator.Phase1
             Phase1Result result,
             string? originalSuggestion = null,
             PhisSearchResult? originalBestMatch = null,
-            double originalBestScore = 0.0)
+            double originalBestScore = 0.0,
+            string? fallbackSuggestion = null)
         {
             // Strategy 1: Try Medicare search if available
             if (!string.IsNullOrWhiteSpace(student.MedicareNumber))
@@ -522,6 +559,11 @@ namespace Orchestrator.Phase1
                 // Use original match as suggestion
                 student.BestMatch = originalSuggestion;
                 LoggerService.LogInformation($"   ⚠️  Needs manual review - Best suggestion: {originalSuggestion}");
+            }
+            else if (!string.IsNullOrEmpty(fallbackSuggestion))
+            {
+                student.BestMatch = fallbackSuggestion;
+                LoggerService.LogInformation($"   ⚠️  Needs manual review - Local roster suggestion: {fallbackSuggestion}");
             }
             else
             {

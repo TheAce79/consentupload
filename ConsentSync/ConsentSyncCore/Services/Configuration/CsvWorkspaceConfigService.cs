@@ -44,6 +44,7 @@ namespace ConsentSyncCore.Services.Configuration
 
                 InputCsvFileName = config["CsvProcessing:InputCsvFileName"] ?? "immunizations.csv",
                 OutputCsvFileName = config["CsvProcessing:OutputCsvFileName"] ?? "immunizations_processed.csv",
+                MassImmunisationCsvFileName = config["CsvProcessing:MassImmunisationCsvFileName"] ?? "mass_immunisation.csv",
 
                 SaveProgressEveryNRecords = config.GetValue<int>("CsvProcessing:SaveProgressEveryNRecords", 5),
                 DateOfBirthColumn = config["CsvProcessing:DateOfBirthColumn"] ?? "Date of Birth",
@@ -69,6 +70,13 @@ namespace ConsentSyncCore.Services.Configuration
         {
             var c = GetCsvConfig();
             return Path.Combine(c.OutputCsvPath, c.OutputCsvFileName);
+        }
+
+        /// <summary>Get full mass immunisation roster CSV path (resolved)</summary>
+        public static string GetMassImmunisationCsvFullPath()
+        {
+            var c = GetCsvConfig();
+            return Path.Combine(c.OutputCsvPath, c.MassImmunisationCsvFileName);
         }
     }
 }

@@ -55,6 +55,7 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         // ── Filenames ─────────────────────────────────────────────────────────
         public string InputCsvFileName { get; set; } = "immunizations.csv";
         public string OutputCsvFileName { get; set; } = "immunizations_processed.csv";
+        public string MassImmunisationCsvFileName { get; set; } = "mass_immunisation.csv";
 
         // ── Processing settings ───────────────────────────────────────────────
         public int SaveProgressEveryNRecords { get; set; } = 5;

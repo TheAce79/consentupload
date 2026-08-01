@@ -322,6 +322,101 @@ namespace OrchestratorUi
             }
         }
 
+        private async void btn_ExportMassImms_Click(object sender, EventArgs e)
+        {
+            string originalText = btn_ExportMassImms.Text;
+            btn_ExportMassImms.Enabled = false;
+            btn_ExportMassImms.Text = "⏳ Exporting…";
+
+            try
+            {
+                IConfiguration config = ConfigurationService.GetConfiguration();
+                string rosterCsvPath = ConfigurationService.GetMassImmunisationCsvFullPath();
+
+                if (!WorkspaceInitializer.IsFileAvailable(rosterCsvPath))
+                {
+                    MessageBox.Show(this,
+                        $"The system cannot update:\n\"{Path.GetFileName(rosterCsvPath)}\"\n\nPlease close this file in Excel and try again.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                LoggerService.LogInformation("\n" + new string('═', 60));
+                LoggerService.LogInformation("📋 PHASE 1 AUXILIARY EXPORT: Mass Imms Roster");
+                LoggerService.LogInformation(new string('═', 60));
+
+                await EnsurePhisSessionAsync(config);
+
+                var massImmsService = new PhisMassImmsService(_driver!, config, _sessionManager!);
+
+                while (!massImmsService.IsOnMassImmsPage())
+                {
+                    var answer = MessageBox.Show(
+                        this,
+                        "Please navigate to the target 'View Mass Imms Event' page in PHIS, then click OK to continue.",
+                        "Navigate to Mass Imms Page",
+                        MessageBoxButtons.OKCancel,
+                        MessageBoxIcon.Information);
+
+                    if (answer != DialogResult.OK)
+                    {
+                        LoggerService.LogInformation("ℹ️  Mass Imms roster export cancelled before page navigation completed.");
+                        return;
+                    }
+
+                    await Task.Delay(250);
+                }
+
+                var exportResult = await massImmsService.ExportRosterToCsvAsync(rosterCsvPath);
+                if (!exportResult.Success)
+                {
+                    LoggerService.LogWarning($"⚠️  Mass Imms roster export failed: {exportResult.ErrorMessage}");
+                    MessageBox.Show(
+                        this,
+                        $"The roster export could not be completed.\n\n{exportResult.ErrorMessage}",
+                        "Export Failed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+
+                LoggerService.LogInformation($"✅ Mass Imms roster exported: {exportResult.ExportedCount} row(s) → {rosterCsvPath}");
+                MessageBox.Show(
+                    this,
+                    $"✅ Mass Imms roster exported successfully.\n\n" +
+                    $"Rows exported: {exportResult.ExportedCount}\n" +
+                    $"Output file: {Path.GetFileName(rosterCsvPath)}",
+                    "Export Complete",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (InvalidOperationException ex)
+            {
+                LoggerService.LogError($"❌ Mass Imms roster export error: {ex.Message}", ex);
+                MessageBox.Show(
+                    this,
+                    $"❌ A PHIS session error occurred.\n\n{ex.Message}",
+                    "Export Failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError($"❌ Unexpected Mass Imms roster export error: {ex.Message}", ex);
+                MessageBox.Show(
+                    this,
+                    $"❌ An unexpected error occurred during roster export:\n\n{ex.Message}",
+                    "Export Failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            finally
+            {
+                btn_ExportMassImms.Enabled = true;
+                btn_ExportMassImms.Text = originalText;
+            }
+        }
+
 
 
         // ── Phase 1 runner ────────────────────────────────────────────
