@@ -353,12 +353,49 @@ namespace ConsentSyncCore.Services.Matching
 
         private LocalRosterMatchResult TryMatchByName(List<RosterCandidate> candidates)
         {
+            return TryResolveUniqueStrongMatch(candidates, "MassCSV_NameMatch");
+        }
+
+        private LocalRosterMatchResult TryMatchByExactDob(StudentRecord student, List<RosterCandidate> candidates)
+        {
+            DateTime? studentDob = ParseStudentDob(student.DateOfBirth);
+            if (!studentDob.HasValue)
+            {
+                return new LocalRosterMatchResult();
+            }
+
+            var matches = candidates
+                .Where(candidate => candidate.ExactDobMatch)
+                .ToList();
+
+            return TryResolveUniqueStrongMatch(matches, "MassCSV_DOBPlusNameMatch");
+        }
+
+        private LocalRosterMatchResult TryMatchByInvertedDob(StudentRecord student, List<RosterCandidate> candidates)
+        {
+            if (!TryInvertDate(student.DateOfBirth, out DateTime invertedDate))
+            {
+                return new LocalRosterMatchResult();
+            }
+
+            var matches = candidates
+                .Where(candidate => candidate.InvertedDobMatch)
+                .ToList();
+
+            return TryResolveUniqueStrongMatch(matches, "MassCSV_InvertedDOBMatch");
+        }
+
+        private LocalRosterMatchResult TryResolveUniqueStrongMatch(
+            IEnumerable<RosterCandidate> candidates,
+            string matchMethod)
+        {
             var ordered = candidates
+                .Where(candidate => candidate.NameScore >= AutoMatchThreshold)
                 .OrderByDescending(candidate => candidate.NameScore)
                 .ToList();
 
             var bestCandidate = ordered.FirstOrDefault();
-            if (bestCandidate == null || bestCandidate.NameScore < AutoMatchThreshold)
+            if (bestCandidate == null)
             {
                 return new LocalRosterMatchResult();
             }
@@ -373,55 +410,7 @@ namespace ConsentSyncCore.Services.Matching
                 return new LocalRosterMatchResult();
             }
 
-            return BuildMatchedResult(bestCandidate, "MassCSV_NameMatch");
-        }
-
-        private LocalRosterMatchResult TryMatchByExactDob(StudentRecord student, List<RosterCandidate> candidates)
-        {
-            DateTime? studentDob = ParseStudentDob(student.DateOfBirth);
-            if (!studentDob.HasValue)
-            {
-                return new LocalRosterMatchResult();
-            }
-
-            var matches = candidates
-                .Where(candidate => candidate.ExactDobMatch)
-                .OrderByDescending(candidate => candidate.NameScore)
-                .ToList();
-
-            if (matches.Count == 1)
-            {
-                return BuildMatchedResult(matches[0], "MassCSV_DOBMatch");
-            }
-
-            var tokenMatches = matches
-                .Where(candidate => candidate.TokensMatch)
-                .OrderByDescending(candidate => candidate.NameScore)
-                .ToList();
-
-            if (tokenMatches.Count == 1)
-            {
-                return BuildMatchedResult(tokenMatches[0], "MassCSV_DOBPlusNameMatch");
-            }
-
-            return new LocalRosterMatchResult();
-        }
-
-        private LocalRosterMatchResult TryMatchByInvertedDob(StudentRecord student, List<RosterCandidate> candidates)
-        {
-            if (!TryInvertDate(student.DateOfBirth, out DateTime invertedDate))
-            {
-                return new LocalRosterMatchResult();
-            }
-
-            var match = candidates
-                .Where(candidate => candidate.InvertedDobMatch && candidate.TokensMatch)
-                .OrderByDescending(candidate => candidate.NameScore)
-                .FirstOrDefault();
-
-            return match != null
-                ? BuildMatchedResult(match, "MassCSV_InvertedDOBMatch")
-                : new LocalRosterMatchResult();
+            return BuildMatchedResult(bestCandidate, matchMethod);
         }
 
         private LocalRosterMatchResult BuildSuggestionResult(List<RosterCandidate> candidates)

@@ -182,7 +182,10 @@ namespace ConsentSyncCore.Services.Matching
             if (string.IsNullOrEmpty(name1) || string.IsNullOrEmpty(name2))
                 return 0.0;
 
-            if (name1.Equals(name2, StringComparison.OrdinalIgnoreCase))
+            var comparableName1 = CanonicalizeForComparison(name1);
+            var comparableName2 = CanonicalizeForComparison(name2);
+
+            if (comparableName1.Equals(comparableName2, StringComparison.OrdinalIgnoreCase))
                 return 1.0;
 
             // Handle compound names (if enabled in config)
@@ -196,12 +199,24 @@ namespace ConsentSyncCore.Services.Matching
                 {
                     foreach (var part in parts1)
                     {
-                        if (part.Equals(name2, StringComparison.OrdinalIgnoreCase))
+                        if (part.Equals(comparableName2, StringComparison.OrdinalIgnoreCase))
                         {
                             var score = _config.CompoundNameMatchScore / 100.0;
                              LoggerService.LogInformation($"      Compound match: '{name1}' contains '{name2}' → {score * 100:F1}%");
                             return score;
                         }
+                    }
+
+                    double bestPartSimilarity = parts1
+                        .Select(part => CalculateStringSimilarity(part, comparableName2))
+                        .DefaultIfEmpty(0.0)
+                        .Max();
+
+                    if (bestPartSimilarity >= 0.80)
+                    {
+                        LoggerService.LogInformation(
+                            $"      Fuzzy compound match: '{name1}' contains close part for '{name2}' → {bestPartSimilarity * 100:F1}%");
+                        return bestPartSimilarity;
                     }
                 }
 
@@ -210,12 +225,24 @@ namespace ConsentSyncCore.Services.Matching
                 {
                     foreach (var part in parts2)
                     {
-                        if (part.Equals(name1, StringComparison.OrdinalIgnoreCase))
+                        if (part.Equals(comparableName1, StringComparison.OrdinalIgnoreCase))
                         {
                             var score = _config.CompoundNameMatchScore / 100.0;
                              LoggerService.LogInformation($"      Compound match: '{name2}' contains '{name1}' → {score * 100:F1}%");
                             return score;
                         }
+                    }
+
+                    double bestPartSimilarity = parts2
+                        .Select(part => CalculateStringSimilarity(comparableName1, part))
+                        .DefaultIfEmpty(0.0)
+                        .Max();
+
+                    if (bestPartSimilarity >= 0.80)
+                    {
+                        LoggerService.LogInformation(
+                            $"      Fuzzy compound match: '{name2}' contains close part for '{name1}' → {bestPartSimilarity * 100:F1}%");
+                        return bestPartSimilarity;
                     }
                 }
 
@@ -248,7 +275,7 @@ namespace ConsentSyncCore.Services.Matching
             }
 
             // Fallback to Levenshtein distance
-            return CalculateStringSimilarity(name1, name2);
+            return CalculateStringSimilarity(comparableName1, comparableName2);
         }
 
 
@@ -285,6 +312,7 @@ namespace ConsentSyncCore.Services.Matching
             return name.Split(delimiters, StringSplitOptions.RemoveEmptyEntries)
                        .Select(part => part.Trim())
                        .Where(part => !string.IsNullOrEmpty(part))
+                       .Select(CanonicalizeForComparison)
                        .ToArray();
         }
 
@@ -310,20 +338,27 @@ namespace ConsentSyncCore.Services.Matching
             if (string.IsNullOrWhiteSpace(name))
                 return "";
 
-            var normalized = RemoveAccents(name.Trim().ToUpperInvariant());
+            return RemoveAccents(name.Trim().ToUpperInvariant());
+        }
+
+        private string CanonicalizeForComparison(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return "";
+
+            var comparable = name;
 
             if (_config.IgnoreHyphensInComparison)
             {
-                // Only remove hyphens if configured, but keep them for compound name detection
-                // This is done AFTER compound name check
+                comparable = comparable.Replace("-", "");
             }
 
             if (_config.IgnoreSpacesInComparison)
             {
-                normalized = normalized.Replace(" ", "");
+                comparable = comparable.Replace(" ", "");
             }
 
-            return normalized;
+            return comparable;
         }
 
 
