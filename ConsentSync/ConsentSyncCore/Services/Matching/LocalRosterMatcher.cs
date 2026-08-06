@@ -368,7 +368,7 @@ namespace ConsentSyncCore.Services.Matching
                 .Where(candidate => candidate.ExactDobMatch)
                 .ToList();
 
-            return TryResolveUniqueStrongMatch(matches, "MassCSV_DOBPlusNameMatch");
+            return TryResolveSingleStrongMatch(matches, "MassCSV_DOBPlusNameMatch");
         }
 
         private LocalRosterMatchResult TryMatchByInvertedDob(StudentRecord student, List<RosterCandidate> candidates)
@@ -382,7 +382,24 @@ namespace ConsentSyncCore.Services.Matching
                 .Where(candidate => candidate.InvertedDobMatch)
                 .ToList();
 
-            return TryResolveUniqueStrongMatch(matches, "MassCSV_InvertedDOBMatch");
+            return TryResolveSingleStrongMatch(matches, "MassCSV_InvertedDOBMatch");
+        }
+
+        private LocalRosterMatchResult TryResolveSingleStrongMatch(
+            IEnumerable<RosterCandidate> candidates,
+            string matchMethod)
+        {
+            var strongMatches = candidates
+                .Where(candidate => candidate.NameScore >= AutoMatchThreshold)
+                .OrderByDescending(candidate => candidate.NameScore)
+                .ToList();
+
+            if (strongMatches.Count != 1)
+            {
+                return new LocalRosterMatchResult();
+            }
+
+            return BuildMatchedResult(strongMatches[0], matchMethod);
         }
 
         private LocalRosterMatchResult TryResolveUniqueStrongMatch(
@@ -416,7 +433,8 @@ namespace ConsentSyncCore.Services.Matching
         private LocalRosterMatchResult BuildSuggestionResult(List<RosterCandidate> candidates)
         {
             var suggestionCandidate = candidates
-                .OrderByDescending(candidate => candidate.NameScore)
+                .OrderByDescending(GetSuggestionPriority)
+                .ThenByDescending(candidate => candidate.NameScore)
                 .FirstOrDefault();
 
             if (suggestionCandidate == null)
@@ -449,6 +467,31 @@ namespace ConsentSyncCore.Services.Matching
             }
 
             return "MassCSV_NameMatch";
+        }
+
+        private static int GetSuggestionPriority(RosterCandidate candidate)
+        {
+            if (candidate.ExactDobMatch && candidate.TokensMatch)
+            {
+                return 4;
+            }
+
+            if (candidate.InvertedDobMatch && candidate.TokensMatch)
+            {
+                return 3;
+            }
+
+            if (candidate.ExactDobMatch)
+            {
+                return 2;
+            }
+
+            if (candidate.TokensMatch)
+            {
+                return 1;
+            }
+
+            return 0;
         }
 
         private static LocalRosterMatchResult BuildMatchedResult(RosterCandidate candidate, string matchMethod)

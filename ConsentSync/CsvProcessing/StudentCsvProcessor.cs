@@ -287,7 +287,11 @@ namespace CsvProcessing
             {
                 try
                 {
-                    var targetEncoding = EncodingConfigurationService.GetPriorityEncoding();
+                    records.Clear();
+                    _processingErrors.Clear();
+                    _totalInputRows = _successfullyParsedRows = _skippedEmptyRows = _malformedRows = 0;
+
+                    var targetEncoding = EncodingConfigurationService.ResolveEncoding(encodingConfig);
 
                     LoggerService.LogInformation($"   Trying: {encodingConfig.Name}...");
 
@@ -421,7 +425,8 @@ namespace CsvProcessing
                     LoggerService.LogInformation(
                         $"      ✗ Failed with {encodingConfig.Name}: {ex.Message}");
                     records.Clear();
-                    _totalInputRows = _successfullyParsedRows = 0;
+                    _processingErrors.Clear();
+                    _totalInputRows = _successfullyParsedRows = _skippedEmptyRows = _malformedRows = 0;
                 }
             }
 

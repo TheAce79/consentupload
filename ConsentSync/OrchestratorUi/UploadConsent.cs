@@ -633,6 +633,8 @@ namespace OrchestratorUi
 
             try
             {
+                EncodingConfigurationService.ClearCache();
+
                 var config = ConfigurationService.GetConfiguration();
                 var csvWs = ConfigurationService.GetCsvWorkspaceConfig();
                 var csvConfig = ConfigurationService.GetCsvConfig();
