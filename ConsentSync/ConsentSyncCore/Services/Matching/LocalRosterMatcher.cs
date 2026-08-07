@@ -179,6 +179,21 @@ namespace ConsentSyncCore.Services.Matching
             return leftSet.Count > 0 && rightSet.Count > 0 && leftSet.Overlaps(rightSet);
         }
 
+        private static bool HasBidirectionalSubsetCoverage(string studentName, string rosterName)
+        {
+            return HasBidirectionalSubsetCoverage(BuildTokenSet(studentName), BuildTokenSet(rosterName));
+        }
+
+        private static bool HasBidirectionalSubsetCoverage(HashSet<string> studentTokens, HashSet<string> rosterTokens)
+        {
+            if (studentTokens.Count == 0 || rosterTokens.Count == 0)
+            {
+                return false;
+            }
+
+            return studentTokens.IsSubsetOf(rosterTokens) || rosterTokens.IsSubsetOf(studentTokens);
+        }
+
         private static bool StudentTokensCoveredByRoster(string studentName, string rosterName)
         {
             return StudentTokensCoveredByRoster(BuildTokenSet(studentName), BuildTokenSet(rosterName));
@@ -309,7 +324,7 @@ namespace ConsentSyncCore.Services.Matching
                 return 0.0;
             }
 
-            if (StudentTokensCoveredByRoster(leftTokens, rightTokens))
+            if (HasBidirectionalSubsetCoverage(leftTokens, rightTokens))
             {
                 return 100.0;
             }
@@ -338,7 +353,11 @@ namespace ConsentSyncCore.Services.Matching
 
         private static string BuildSuggestion(RosterCandidate candidate)
         {
-            string matchMethod = DetermineSuggestionMatchMethod(candidate);
+            return BuildSuggestion(candidate, DetermineSuggestionMatchMethod(candidate));
+        }
+
+        private static string BuildSuggestion(RosterCandidate candidate, string matchMethod)
+        {
             return $"{candidate.Row.ClientName} # {candidate.Row.ClientId} # {matchMethod} ({candidate.NameScore:F0}%)";
         }
 
@@ -364,7 +383,8 @@ namespace ConsentSyncCore.Services.Matching
                     Row = row,
                     NameScore = CalculateFuzzyScore(studentFullName, row.ClientName),
                     TokensMatch = NameTokensMatch(studentFullName, row.ClientName),
-                    HasSubsetTokenCoverage = StudentTokensCoveredByRoster(studentFullName, row.ClientName),
+                    HasBidirectionalSubsetCoverage = HasBidirectionalSubsetCoverage(studentFullName, row.ClientName),
+                    StudentTokensCoveredByRoster = StudentTokensCoveredByRoster(studentFullName, row.ClientName),
                     FirstNameTokensMatch = ComponentTokensMatch(studentFirstName, rosterFirstName),
                     LastNameTokensMatch = ComponentTokensMatch(studentLastName, rosterLastName),
                     RosterDob = rosterDob,
@@ -382,6 +402,28 @@ namespace ConsentSyncCore.Services.Matching
 
         private LocalRosterMatchResult TryMatchByName(List<RosterCandidate> candidates)
         {
+            var subsetMatches = candidates
+                .Where(candidate => candidate.HasBidirectionalSubsetCoverage)
+                .OrderByDescending(candidate => candidate.NameScore)
+                .ToList();
+
+            if (subsetMatches.Count == 1)
+            {
+                return BuildMatchedResult(subsetMatches[0], "MassCSV_NameMatch");
+            }
+
+            if (subsetMatches.Count >= 2)
+            {
+                var topCandidate = subsetMatches.First();
+                return new LocalRosterMatchResult
+                {
+                    Matched = false,
+                    ClientId = string.Empty,
+                    NameScore = topCandidate.NameScore,
+                    Suggestion = BuildSuggestion(topCandidate, "MassCSV_NameMatch_Ambiguous")
+                };
+            }
+
             return TryResolveUniqueStrongMatch(candidates, "MassCSV_NameMatch");
         }
 
@@ -398,7 +440,7 @@ namespace ConsentSyncCore.Services.Matching
                 .ToList();
 
             var subsetMatches = matches
-                .Where(candidate => candidate.HasSubsetTokenCoverage)
+                .Where(candidate => candidate.StudentTokensCoveredByRoster)
                 .OrderByDescending(candidate => candidate.NameScore)
                 .ToList();
 
@@ -491,7 +533,7 @@ namespace ConsentSyncCore.Services.Matching
         private static string DetermineSuggestionMatchMethod(RosterCandidate candidate)
         {
             if (candidate.ExactDobMatch &&
-                (candidate.HasSubsetTokenCoverage || (candidate.FirstNameTokensMatch && candidate.LastNameTokensMatch)))
+                (candidate.StudentTokensCoveredByRoster || (candidate.FirstNameTokensMatch && candidate.LastNameTokensMatch)))
             {
                 return "MassCSV_DOBPlusNameMatch";
             }
@@ -502,7 +544,7 @@ namespace ConsentSyncCore.Services.Matching
             }
 
             if (candidate.InvertedDobMatch &&
-                (candidate.HasSubsetTokenCoverage || (candidate.FirstNameTokensMatch && candidate.LastNameTokensMatch)))
+                (candidate.StudentTokensCoveredByRoster || (candidate.FirstNameTokensMatch && candidate.LastNameTokensMatch)))
             {
                 return "MassCSV_InvertedDOBMatch";
             }
@@ -512,7 +554,7 @@ namespace ConsentSyncCore.Services.Matching
 
         private static int GetSuggestionPriority(RosterCandidate candidate)
         {
-            if (candidate.ExactDobMatch && candidate.HasSubsetTokenCoverage)
+            if (candidate.ExactDobMatch && candidate.StudentTokensCoveredByRoster)
             {
                 return 5;
             }
@@ -522,7 +564,7 @@ namespace ConsentSyncCore.Services.Matching
                 return 4;
             }
 
-            if (candidate.InvertedDobMatch && candidate.HasSubsetTokenCoverage)
+            if (candidate.InvertedDobMatch && candidate.StudentTokensCoveredByRoster)
             {
                 return 4;
             }
@@ -561,7 +603,8 @@ namespace ConsentSyncCore.Services.Matching
             public required MassImmunisationRosterRecord Row { get; init; }
             public double NameScore { get; init; }
             public bool TokensMatch { get; init; }
-            public bool HasSubsetTokenCoverage { get; init; }
+            public bool HasBidirectionalSubsetCoverage { get; init; }
+            public bool StudentTokensCoveredByRoster { get; init; }
             public bool FirstNameTokensMatch { get; init; }
             public bool LastNameTokensMatch { get; init; }
             public DateTime? RosterDob { get; init; }
