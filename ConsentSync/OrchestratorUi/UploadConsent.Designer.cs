@@ -45,6 +45,8 @@ namespace OrchestratorUi
             lbl_Phase1Progress = new Label();
             gb_PreUpload = new GroupBox();
             gb_UploadPhis = new GroupBox();
+            grp_Phase4Auditing = new GroupBox();
+            btn_ClientIdentityPreAudit = new Button();
             pb_Phase3 = new ProgressBar();
             lbl_Phase3Progress = new Label();
             groupBox1 = new GroupBox();
@@ -61,6 +63,7 @@ namespace OrchestratorUi
             gb_Phase1.SuspendLayout();
             gb_PreUpload.SuspendLayout();
             gb_UploadPhis.SuspendLayout();
+            grp_Phase4Auditing.SuspendLayout();
             groupBox1.SuspendLayout();
             SuspendLayout();
             // 
@@ -365,7 +368,7 @@ namespace OrchestratorUi
             gb_UploadPhis.Controls.Add(lbl_Phase3Progress);
             gb_UploadPhis.Location = new Point(790, 140);
             gb_UploadPhis.Name = "gb_UploadPhis";
-            gb_UploadPhis.Size = new Size(316, 290);
+            gb_UploadPhis.Size = new Size(316, 160);
             gb_UploadPhis.TabIndex = 4;
             gb_UploadPhis.TabStop = false;
             gb_UploadPhis.Text = "Phase 3 — PHIS Document Upload";
@@ -387,7 +390,33 @@ namespace OrchestratorUi
             lbl_Phase3Progress.Size = new Size(228, 24);
             lbl_Phase3Progress.TabIndex = 2;
             lbl_Phase3Progress.TextAlign = ContentAlignment.MiddleCenter;
-            // 
+            //
+            // grp_Phase4Auditing
+            //
+            grp_Phase4Auditing.Controls.Add(btn_ClientIdentityPreAudit);
+            grp_Phase4Auditing.Location = new Point(790, 310);
+            grp_Phase4Auditing.Name = "grp_Phase4Auditing";
+            grp_Phase4Auditing.Size = new Size(316, 120);
+            grp_Phase4Auditing.TabIndex = 5;
+            grp_Phase4Auditing.TabStop = false;
+            grp_Phase4Auditing.Text = "Phase 4 — Post-Upload Audit & Review";
+            //
+            // btn_ClientIdentityPreAudit
+            //
+            btn_ClientIdentityPreAudit.BackColor = Color.FromArgb(50, 110, 85);
+            btn_ClientIdentityPreAudit.FlatAppearance.BorderColor = Color.FromArgb(35, 80, 60);
+            btn_ClientIdentityPreAudit.FlatStyle = FlatStyle.Flat;
+            btn_ClientIdentityPreAudit.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            btn_ClientIdentityPreAudit.ForeColor = Color.White;
+            btn_ClientIdentityPreAudit.Location = new Point(12, 45);
+            btn_ClientIdentityPreAudit.Name = "btn_ClientIdentityPreAudit";
+            btn_ClientIdentityPreAudit.Size = new Size(292, 43);
+            btn_ClientIdentityPreAudit.TabIndex = 0;
+            btn_ClientIdentityPreAudit.Text = "🔍 Client Identity Pre-Audit (Optional)";
+            toolTip1.SetToolTip(btn_ClientIdentityPreAudit, "Checks uploaded Client IDs and student names against the exported Mass Imms roster before handoff to the independent auditor.\r\n\r\nThis check does not modify upload data.");
+            btn_ClientIdentityPreAudit.UseVisualStyleBackColor = false;
+            btn_ClientIdentityPreAudit.Click += btn_ClientIdentityPreAudit_Click;
+            //
             // groupBox1
             // 
             groupBox1.Controls.Add(btn_PortableChrome);
@@ -499,6 +528,7 @@ namespace OrchestratorUi
             Controls.Add(bt_ScanPdfOcr);
             Controls.Add(bt_Save);
             Controls.Add(groupBox1);
+            Controls.Add(grp_Phase4Auditing);
             Controls.Add(gb_UploadPhis);
             Controls.Add(gb_PreUpload);
             Controls.Add(gb_Phase1);
@@ -513,6 +543,7 @@ namespace OrchestratorUi
             gb_Phase1.ResumeLayout(false);
             gb_PreUpload.ResumeLayout(false);
             gb_UploadPhis.ResumeLayout(false);
+            grp_Phase4Auditing.ResumeLayout(false);
             groupBox1.ResumeLayout(false);
             groupBox1.PerformLayout();
             ResumeLayout(false);
@@ -543,6 +574,8 @@ namespace OrchestratorUi
         private Button bt_GenerateCsv;
         private ToolTip toolTip1;
         private GroupBox gb_UploadPhis;
+        private GroupBox grp_Phase4Auditing;
+        private Button btn_ClientIdentityPreAudit;
         private Button bt_Upload;
         private Button bt_AppendFileRose;
         private ProgressBar pb_Phase3;

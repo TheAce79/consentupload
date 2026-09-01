@@ -11,6 +11,7 @@ using Orchestrator;
 using Orchestrator.Phase1;
 using Orchestrator.Phase2;
 using Orchestrator.Phase3;
+using Orchestrator.Phase4.Auditing.ClientIdentity;
 using Orchestrator.PrePhase3;
 using System.Text;
 using System.Text.Json;
@@ -1531,6 +1532,118 @@ namespace OrchestratorUi
 
 
         // ── Phase 3: Upload Consent & FileRose to PHIS ────────────────
+        private async void btn_ClientIdentityPreAudit_Click(object sender, EventArgs e)
+        {
+            const string buttonText = "🔍 Client Identity Pre-Audit (Optional)";
+            btn_ClientIdentityPreAudit.Enabled = false;
+            btn_ClientIdentityPreAudit.Text = "⏳ Running Pre-Audit…";
+
+            try
+            {
+                var phase2Config = ConfigurationService.GetPhase2Config();
+                var prePhase3Config = ConfigurationService.GetPrePhase3Config();
+                string uploadPath = Path.Combine(prePhase3Config.OutputPath, phase2Config.UploadCsv);
+                string rosterPath = ConfigurationService.GetMassImmunisationCsvFullPath();
+                string outputPath = Path.Combine(prePhase3Config.OutputPath, "Verification_Upload.csv");
+
+                if (!File.Exists(uploadPath) || !File.Exists(rosterPath))
+                {
+                    throw new FileNotFoundException(
+                        "The upload CSV and Mass Imms roster must both exist before the pre-audit can run.");
+                }
+
+                if (!WorkspaceInitializer.IsFileAvailable(uploadPath) ||
+                    !WorkspaceInitializer.IsFileAvailable(rosterPath) ||
+                    (File.Exists(outputPath) && !WorkspaceInitializer.IsFileAvailable(outputPath)))
+                {
+                    MessageBox.Show(this,
+                        "Please close Upload_to_PHIS.csv, mass_immunisation.csv, and Verification_Upload.csv in Excel before running the pre-audit.",
+                        "File in Use", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                LoggerService.LogInformation("\n" + new string('═', 60));
+                LoggerService.LogInformation("PHASE 4 — CLIENT IDENTITY PRE-AUDIT");
+                LoggerService.LogInformation(new string('═', 60));
+
+                var service = new ClientIdentityPreAuditService();
+                ClientIdentityPreAuditResult result = await Task.Run(service.ExecuteAudit);
+
+                LoggerService.LogInformation($"   Total rows                 : {result.TotalRows}");
+                LoggerService.LogInformation($"   Automatically verified     : {result.AutomaticallyVerifiedRows}");
+                LoggerService.LogInformation($"   Needs manual review        : {result.NeedsManualReviewRows}");
+                LoggerService.LogInformation($"   Accepted exceptions        : {result.AcceptedUploadExceptionRows}");
+                LoggerService.LogInformation($"   Exact matches              : {result.ExactMatchRows}");
+                LoggerService.LogInformation($"   Compatible matches         : {result.CompatibleMatchRows}");
+                LoggerService.LogInformation($"   Token-order matches        : {result.TokenOrderEquivalentRows}");
+                LoggerService.LogInformation($"   Unique partial matches     : {result.UniquePartialMatchRows}");
+                LoggerService.LogInformation($"   Upload not completed       : {result.UploadNotCompletedRows}");
+                LoggerService.LogInformation($"   Upload failed              : {result.UploadFailedRows}");
+                LoggerService.LogInformation($"   Invalid upload status      : {result.InvalidStatusRows}");
+                LoggerService.LogInformation($"   Manual consent rows        : {result.ManualConsentRows}");
+                LoggerService.LogInformation($"   Client IDs not in roster   : {result.ClientIdNotInRosterRows}");
+                LoggerService.LogInformation($"   Incomplete names           : {result.IncompleteNameRows}");
+                LoggerService.LogInformation($"   Duplicate roster ID rows   : {result.DuplicateRosterClientIdRows}");
+                LoggerService.LogInformation($"   Reversed names             : {result.ReversedNameRows}");
+                LoggerService.LogInformation($"   Name mismatches            : {result.NameMismatchRows}");
+                LoggerService.LogInformation($"   Ambiguous names            : {result.AmbiguousNameRows}");
+                LoggerService.LogInformation($"   Multiple upload name rows  : {result.MultipleUploadNameRows}");
+                LoggerService.LogInformation($"   Output                     : {result.OutputPath}");
+                LoggerService.LogInformation(new string('═', 60));
+
+                if (result.HasReviewItems)
+                {
+                    MessageBox.Show(this,
+                        "Client Identity Pre-Audit completed — review recommended.\n\n" +
+                        $"Rows checked:                    {result.TotalRows}\n" +
+                        $"Automatically verified:          {result.AutomaticallyVerifiedRows}\n" +
+                        $"Accepted upload exceptions:     {result.AcceptedUploadExceptionRows}\n" +
+                        $"Manual consent rows:             {result.ManualConsentRows}\n" +
+                        $"Client IDs not in roster:        {result.ClientIdNotInRosterRows}\n" +
+                        $"Ambiguous names:                 {result.AmbiguousNameRows}\n" +
+                        $"Name mismatches:                 {result.NameMismatchRows}\n\n" +
+                        "Review Verification_Upload.csv before handing the batch to the independent auditor.\n\n" +
+                        "Accepted upload exceptions are not included in the manual-review total.\n\n" +
+                        "This optional check did not modify the upload data.",
+                        "Pre-Audit Complete — Review Recommended", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                else
+                {
+                    MessageBox.Show(this,
+                        "Client Identity Pre-Audit completed.\n\n" +
+                        $"Rows checked:                    {result.TotalRows}\n" +
+                        $"Automatically verified:          {result.AutomaticallyVerifiedRows}\n" +
+                        $"Accepted upload exceptions:     {result.AcceptedUploadExceptionRows}\n" +
+                        "Needs manual review:               0\n\n" +
+                        "No Client ID issues were detected.\n\n" +
+                        "Accepted upload exceptions were excluded based on documented Remarks By Melisa.\n\n" +
+                        "Upload_to_PHIS.csv was not modified.\n\n" +
+                        "Output:\nVerification_Upload.csv",
+                        "Pre-Audit Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (FileNotFoundException ex)
+            {
+                LoggerService.LogWarning($"⚠️  Client Identity Pre-Audit input missing: {ex.Message}");
+                MessageBox.Show(this, ex.Message, "Pre-Audit Input Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (InvalidDataException ex)
+            {
+                LoggerService.LogWarning($"⚠️  Client Identity Pre-Audit CSV validation failed: {ex.Message}");
+                MessageBox.Show(this, ex.Message, "Pre-Audit CSV Invalid", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError($"❌ Client Identity Pre-Audit failed: {ex.Message}", ex);
+                MessageBox.Show(this, $"The Client Identity Pre-Audit could not complete.\n\n{ex.Message}", "Pre-Audit Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                btn_ClientIdentityPreAudit.Enabled = true;
+                btn_ClientIdentityPreAudit.Text = buttonText;
+            }
+        }
+
         private async void bt_Upload_Click(object sender, EventArgs e)
         {
             bt_Upload.Enabled = false;
