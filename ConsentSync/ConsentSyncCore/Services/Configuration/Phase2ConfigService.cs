@@ -50,6 +50,10 @@ namespace ConsentSyncCore.Services.Configuration
                 // ✅ Validation_Results.csv written to Upload Csv folder
                 ValidationResultsCsv = config["Phase2:Output:ValidationResultsCsv"] ?? "Validation_Results.csv",
                 UploadCsv = config["Phase2:Output:UploadCsv"] ?? "Upload_to_PHIS.csv",
+                VaccineTypes = config.GetSection("Phase2:VaccineTypes")
+                    .Get<Dictionary<string, List<string>>>()?
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase)
+                    ?? new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase),
             };
         }
 

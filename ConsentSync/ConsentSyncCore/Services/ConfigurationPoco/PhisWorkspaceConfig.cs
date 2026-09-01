@@ -44,7 +44,7 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
 
         // ✅ Add the path helper
         /// <summary>
-        /// Path to the "1 Consent Archive" folder where consent PDFs will be moved after successful upload in Phase 3.
+        /// Path to the "3 Consent Archive" folder where consent PDFs will be moved after successful upload in Phase 3.
         /// </summary>
         public string GetConsentArchivePath() => Path.Combine(GetToUploadPath(), ConsentArchiveSubFolder);
 
@@ -54,7 +54,7 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
 
         // ✅ Add the path helper
         /// <summary>
-        /// Path to the "1 Rose Archive" folder where file rose PDFs will be moved after successful upload in Phase 3.
+        /// Path to the "4 Rose Archive" folder where file rose PDFs will be moved after successful upload in Phase 3.
         /// </summary>
         public string GetFileRoseArchivePath() => Path.Combine(GetToUploadPath(), FileRoseArchiveSubFolder);
 

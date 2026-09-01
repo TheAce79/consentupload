@@ -64,6 +64,9 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         /// Resolved from CsvWorkspace → 2_Output Csv → 2 Upload Csv.
         /// </summary>
         public string ValidationCsvPath { get; set; } = string.Empty;
+
+        /// <summary>Configured vaccine types keyed by grade, for example Grade7.</summary>
+        public Dictionary<string, List<string>> VaccineTypes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
 }

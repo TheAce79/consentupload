@@ -23,6 +23,8 @@ namespace OrchestratorUi
             bt_GenerateCsv = new Button();
             bt_Upload = new Button();
             bt_AppendFileRose = new Button();
+            btn_ClientIdentityPreAudit = new Button();
+            btn_DocumentReconciliationAudit = new Button();
             grpConfig = new GroupBox();
             cb_Grade = new ComboBox();
             lb_Grade = new Label();
@@ -45,10 +47,9 @@ namespace OrchestratorUi
             lbl_Phase1Progress = new Label();
             gb_PreUpload = new GroupBox();
             gb_UploadPhis = new GroupBox();
-            grp_Phase4Auditing = new GroupBox();
-            btn_ClientIdentityPreAudit = new Button();
             pb_Phase3 = new ProgressBar();
             lbl_Phase3Progress = new Label();
+            grp_Phase4Auditing = new GroupBox();
             groupBox1 = new GroupBox();
             btn_PortableChrome = new Button();
             lb_Dir = new Label();
@@ -130,6 +131,38 @@ namespace OrchestratorUi
             toolTip1.SetToolTip(bt_AppendFileRose, resources.GetString("bt_AppendFileRose.ToolTip"));
             bt_AppendFileRose.UseVisualStyleBackColor = false;
             bt_AppendFileRose.Click += bt_AppendFileRose_Click;
+            // 
+            // btn_ClientIdentityPreAudit
+            // 
+            btn_ClientIdentityPreAudit.BackColor = Color.FromArgb(50, 110, 85);
+            btn_ClientIdentityPreAudit.FlatAppearance.BorderColor = Color.FromArgb(35, 80, 60);
+            btn_ClientIdentityPreAudit.FlatStyle = FlatStyle.Flat;
+            btn_ClientIdentityPreAudit.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            btn_ClientIdentityPreAudit.ForeColor = Color.White;
+            btn_ClientIdentityPreAudit.Location = new Point(12, 45);
+            btn_ClientIdentityPreAudit.Name = "btn_ClientIdentityPreAudit";
+            btn_ClientIdentityPreAudit.Size = new Size(292, 43);
+            btn_ClientIdentityPreAudit.TabIndex = 0;
+            btn_ClientIdentityPreAudit.Text = "🔍 Client Identity Pre-Audit (Optional)";
+            toolTip1.SetToolTip(btn_ClientIdentityPreAudit, "Checks uploaded Client IDs and student names against the exported Mass Imms roster before handoff to the independent auditor.\r\n\r\nThis check does not modify upload data.");
+            btn_ClientIdentityPreAudit.UseVisualStyleBackColor = false;
+            btn_ClientIdentityPreAudit.Click += btn_ClientIdentityPreAudit_Click;
+            // 
+            // btn_DocumentReconciliationAudit
+            // 
+            btn_DocumentReconciliationAudit.BackColor = Color.FromArgb(50, 110, 85);
+            btn_DocumentReconciliationAudit.FlatAppearance.BorderColor = Color.FromArgb(35, 80, 60);
+            btn_DocumentReconciliationAudit.FlatStyle = FlatStyle.Flat;
+            btn_DocumentReconciliationAudit.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            btn_DocumentReconciliationAudit.ForeColor = Color.White;
+            btn_DocumentReconciliationAudit.Location = new Point(12, 96);
+            btn_DocumentReconciliationAudit.Name = "btn_DocumentReconciliationAudit";
+            btn_DocumentReconciliationAudit.Size = new Size(292, 43);
+            btn_DocumentReconciliationAudit.TabIndex = 1;
+            btn_DocumentReconciliationAudit.Text = "Document Reconciliation Audit";
+            toolTip1.SetToolTip(btn_DocumentReconciliationAudit, "Reconciles successful verification rows against archived PDFs. This audit does not modify CSV or PDF files.");
+            btn_DocumentReconciliationAudit.UseVisualStyleBackColor = false;
+            btn_DocumentReconciliationAudit.Click += btn_DocumentReconciliationAudit_Click;
             // 
             // grpConfig
             // 
@@ -242,11 +275,11 @@ namespace OrchestratorUi
             rtxt_Log.BackColor = Color.Black;
             rtxt_Log.Font = new Font("Consolas", 9F);
             rtxt_Log.ForeColor = Color.LimeGreen;
-            rtxt_Log.Location = new Point(12, 473);
+            rtxt_Log.Location = new Point(12, 544);
             rtxt_Log.Name = "rtxt_Log";
             rtxt_Log.ReadOnly = true;
             rtxt_Log.ScrollBars = RichTextBoxScrollBars.Vertical;
-            rtxt_Log.Size = new Size(1094, 218);
+            rtxt_Log.Size = new Size(1094, 147);
             rtxt_Log.TabIndex = 1;
             rtxt_Log.Text = "";
             // 
@@ -300,21 +333,6 @@ namespace OrchestratorUi
             gb_Phase1.TabStop = false;
             gb_Phase1.Text = "Phase 1 — PHIS Client ID Search";
             // 
-            // bt_SearchClientId
-            // 
-            bt_SearchClientId.BackColor = Color.FromArgb(0, 90, 160);
-            bt_SearchClientId.FlatAppearance.BorderColor = Color.FromArgb(0, 60, 120);
-            bt_SearchClientId.FlatStyle = FlatStyle.Flat;
-            bt_SearchClientId.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            bt_SearchClientId.ForeColor = Color.White;
-            bt_SearchClientId.Location = new Point(164, 28);
-            bt_SearchClientId.Name = "bt_SearchClientId";
-            bt_SearchClientId.Size = new Size(140, 38);
-            bt_SearchClientId.TabIndex = 1;
-            bt_SearchClientId.Text = "🔍 Search Client IDs on PHIS";
-            bt_SearchClientId.UseVisualStyleBackColor = false;
-            bt_SearchClientId.Click += bt_SearchClientId_Click;
-            // 
             // btn_ExportMassImms
             // 
             btn_ExportMassImms.BackColor = Color.DarkSlateBlue;
@@ -329,6 +347,21 @@ namespace OrchestratorUi
             btn_ExportMassImms.Text = "📋 Export Mass Imms Roster to CSV";
             btn_ExportMassImms.UseVisualStyleBackColor = false;
             btn_ExportMassImms.Click += btn_ExportMassImms_Click;
+            // 
+            // bt_SearchClientId
+            // 
+            bt_SearchClientId.BackColor = Color.FromArgb(0, 90, 160);
+            bt_SearchClientId.FlatAppearance.BorderColor = Color.FromArgb(0, 60, 120);
+            bt_SearchClientId.FlatStyle = FlatStyle.Flat;
+            bt_SearchClientId.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            bt_SearchClientId.ForeColor = Color.White;
+            bt_SearchClientId.Location = new Point(164, 28);
+            bt_SearchClientId.Name = "bt_SearchClientId";
+            bt_SearchClientId.Size = new Size(140, 38);
+            bt_SearchClientId.TabIndex = 1;
+            bt_SearchClientId.Text = "🔍 Search Client IDs on PHIS";
+            bt_SearchClientId.UseVisualStyleBackColor = false;
+            bt_SearchClientId.Click += bt_SearchClientId_Click;
             // 
             // pb_Phase1
             // 
@@ -390,33 +423,18 @@ namespace OrchestratorUi
             lbl_Phase3Progress.Size = new Size(228, 24);
             lbl_Phase3Progress.TabIndex = 2;
             lbl_Phase3Progress.TextAlign = ContentAlignment.MiddleCenter;
-            //
+            // 
             // grp_Phase4Auditing
-            //
+            // 
+            grp_Phase4Auditing.Controls.Add(btn_DocumentReconciliationAudit);
             grp_Phase4Auditing.Controls.Add(btn_ClientIdentityPreAudit);
             grp_Phase4Auditing.Location = new Point(790, 310);
             grp_Phase4Auditing.Name = "grp_Phase4Auditing";
-            grp_Phase4Auditing.Size = new Size(316, 120);
+            grp_Phase4Auditing.Size = new Size(316, 215);
             grp_Phase4Auditing.TabIndex = 5;
             grp_Phase4Auditing.TabStop = false;
             grp_Phase4Auditing.Text = "Phase 4 — Post-Upload Audit & Review";
-            //
-            // btn_ClientIdentityPreAudit
-            //
-            btn_ClientIdentityPreAudit.BackColor = Color.FromArgb(50, 110, 85);
-            btn_ClientIdentityPreAudit.FlatAppearance.BorderColor = Color.FromArgb(35, 80, 60);
-            btn_ClientIdentityPreAudit.FlatStyle = FlatStyle.Flat;
-            btn_ClientIdentityPreAudit.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            btn_ClientIdentityPreAudit.ForeColor = Color.White;
-            btn_ClientIdentityPreAudit.Location = new Point(12, 45);
-            btn_ClientIdentityPreAudit.Name = "btn_ClientIdentityPreAudit";
-            btn_ClientIdentityPreAudit.Size = new Size(292, 43);
-            btn_ClientIdentityPreAudit.TabIndex = 0;
-            btn_ClientIdentityPreAudit.Text = "🔍 Client Identity Pre-Audit (Optional)";
-            toolTip1.SetToolTip(btn_ClientIdentityPreAudit, "Checks uploaded Client IDs and student names against the exported Mass Imms roster before handoff to the independent auditor.\r\n\r\nThis check does not modify upload data.");
-            btn_ClientIdentityPreAudit.UseVisualStyleBackColor = false;
-            btn_ClientIdentityPreAudit.Click += btn_ClientIdentityPreAudit_Click;
-            //
+            // 
             // groupBox1
             // 
             groupBox1.Controls.Add(btn_PortableChrome);
@@ -576,6 +594,7 @@ namespace OrchestratorUi
         private GroupBox gb_UploadPhis;
         private GroupBox grp_Phase4Auditing;
         private Button btn_ClientIdentityPreAudit;
+        private Button btn_DocumentReconciliationAudit;
         private Button bt_Upload;
         private Button bt_AppendFileRose;
         private ProgressBar pb_Phase3;

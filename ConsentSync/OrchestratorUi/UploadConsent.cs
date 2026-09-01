@@ -12,6 +12,7 @@ using Orchestrator.Phase1;
 using Orchestrator.Phase2;
 using Orchestrator.Phase3;
 using Orchestrator.Phase4.Auditing.ClientIdentity;
+using Orchestrator.Phase4.Auditing.DocumentReconciliation;
 using Orchestrator.PrePhase3;
 using System.Text;
 using System.Text.Json;
@@ -1641,6 +1642,68 @@ namespace OrchestratorUi
             {
                 btn_ClientIdentityPreAudit.Enabled = true;
                 btn_ClientIdentityPreAudit.Text = buttonText;
+            }
+        }
+
+        private async void btn_DocumentReconciliationAudit_Click(object sender, EventArgs e)
+        {
+            const string buttonText = "Document Reconciliation Audit";
+            btn_DocumentReconciliationAudit.Enabled = false;
+            btn_DocumentReconciliationAudit.Text = "Running Audit...";
+
+            try
+            {
+                LoggerService.LogInformation("PHASE 4 - DOCUMENT RECONCILIATION AUDIT");
+                var service = new DocumentReconciliationAuditService();
+                DocumentReconciliationAuditResult result = await Task.Run(service.ExecuteAudit);
+
+                LoggerService.LogInformation($"   Selected grade                 : {result.SelectedGrade}");
+                LoggerService.LogInformation($"   Configured vaccine count       : {result.ConfiguredConsentVaccineCount}");
+                LoggerService.LogInformation($"   Configured PHIS antigens       : {string.Join(", ", result.ConfiguredPhisAntigens)}");
+                LoggerService.LogInformation($"   Consent upload rows            : {result.ConsentUploadRows}");
+                LoggerService.LogInformation($"   Unique consent Client IDs      : {result.UniqueConsentClientIds}");
+                LoggerService.LogInformation($"   Trusted consent clients        : {result.TrustedConsentClientsCounted}");
+                LoggerService.LogInformation($"   Technical rows collapsed       : {result.VaccineSpecificConsentRowsCollapsed}");
+                LoggerService.LogInformation($"   Identical copies collapsed     : {result.IdenticalConsentArchiveCopiesCollapsed}");
+                LoggerService.LogInformation($"   Vaccine-copy mismatch groups   : {result.ConsentVaccineCopyMismatchGroups}");
+
+                string outcome = !result.CountsAreComplete
+                    ? "The totals may be incomplete."
+                    : result.HasReviewIssues
+                        ? "The totals were calculated, but review items were detected."
+                        : "The totals were calculated without review items.";
+
+                MessageBox.Show(this,
+                    $"Document Reconciliation Audit completed.\n\n" +
+                    $"Selected grade: {result.SelectedGrade}\n" +
+                    $"Configured vaccines per consent: {result.ConfiguredConsentVaccineCount}\n\n" +
+                    $"PHIS consent upload rows: {result.ConsentUploadRows}\n" +
+                    $"Physical consent clients: {result.ExpectedPhysicalConsentClients}\n" +
+                    $"Vaccine-specific rows collapsed: {result.VaccineSpecificConsentRowsCollapsed}\n\n" +
+                    $"Digital consent submissions: {result.DigitalConsentPages}\n" +
+                    $"Manual consent submissions: {result.ManualConsentPages}\n" +
+                    $"FileRose documents: {result.FileRoseDocuments}\n\n" +
+                    $"{outcome}\n\nOutput:\n{result.OutputPath}",
+                    "Document Reconciliation Audit", result.HasReviewIssues ? MessageBoxButtons.OK : MessageBoxButtons.OK,
+                    result.HasReviewIssues ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+            }
+            catch (FileNotFoundException ex)
+            {
+                MessageBox.Show(this, ex.Message, "Audit Input Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (InvalidDataException ex)
+            {
+                MessageBox.Show(this, ex.Message, "Audit Input Invalid", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError($"Document Reconciliation Audit failed: {ex.Message}", ex);
+                MessageBox.Show(this, $"The audit could not complete.\n\n{ex.Message}", "Audit Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                btn_DocumentReconciliationAudit.Enabled = true;
+                btn_DocumentReconciliationAudit.Text = buttonText;
             }
         }
 
