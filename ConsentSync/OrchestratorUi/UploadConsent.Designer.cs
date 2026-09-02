@@ -25,6 +25,7 @@ namespace OrchestratorUi
             bt_AppendFileRose = new Button();
             btn_ClientIdentityPreAudit = new Button();
             btn_DocumentReconciliationAudit = new Button();
+            btn_VerifyDocumentsOnPhis = new Button();
             txt_OriginalDigitalConsentCount = new TextBox();
             txt_ExpectedManualConsentCount = new TextBox();
             txt_ExpectedFileRoseCount = new TextBox();
@@ -161,62 +162,81 @@ namespace OrchestratorUi
             btn_DocumentReconciliationAudit.FlatStyle = FlatStyle.Flat;
             btn_DocumentReconciliationAudit.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             btn_DocumentReconciliationAudit.ForeColor = Color.White;
-            btn_DocumentReconciliationAudit.Location = new Point(12, 164);
+            btn_DocumentReconciliationAudit.Location = new Point(6, 176);
             btn_DocumentReconciliationAudit.Name = "btn_DocumentReconciliationAudit";
-            btn_DocumentReconciliationAudit.Size = new Size(292, 43);
+            btn_DocumentReconciliationAudit.Size = new Size(310, 43);
             btn_DocumentReconciliationAudit.TabIndex = 4;
             btn_DocumentReconciliationAudit.Text = "Document Reconciliation Audit";
             toolTip1.SetToolTip(btn_DocumentReconciliationAudit, "Reconciles successful verification rows against archived PDFs. This audit does not modify CSV or PDF files.");
             btn_DocumentReconciliationAudit.UseVisualStyleBackColor = false;
             btn_DocumentReconciliationAudit.Click += btn_DocumentReconciliationAudit_Click;
             //
-            // lbl_OriginalDigitalConsentCount
+            // btn_VerifyDocumentsOnPhis
             //
+            btn_VerifyDocumentsOnPhis.BackColor = Color.FromArgb(50, 110, 85);
+            btn_VerifyDocumentsOnPhis.FlatAppearance.BorderColor = Color.FromArgb(35, 80, 60);
+            btn_VerifyDocumentsOnPhis.FlatStyle = FlatStyle.Flat;
+            btn_VerifyDocumentsOnPhis.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            btn_VerifyDocumentsOnPhis.ForeColor = Color.White;
+            btn_VerifyDocumentsOnPhis.Location = new Point(6, 225);
+            btn_VerifyDocumentsOnPhis.Name = "btn_VerifyDocumentsOnPhis";
+            btn_VerifyDocumentsOnPhis.Size = new Size(310, 34);
+            btn_VerifyDocumentsOnPhis.TabIndex = 5;
+            btn_VerifyDocumentsOnPhis.Text = "Verify Documents on PHIS";
+            toolTip1.SetToolTip(btn_VerifyDocumentsOnPhis, resources.GetString("btn_VerifyDocumentsOnPhis.ToolTip"));
+            btn_VerifyDocumentsOnPhis.UseVisualStyleBackColor = false;
+            btn_VerifyDocumentsOnPhis.Click += btn_VerifyDocumentsOnPhis_Click;
+            // 
+            // txt_OriginalDigitalConsentCount
+            // 
+            txt_OriginalDigitalConsentCount.Location = new Point(205, 95);
+            txt_OriginalDigitalConsentCount.Name = "txt_OriginalDigitalConsentCount";
+            txt_OriginalDigitalConsentCount.Size = new Size(99, 27);
+            txt_OriginalDigitalConsentCount.TabIndex = 1;
+            toolTip1.SetToolTip(txt_OriginalDigitalConsentCount, resources.GetString("txt_OriginalDigitalConsentCount.ToolTip"));
+            // 
+            // txt_ExpectedManualConsentCount
+            // 
+            txt_ExpectedManualConsentCount.Location = new Point(205, 119);
+            txt_ExpectedManualConsentCount.Name = "txt_ExpectedManualConsentCount";
+            txt_ExpectedManualConsentCount.Size = new Size(99, 27);
+            txt_ExpectedManualConsentCount.TabIndex = 2;
+            toolTip1.SetToolTip(txt_ExpectedManualConsentCount, "Enter the number of physical manual consent forms identified in the original school batch. Count each submitted manual consent form once, including a form later merged with a digital consent PDF.");
+            // 
+            // txt_ExpectedFileRoseCount
+            // 
+            txt_ExpectedFileRoseCount.Location = new Point(205, 143);
+            txt_ExpectedFileRoseCount.Name = "txt_ExpectedFileRoseCount";
+            txt_ExpectedFileRoseCount.Size = new Size(99, 27);
+            txt_ExpectedFileRoseCount.TabIndex = 3;
+            toolTip1.SetToolTip(txt_ExpectedFileRoseCount, resources.GetString("txt_ExpectedFileRoseCount.ToolTip"));
+            // 
+            // lbl_OriginalDigitalConsentCount
+            // 
             lbl_OriginalDigitalConsentCount.AutoSize = true;
             lbl_OriginalDigitalConsentCount.Location = new Point(12, 98);
             lbl_OriginalDigitalConsentCount.Name = "lbl_OriginalDigitalConsentCount";
-            lbl_OriginalDigitalConsentCount.Size = new Size(176, 15);
+            lbl_OriginalDigitalConsentCount.Size = new Size(216, 20);
+            lbl_OriginalDigitalConsentCount.TabIndex = 7;
             lbl_OriginalDigitalConsentCount.Text = "Original Digital Consents (SNB)";
-            //
-            // txt_OriginalDigitalConsentCount
-            //
-            txt_OriginalDigitalConsentCount.Location = new Point(205, 95);
-            txt_OriginalDigitalConsentCount.Name = "txt_OriginalDigitalConsentCount";
-            txt_OriginalDigitalConsentCount.Size = new Size(99, 23);
-            txt_OriginalDigitalConsentCount.TabIndex = 1;
-            toolTip1.SetToolTip(txt_OriginalDigitalConsentCount, "Enter the total number of digital consent submissions shown for this school/grade batch on the SNB website. This value is confirmed manually by the uploader/verifier. Phase 4 does not access the SNB website.");
-            //
+            // 
             // lbl_ExpectedManualConsentCount
-            //
+            // 
             lbl_ExpectedManualConsentCount.AutoSize = true;
             lbl_ExpectedManualConsentCount.Location = new Point(12, 122);
             lbl_ExpectedManualConsentCount.Name = "lbl_ExpectedManualConsentCount";
-            lbl_ExpectedManualConsentCount.Size = new Size(132, 15);
+            lbl_ExpectedManualConsentCount.Size = new Size(159, 20);
+            lbl_ExpectedManualConsentCount.TabIndex = 6;
             lbl_ExpectedManualConsentCount.Text = "Manual Consent Forms";
-            //
-            // txt_ExpectedManualConsentCount
-            //
-            txt_ExpectedManualConsentCount.Location = new Point(205, 119);
-            txt_ExpectedManualConsentCount.Name = "txt_ExpectedManualConsentCount";
-            txt_ExpectedManualConsentCount.Size = new Size(99, 23);
-            txt_ExpectedManualConsentCount.TabIndex = 2;
-            toolTip1.SetToolTip(txt_ExpectedManualConsentCount, "Enter the number of physical manual consent forms identified in the original school batch. Count each submitted manual consent form once, including a form later merged with a digital consent PDF.");
-            //
+            // 
             // lbl_ExpectedFileRoseCount
-            //
+            // 
             lbl_ExpectedFileRoseCount.AutoSize = true;
             lbl_ExpectedFileRoseCount.Location = new Point(12, 146);
             lbl_ExpectedFileRoseCount.Name = "lbl_ExpectedFileRoseCount";
-            lbl_ExpectedFileRoseCount.Size = new Size(91, 15);
+            lbl_ExpectedFileRoseCount.Size = new Size(108, 20);
+            lbl_ExpectedFileRoseCount.TabIndex = 5;
             lbl_ExpectedFileRoseCount.Text = "FileRose Forms";
-            //
-            // txt_ExpectedFileRoseCount
-            //
-            txt_ExpectedFileRoseCount.Location = new Point(205, 143);
-            txt_ExpectedFileRoseCount.Name = "txt_ExpectedFileRoseCount";
-            txt_ExpectedFileRoseCount.Size = new Size(99, 23);
-            txt_ExpectedFileRoseCount.TabIndex = 3;
-            toolTip1.SetToolTip(txt_ExpectedFileRoseCount, "Enter the number of physical FileRose forms identified in the original school batch. Each scanned FileRose PDF page represents one physical FileRose form; multiple pages in one PDF are separate forms merged before upload.");
             // 
             // grpConfig
             // 
@@ -329,11 +349,11 @@ namespace OrchestratorUi
             rtxt_Log.BackColor = Color.Black;
             rtxt_Log.Font = new Font("Consolas", 9F);
             rtxt_Log.ForeColor = Color.LimeGreen;
-            rtxt_Log.Location = new Point(12, 544);
+            rtxt_Log.Location = new Point(12, 584);
             rtxt_Log.Name = "rtxt_Log";
             rtxt_Log.ReadOnly = true;
             rtxt_Log.ScrollBars = RichTextBoxScrollBars.Vertical;
-            rtxt_Log.Size = new Size(1094, 147);
+            rtxt_Log.Size = new Size(1094, 107);
             rtxt_Log.TabIndex = 1;
             rtxt_Log.Text = "";
             // 
@@ -382,7 +402,7 @@ namespace OrchestratorUi
             gb_Phase1.Controls.Add(lbl_Phase1Progress);
             gb_Phase1.Location = new Point(790, 12);
             gb_Phase1.Name = "gb_Phase1";
-            gb_Phase1.Size = new Size(316, 120);
+            gb_Phase1.Size = new Size(379, 120);
             gb_Phase1.TabIndex = 3;
             gb_Phase1.TabStop = false;
             gb_Phase1.Text = "Phase 1 — PHIS Client ID Search";
@@ -455,7 +475,7 @@ namespace OrchestratorUi
             gb_UploadPhis.Controls.Add(lbl_Phase3Progress);
             gb_UploadPhis.Location = new Point(790, 140);
             gb_UploadPhis.Name = "gb_UploadPhis";
-            gb_UploadPhis.Size = new Size(316, 160);
+            gb_UploadPhis.Size = new Size(379, 160);
             gb_UploadPhis.TabIndex = 4;
             gb_UploadPhis.TabStop = false;
             gb_UploadPhis.Text = "Phase 3 — PHIS Document Upload";
@@ -481,6 +501,7 @@ namespace OrchestratorUi
             // grp_Phase4Auditing
             // 
             grp_Phase4Auditing.Controls.Add(btn_DocumentReconciliationAudit);
+            grp_Phase4Auditing.Controls.Add(btn_VerifyDocumentsOnPhis);
             grp_Phase4Auditing.Controls.Add(txt_ExpectedFileRoseCount);
             grp_Phase4Auditing.Controls.Add(lbl_ExpectedFileRoseCount);
             grp_Phase4Auditing.Controls.Add(txt_ExpectedManualConsentCount);
@@ -490,7 +511,7 @@ namespace OrchestratorUi
             grp_Phase4Auditing.Controls.Add(btn_ClientIdentityPreAudit);
             grp_Phase4Auditing.Location = new Point(790, 310);
             grp_Phase4Auditing.Name = "grp_Phase4Auditing";
-            grp_Phase4Auditing.Size = new Size(316, 225);
+            grp_Phase4Auditing.Size = new Size(379, 268);
             grp_Phase4Auditing.TabIndex = 5;
             grp_Phase4Auditing.TabStop = false;
             grp_Phase4Auditing.Text = "Phase 4 — Post-Upload Audit & Review";
@@ -598,7 +619,7 @@ namespace OrchestratorUi
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(1137, 706);
+            ClientSize = new Size(1237, 709);
             Controls.Add(bt_PdfSplit);
             Controls.Add(tx_PdfSplitPages);
             Controls.Add(bt_PdfMerge);
@@ -622,6 +643,7 @@ namespace OrchestratorUi
             gb_PreUpload.ResumeLayout(false);
             gb_UploadPhis.ResumeLayout(false);
             grp_Phase4Auditing.ResumeLayout(false);
+            grp_Phase4Auditing.PerformLayout();
             groupBox1.ResumeLayout(false);
             groupBox1.PerformLayout();
             ResumeLayout(false);
@@ -655,6 +677,7 @@ namespace OrchestratorUi
         private GroupBox grp_Phase4Auditing;
         private Button btn_ClientIdentityPreAudit;
         private Button btn_DocumentReconciliationAudit;
+        private Button btn_VerifyDocumentsOnPhis;
         private TextBox txt_OriginalDigitalConsentCount;
         private TextBox txt_ExpectedManualConsentCount;
         private TextBox txt_ExpectedFileRoseCount;
