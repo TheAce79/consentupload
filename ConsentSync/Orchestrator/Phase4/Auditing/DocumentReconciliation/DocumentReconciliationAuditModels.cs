@@ -15,6 +15,26 @@ public enum ConsentPageOrigin
     Unknown
 }
 
+public enum ReconciliationCountSource
+{
+    UploaderConfirmedFromSnbWebsite = 1,
+    UploaderConfirmedFromPhysicalBatch = 2
+}
+
+public enum BulkSourceCrossCheckStatus
+{
+    Unavailable = 0,
+    Match = 1,
+    Mismatch = 2
+}
+
+public sealed class DocumentReconciliationAuditRequest
+{
+    public int OriginalDigitalConsentSubmissions { get; init; }
+    public int ExpectedManualConsentForms { get; init; }
+    public int ExpectedFileRoseForms { get; init; }
+}
+
 public sealed class DocumentReconciliationIssue
 {
     public string Code { get; init; } = string.Empty;
@@ -26,8 +46,35 @@ public sealed class DocumentReconciliationIssue
     public bool AffectsCompleteness { get; init; }
 }
 
+public sealed class FileRoseReconciliationDetail
+{
+    public string ClientId { get; init; } = string.Empty;
+    public string LastName { get; init; } = string.Empty;
+    public string FirstName { get; init; } = string.Empty;
+    public string DocumentTitle { get; init; } = string.Empty;
+    public string ArchivePath { get; init; } = string.Empty;
+    public int PageCount { get; init; }
+    public int PhysicalForms => PageCount;
+    public int AdditionalMergedForms => Math.Max(0, PageCount - 1);
+    public bool ContainsMultipleForms => PageCount > 1;
+
+    [Obsolete("FileRose pages represent separate physical forms. Use AdditionalMergedForms.")]
+    public int ContinuationPages => AdditionalMergedForms;
+    public bool HasMatchingConsentClient { get; init; }
+    public bool IsTrusted { get; init; }
+    public string Status { get; init; } = string.Empty;
+}
+
 public sealed class DocumentReconciliationAuditResult
 {
+    public int OriginalDigitalConsentSubmissions { get; init; }
+    public ReconciliationCountSource DigitalConsentCountSource { get; init; }
+    public ReconciliationCountSource ManualConsentCountSource { get; init; }
+    public ReconciliationCountSource FileRoseCountSource { get; init; }
+    public int UniqueDigitalConsentClients { get; init; }
+    public int? AdditionalDigitalSourceSubmissions { get; init; }
+    public BulkSourceCrossCheckStatus BulkCrossCheckStatus { get; init; }
+    public int? BulkCalculatedDigitalSubmissions { get; init; }
     public string SelectedGrade { get; init; } = string.Empty;
     public int ConfiguredConsentVaccineCount { get; init; }
     public IReadOnlyList<string> ConfiguredPhisAntigens { get; init; } = Array.Empty<string>();
@@ -40,7 +87,10 @@ public sealed class DocumentReconciliationAuditResult
     public int ReadableConsentArchiveFiles { get; init; }
     public int ReadableFileRoseArchiveFiles { get; init; }
     public int ConsentArchiveCopies { get; init; }
-    public int FileRoseDocuments { get; init; }
+    public int FileRosePdfDocuments { get; init; }
+
+    [Obsolete("Use FileRosePdfDocuments.")]
+    public int FileRoseDocuments => FileRosePdfDocuments;
     public int UniqueFileRoseClientIds { get; init; }
     public int UniqueConsentClientIds { get; init; }
     public int ExpectedPhysicalConsentClients { get; init; }
@@ -65,9 +115,22 @@ public sealed class DocumentReconciliationAuditResult
     public int ConsentPages { get; init; }
     public int DigitalConsentPages { get; init; }
     public int ManualConsentPages { get; init; }
+    public int ExpectedManualConsentForms { get; init; }
+    public int DetectedManualConsentForms => ManualConsentPages;
+    public int ManualConsentVariance => DetectedManualConsentForms - ExpectedManualConsentForms;
+    public bool ManualConsentCountMatches => DetectedManualConsentForms == ExpectedManualConsentForms;
     public int BlankConsentPages { get; init; }
     public int UnknownConsentPages { get; init; }
     public int FileRosePages { get; init; }
+    public int ExpectedFileRoseForms { get; init; }
+    public int DetectedFileRoseForms { get; init; }
+    public int FileRoseFormVariance => DetectedFileRoseForms - ExpectedFileRoseForms;
+    public bool FileRoseFormCountMatches => DetectedFileRoseForms == ExpectedFileRoseForms;
+    public int MultiPageFileRoseDocuments { get; init; }
+    public int AdditionalMergedFileRoseForms { get; init; }
+    public int FileRoseClientsWithMatchingConsent { get; init; }
+    public int FileRoseClientsWithoutMatchingConsent { get; init; }
+    public IReadOnlyList<FileRoseReconciliationDetail> FileRoseDetails { get; init; } = Array.Empty<FileRoseReconciliationDetail>();
     public int InvalidDocumentTitleRows { get; init; }
     public int InvalidIsFeuilleRoseRows { get; init; }
     public int PdfPageCountMismatchFiles { get; init; }
@@ -78,6 +141,9 @@ public sealed class DocumentReconciliationAuditResult
 
     public bool HasReviewIssues => Issues.Any(issue => issue.Severity is DocumentReconciliationIssueSeverity.Warning or DocumentReconciliationIssueSeverity.Error);
     public bool CountsAreComplete => !Issues.Any(issue => issue.AffectsCompleteness);
+    public bool PhysicalCountsAvailable => CountsAreComplete;
+    public bool OverallPhysicalReconciliationReady => PhysicalCountsAvailable && ManualConsentCountMatches && FileRoseFormCountMatches;
+    public bool HasIntegrityWarnings => HasReviewIssues;
 }
 
 public static class DocumentReconciliationIssueCodes
@@ -100,4 +166,9 @@ public static class DocumentReconciliationIssueCodes
     public const string ConsentVaccineCopyContentMismatch = "CONSENT_VACCINE_COPY_CONTENT_MISMATCH";
     public const string DuplicateFileRoseRow = "DUPLICATE_FILEROSE_ROW";
     public const string MultipleFileRoseDocumentsForClient = "MULTIPLE_FILEROSE_DOCUMENTS_FOR_CLIENT";
+    public const string SnbSourceCountBelowUniqueClientCount = "SNB_SOURCE_COUNT_BELOW_UNIQUE_CLIENT_COUNT";
+    public const string BulkSourceCrossCheckMismatch = "BULK_SOURCE_CROSS_CHECK_MISMATCH";
+    public const string DocumentTitleClientIdMismatch = "DOCUMENT_TITLE_CLIENT_ID_MISMATCH";
+    public const string FileRoseClientWithoutConsent = "FILEROSE_CLIENT_WITHOUT_CONSENT";
+    public const string FileRoseMultipleFormsMerged = "FILEROSE_MULTIPLE_FORMS_MERGED";
 }

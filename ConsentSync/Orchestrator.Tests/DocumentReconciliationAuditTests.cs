@@ -137,7 +137,7 @@ public sealed class DocumentReconciliationAuditTests
     }
 
     [Fact]
-    public void Mismatched_vaccine_copies_are_not_trusted()
+    public void Mismatched_vaccine_copies_remain_a_diagnostic_warning_without_changing_physical_readiness()
     {
         using var fixture = new AuditFixture();
         fixture.Write("123_hpv.pdf", "packet-one");
@@ -146,25 +146,140 @@ public sealed class DocumentReconciliationAuditTests
             "123,123_hpv,false,HPV-9,1\n123,123_tdap,false,Tetanus (T),1\n");
 
         Assert.Equal(1, result.ExpectedPhysicalConsentClients);
-        Assert.Equal(0, result.TrustedConsentClientsCounted);
+        Assert.Equal(1, result.TrustedConsentClientsCounted);
         Assert.Equal(1, result.ConsentVaccineCopyMismatchGroups);
-        Assert.Equal(0, result.ConsentPages);
-        Assert.False(result.CountsAreComplete);
+        Assert.Equal(1, result.ConsentPages);
+        Assert.True(result.CountsAreComplete);
+        Assert.True(result.HasIntegrityWarnings);
+        Assert.True(result.OverallPhysicalReconciliationReady);
+        Assert.Contains(result.Issues, issue => issue.Code == DocumentReconciliationIssueCodes.ConsentVaccineCopyContentMismatch && issue.Severity == DocumentReconciliationIssueSeverity.Warning);
+
+        string report = File.ReadAllText(result.OutputPath);
+        Assert.Contains(DocumentReconciliationIssueCodes.ConsentVaccineCopyContentMismatch, report);
+        Assert.DoesNotContain("Technical archive integrity", report);
     }
 
     [Fact]
     public void Multiple_filerose_paths_do_not_increase_trusted_document_count()
     {
         using var fixture = new AuditFixture();
+        fixture.Write("123_hpv.pdf", "packet");
         fixture.WriteRose("123_rose_a.pdf", "one");
         fixture.WriteRose("123_rose_b.pdf", "two");
         DocumentReconciliationAuditResult result = fixture.Run(
-            "123,123_rose_a,true,,1\n123,123_rose_b,true,,1\n");
+            "123,123_hpv,false,HPV-9,1\n123,123_rose_a,true,,1\n123,123_rose_b,true,,1\n");
 
-        Assert.Equal(0, result.FileRoseDocuments);
-        Assert.Equal(4, result.FileRosePages);
+        Assert.Equal(0, result.FileRosePdfDocuments);
+        Assert.Equal(0, result.FileRosePages);
         Assert.Equal(1, result.MultipleFileRoseDocumentClientGroups);
         Assert.False(result.CountsAreComplete);
+    }
+
+    [Fact]
+    public void Entered_source_counts_reconcile_manual_and_filerose_forms_independently()
+    {
+        using var fixture = new AuditFixture();
+        fixture.Write("123_hpv.pdf", "packet");
+        fixture.WriteRose("123_rose.pdf", "rose");
+
+        DocumentReconciliationAuditResult result = fixture.Run(
+            "123,123_hpv,false,HPV-9,1\n123,123_rose,true,,1\n",
+            new DocumentReconciliationAuditRequest
+            {
+                OriginalDigitalConsentSubmissions = 1,
+                ExpectedManualConsentForms = 0,
+                ExpectedFileRoseForms = 2
+            });
+
+        Assert.Equal(1, result.UniqueDigitalConsentClients);
+        Assert.Equal(0, result.AdditionalDigitalSourceSubmissions);
+        Assert.Equal(0, result.DetectedManualConsentForms);
+        Assert.Equal(2, result.DetectedFileRoseForms);
+        Assert.True(result.OverallPhysicalReconciliationReady);
+    }
+
+    [Fact]
+    public void Source_count_below_unique_clients_is_a_warning_not_a_physical_failure()
+    {
+        using var fixture = new AuditFixture();
+        fixture.Write("123_hpv.pdf", "packet");
+        DocumentReconciliationAuditResult result = fixture.Run(
+            "123,123_hpv,false,HPV-9,1\n",
+            new DocumentReconciliationAuditRequest { OriginalDigitalConsentSubmissions = 0 });
+
+        Assert.Null(result.AdditionalDigitalSourceSubmissions);
+        Assert.Contains(result.Issues, issue => issue.Code == DocumentReconciliationIssueCodes.SnbSourceCountBelowUniqueClientCount);
+        Assert.True(result.PhysicalCountsAvailable);
+    }
+
+    [Fact]
+    public void Two_page_filerose_is_two_physical_forms_merged_in_one_pdf()
+    {
+        using var fixture = new AuditFixture();
+        fixture.WriteRose("123_rose.pdf", "rose");
+        DocumentReconciliationAuditResult result = fixture.Run(
+            "123,123_hpv,false,HPV-9,3\n123,123_rose,true,,1\n",
+            new DocumentReconciliationAuditRequest { ExpectedFileRoseForms = 2 });
+
+        Assert.Equal(1, result.FileRosePdfDocuments);
+        Assert.Equal(2, result.DetectedFileRoseForms);
+        Assert.Equal(2, result.FileRosePages);
+        Assert.Equal(1, result.MultiPageFileRoseDocuments);
+        Assert.Equal(1, result.AdditionalMergedFileRoseForms);
+        Assert.True(result.FileRoseFormCountMatches);
+    }
+
+    [Fact]
+    public void Filerose_without_a_same_batch_consent_is_untrusted()
+    {
+        using var fixture = new AuditFixture();
+        fixture.WriteRose("123_rose.pdf", "rose");
+        DocumentReconciliationAuditResult result = fixture.Run(
+            "123,123_rose,true,,1\n",
+            new DocumentReconciliationAuditRequest { ExpectedFileRoseForms = 1 });
+
+        Assert.Equal(0, result.DetectedFileRoseForms);
+        Assert.Equal(0, result.FileRosePages);
+        Assert.False(result.PhysicalCountsAvailable);
+        Assert.Contains(result.Issues, issue => issue.Code == DocumentReconciliationIssueCodes.FileRoseClientWithoutConsent);
+        Assert.False(Assert.Single(result.FileRoseDetails).IsTrusted);
+    }
+
+    [Fact]
+    public void Filerose_title_mismatch_is_a_warning_when_consent_matches()
+    {
+        using var fixture = new AuditFixture();
+        fixture.Write("123_hpv.pdf", "packet");
+        fixture.WriteRose("999_rose.pdf", "rose");
+        DocumentReconciliationAuditResult result = fixture.Run(
+            "123,123_hpv,false,HPV-9,1\n123,999_rose,true,,1\n",
+            new DocumentReconciliationAuditRequest { ExpectedFileRoseForms = 2 });
+
+        Assert.Equal(2, result.DetectedFileRoseForms);
+        Assert.Contains(result.Issues, issue => issue.Code == DocumentReconciliationIssueCodes.DocumentTitleClientIdMismatch);
+        Assert.True(Assert.Single(result.FileRoseDetails).IsTrusted);
+    }
+
+    [Fact]
+    public void Multi_page_filerose_represents_multiple_physical_forms()
+    {
+        using var fixture = new AuditFixture();
+        fixture.WriteRose("123_rose.pdf", "rose");
+        DocumentReconciliationAuditResult result = fixture.Run(
+            "123,123_hpv,false,HPV-9,3\n123,123_rose,true,,1\n",
+            new DocumentReconciliationAuditRequest { ExpectedFileRoseForms = 2 });
+
+        Assert.Equal(2, result.ExpectedFileRoseForms);
+        Assert.Equal(1, result.FileRosePdfDocuments);
+        Assert.Equal(2, result.DetectedFileRoseForms);
+        Assert.Equal(2, result.FileRosePages);
+        Assert.Equal(1, result.AdditionalMergedFileRoseForms);
+        Assert.True(result.FileRoseFormCountMatches);
+        Assert.Contains(result.Issues, issue => issue.Code == DocumentReconciliationIssueCodes.FileRoseMultipleFormsMerged);
+        Assert.Equal(
+            DocumentReconciliationIssueSeverity.Information,
+            Assert.Single(result.Issues, issue => issue.Code == DocumentReconciliationIssueCodes.FileRoseMultipleFormsMerged).Severity);
+        Assert.True(result.OverallPhysicalReconciliationReady);
     }
 
     private sealed class ThrowingInspector : IPdfAuditInspector
@@ -191,13 +306,13 @@ public sealed class DocumentReconciliationAuditTests
         public void Write(string name, string contents) => File.WriteAllText(Path.Combine(_consent, name), contents, Encoding.UTF8);
         public void WriteRose(string name, string contents) => File.WriteAllText(Path.Combine(_rose, name), contents, Encoding.UTF8);
 
-        public DocumentReconciliationAuditResult Run(string rows)
+        public DocumentReconciliationAuditResult Run(string rows, DocumentReconciliationAuditRequest request = null)
         {
             string csv = Path.Combine(_root, "Verification_Upload.csv");
             File.WriteAllText(csv, "ClientID,Document Title,IsFeuilleRose,PhisAntigen,VerifClientIdStatus\n" + rows, Encoding.UTF8);
             var config = new DocumentReconciliationAuditService.AuditConfiguration("7", ["HPV9", "Tdap"], ["HPV-9", "Tetanus (T)"], string.Empty);
             var service = new DocumentReconciliationAuditService(this, () => config);
-            return service.ExecuteAudit(new DocumentReconciliationAuditService.AuditPaths(csv, _consent, _rose, Path.Combine(_root, "report.txt")));
+            return service.ExecuteAudit(request ?? new DocumentReconciliationAuditRequest(), new DocumentReconciliationAuditService.AuditPaths(csv, _consent, _rose, Path.Combine(_root, "report.txt")));
         }
 
         public PdfInspection Inspect(string path, bool includeConsentEvidence)

@@ -17,6 +17,7 @@ using Orchestrator.PrePhase3;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Globalization;
 using static Orchestrator.BulkPdfExtraction;
 using static Orchestrator.Phase1.Phase1Orchestrator;
 using static Orchestrator.Phase3.Phase3Orchestrator;
@@ -1647,6 +1648,22 @@ namespace OrchestratorUi
 
         private async void btn_DocumentReconciliationAudit_Click(object sender, EventArgs e)
         {
+            if (!TryParseRequiredCount(txt_OriginalDigitalConsentCount.Text, out int digitalCount))
+            {
+                MessageBox.Show(this, "Please verify the total number of digital consent submissions for this school/grade batch on the SNB website and enter the count before running Document Reconciliation.", "Original Digital Consent Count Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (!TryParseRequiredCount(txt_ExpectedManualConsentCount.Text, out int manualCount))
+            {
+                MessageBox.Show(this, "Enter the number of physical manual consent forms identified in the original school batch before running Document Reconciliation.", "Manual Consent Count Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (!TryParseRequiredCount(txt_ExpectedFileRoseCount.Text, out int fileRoseCount))
+            {
+                MessageBox.Show(this, "Enter the number of physical FileRose forms identified in the original school batch before running Document Reconciliation.", "FileRose Form Count Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             const string buttonText = "Document Reconciliation Audit";
             btn_DocumentReconciliationAudit.Enabled = false;
             btn_DocumentReconciliationAudit.Text = "Running Audit...";
@@ -1655,7 +1672,13 @@ namespace OrchestratorUi
             {
                 LoggerService.LogInformation("PHASE 4 - DOCUMENT RECONCILIATION AUDIT");
                 var service = new DocumentReconciliationAuditService();
-                DocumentReconciliationAuditResult result = await Task.Run(service.ExecuteAudit);
+                var request = new DocumentReconciliationAuditRequest
+                {
+                    OriginalDigitalConsentSubmissions = digitalCount,
+                    ExpectedManualConsentForms = manualCount,
+                    ExpectedFileRoseForms = fileRoseCount
+                };
+                DocumentReconciliationAuditResult result = await Task.Run(() => service.ExecuteAudit(request));
 
                 LoggerService.LogInformation($"   Selected grade                 : {result.SelectedGrade}");
                 LoggerService.LogInformation($"   Configured vaccine count       : {result.ConfiguredConsentVaccineCount}");
@@ -1667,23 +1690,21 @@ namespace OrchestratorUi
                 LoggerService.LogInformation($"   Identical copies collapsed     : {result.IdenticalConsentArchiveCopiesCollapsed}");
                 LoggerService.LogInformation($"   Vaccine-copy mismatch groups   : {result.ConsentVaccineCopyMismatchGroups}");
 
-                string outcome = !result.CountsAreComplete
-                    ? "The totals may be incomplete."
-                    : result.HasReviewIssues
-                        ? "The totals were calculated, but review items were detected."
-                        : "The totals were calculated without review items.";
+                string physicalOutcome = result.OverallPhysicalReconciliationReady ? "READY" : "RETURN TO UPLOADER";
 
                 MessageBox.Show(this,
                     $"Document Reconciliation Audit completed.\n\n" +
                     $"Selected grade: {result.SelectedGrade}\n" +
                     $"Configured vaccines per consent: {result.ConfiguredConsentVaccineCount}\n\n" +
-                    $"PHIS consent upload rows: {result.ConsentUploadRows}\n" +
-                    $"Physical consent clients: {result.ExpectedPhysicalConsentClients}\n" +
-                    $"Vaccine-specific rows collapsed: {result.VaccineSpecificConsentRowsCollapsed}\n\n" +
-                    $"Digital consent submissions: {result.DigitalConsentPages}\n" +
-                    $"Manual consent submissions: {result.ManualConsentPages}\n" +
-                    $"FileRose documents: {result.FileRoseDocuments}\n\n" +
-                    $"{outcome}\n\nOutput:\n{result.OutputPath}",
+                    $"Digital submissions (SNB): {result.OriginalDigitalConsentSubmissions}\n" +
+                    $"Unique digital clients: {result.UniqueDigitalConsentClients}\n" +
+                    $"Additional digital submissions: {result.AdditionalDigitalSourceSubmissions?.ToString() ?? "Not calculated"}\n\n" +
+                    $"Manual forms: expected {result.ExpectedManualConsentForms}, detected {result.DetectedManualConsentForms}\n" +
+                    $"FileRose forms: expected {result.ExpectedFileRoseForms}, detected {result.DetectedFileRoseForms}\n" +
+                    $"FileRose PDF documents: {result.FileRosePdfDocuments}\n" +
+                    $"FileRose pages: {result.FileRosePages}\n\n" +
+                    $"Overall physical reconciliation: {physicalOutcome}" +
+                    $"\n\nOutput:\n{result.OutputPath}",
                     "Document Reconciliation Audit", result.HasReviewIssues ? MessageBoxButtons.OK : MessageBoxButtons.OK,
                     result.HasReviewIssues ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
             }
@@ -1706,6 +1727,9 @@ namespace OrchestratorUi
                 btn_DocumentReconciliationAudit.Text = buttonText;
             }
         }
+
+        private static bool TryParseRequiredCount(string rawValue, out int value) =>
+            int.TryParse(rawValue.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out value) && value >= 0;
 
         private async void bt_Upload_Click(object sender, EventArgs e)
         {
