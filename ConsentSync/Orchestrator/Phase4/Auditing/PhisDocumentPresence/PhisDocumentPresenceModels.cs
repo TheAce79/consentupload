@@ -2,12 +2,15 @@ namespace Orchestrator.Phase4.Auditing.PhisDocumentPresence;
 
 public enum PhisDocumentPresenceStatus { Found, Missing, VerificationError }
 
+public enum PhisVerificationStatus { NotVerified = 0, VerifiedOk = 1, VerifiedKo = 2 }
+
 public sealed class PhisDocumentPresenceTarget
 {
     public string ClientId { get; init; } = string.Empty;
     public string DocumentTitle { get; init; } = string.Empty;
     public bool IsFileRose { get; init; }
     public string PhisAntigen { get; init; } = string.Empty;
+    internal string VerificationKey { get; init; } = string.Empty;
 }
 
 public sealed class PhisDocumentPresenceVerificationPlan
@@ -16,6 +19,11 @@ public sealed class PhisDocumentPresenceVerificationPlan
     public int EligibleRows { get; init; }
     public int DuplicateTargetsCollapsed { get; init; }
     public int ExcludedAcceptedExceptions { get; init; }
+    public int AlreadyVerifiedRows { get; init; }
+    public int PendingRows { get; init; }
+    public bool BatchLimitReached { get; init; }
+    public int RemainingAfterBatch { get; init; }
+    public string VerificationCsvPath { get; init; } = string.Empty;
     public IReadOnlyList<PhisDocumentPresenceTarget> Targets { get; init; } = Array.Empty<PhisDocumentPresenceTarget>();
 }
 
@@ -52,6 +60,7 @@ public sealed class PhisDocumentPresencePreconditionItem
     public string DocumentTitle { get; init; } = string.Empty;
     public string VerifStatus { get; init; } = string.Empty;
     public string VerifClientIdStatus { get; init; } = string.Empty;
+    public string PhisVerificationStatus { get; init; } = string.Empty;
     public string Reason { get; init; } = string.Empty;
 }
 

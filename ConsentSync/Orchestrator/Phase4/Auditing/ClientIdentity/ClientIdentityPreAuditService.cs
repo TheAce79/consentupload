@@ -15,7 +15,7 @@ public sealed class ClientIdentityPreAuditService
     private static readonly HashSet<string> ClientIdentityAuditHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
         "VerifClientIdStatus", "VerifReasonCode", "VerificationType", "RosterClientName",
-        "VerifNameResult", "VerifNameScore", "VerifError"
+        "VerifNameResult", "VerifNameScore", "VerifError", "PhisVerificationStatus"
     };
 
     private readonly DeterministicNameComparer _nameComparer = new();
@@ -55,7 +55,7 @@ public sealed class ClientIdentityPreAuditService
         var acceptedExceptionClientIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var manualClientIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var outputHeaders = uploadTable.Headers.Where(header => !IsAuditHeader(header)).ToList();
-        outputHeaders.AddRange(["VerifClientIdStatus", "VerifReasonCode", "VerificationType", "RosterClientName", "VerifNameResult", "VerifError"]);
+        outputHeaders.AddRange(["VerifClientIdStatus", "VerifReasonCode", "VerificationType", "RosterClientName", "VerifNameResult", "VerifError", "PhisVerificationStatus"]);
         int[] retainedIndexes = uploadTable.Headers.Select((header, index) => new { Header = header, Index = index }).Where(item => !IsAuditHeader(item.Header)).Select(item => item.Index).ToArray();
         var outputRows = new List<string[]>(uploadTable.Rows.Count);
 
@@ -78,6 +78,7 @@ public sealed class ClientIdentityPreAuditService
             values.Add(rowResult.RosterClientName);
             values.Add(rowResult.NameComparisonResult.ToString());
             values.Add(rowResult.Error);
+            values.Add("0");
             outputRows.Add(values.ToArray());
         }
 

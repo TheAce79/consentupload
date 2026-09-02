@@ -27,7 +27,8 @@ public partial class UploadConsent
             EnsureReportCanBeCommitted(reportPath);
             if (!File.Exists(verificationCsvPath)) throw new FileNotFoundException("Verification_Upload.csv was not found. Run the Client Identity Pre-Audit first.", verificationCsvPath);
 
-            PhisDocumentPresenceVerificationPlan plan = PhisDocumentPresenceVerificationService.Prepare(verificationCsvPath);
+            var phisConfig = ConfigurationService.GetPhisConfig();
+            PhisDocumentPresenceVerificationPlan plan = PhisDocumentPresenceVerificationService.Prepare(verificationCsvPath, phisConfig.BatchSize);
             if (!bt_Upload.Enabled || !bt_SearchClientId.Enabled)
             {
                 MessageBox.Show(this, "PHIS Document Verification cannot start while another PHIS operation is running. Wait for the current operation to complete and try again.", "PHIS Operation In Progress", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -37,7 +38,7 @@ public partial class UploadConsent
             if (plan.Targets.Count == 0)
             {
                 PhisDocumentPresenceReport.Commit(reportPath, new PhisDocumentPresenceVerificationResult { Plan = plan });
-                MessageBox.Show(this, "No eligible documents were available for PHIS verification. No PHIS session was opened.", "PHIS Verification", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, "All eligible documents are already verified on PHIS. No PHIS session was opened.", "PHIS Verification Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -66,8 +67,14 @@ public partial class UploadConsent
                 return;
             }
 
+            if (result.Plan.BatchLimitReached)
+            {
+                MessageBox.Show(this, $"PHIS verification batch completed.\n\nVerified OK this batch: {result.FoundDocuments}\nVerified KO this batch: {result.MissingDocuments + result.VerificationErrors}\nRemaining for next batch: {result.Plan.RemainingAfterBatch}\n\nProgress has been saved. Click Verify Documents on PHIS again to continue.", "PHIS Verification Batch Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             PhisDocumentPresenceReport.Commit(reportPath, result);
-            MessageBox.Show(this, $"PHIS document verification completed.\n\nConfirmed present: {result.FoundDocuments}\nMissing: {result.MissingDocuments}\nCould not verify: {result.VerificationErrors}", result.AllExpectedDocumentsPresent ? "PHIS Verification Complete" : "PHIS Verification Requires Review", MessageBoxButtons.OK, result.AllExpectedDocumentsPresent ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            MessageBox.Show(this, $"PHIS document verification completed.\n\nVerified OK: {result.FoundDocuments}\nVerified KO: {result.MissingDocuments + result.VerificationErrors}\nMissing: {result.MissingDocuments}\nCould not verify: {result.VerificationErrors}", result.AllExpectedDocumentsPresent ? "PHIS Verification Complete" : "PHIS Verification Requires Review", MessageBoxButtons.OK, result.AllExpectedDocumentsPresent ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
         }
         catch (PhisDocumentPresencePreconditionException ex)
         {
