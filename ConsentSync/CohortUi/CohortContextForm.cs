@@ -2,7 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using ConsentSync.Data;
 using ConsentSync.Data.Entities;
+using ConsentSyncCore.Services.Csv;
 using ConsentSyncCore.Services.Configuration;
+using ConsentSyncCore.Services.Pdf;
 
 namespace CohortUi;
 
@@ -34,7 +36,9 @@ public partial class CohortContextForm : Form
         SetFormEnabled(false);
         try
         {
-            _dbManager = new DbManager(ConfigurationService.GetConfiguration());
+            var configuration = ConfigurationService.GetConfiguration();
+            CohortWorkspaceService.EnsureDirectories(configuration);
+            _dbManager = new DbManager(configuration);
             await _dbManager.InitializeAsync();
 
             _activeContext = await _dbManager.GetActiveCohortContextAsync()
@@ -43,6 +47,7 @@ public partial class CohortContextForm : Form
             await LoadPrefixesAsync(_activeContext.Prefix);
             await LoadLocationsAsync(_activeContext.Location);
             BindContext(_activeContext);
+            RefreshStandardizedCsvPreview();
             await RefreshClientListSearchAsync(_activeContext.ClientListName);
         }
         catch (Exception ex)
@@ -74,6 +79,12 @@ public partial class CohortContextForm : Form
             return;
         }
 
+        if (!TryValidateStandardizedOutputPath(context.ClientListName, out validationMessage))
+        {
+            MessageBox.Show(this, validationMessage, "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         btn_SaveCohortContext.Enabled = false;
         btn_SaveCohortContext.Text = "Saving...";
 
@@ -90,6 +101,8 @@ public partial class CohortContextForm : Form
 
             UpdateAppsettings(context);
             ConfigurationService.ReloadConfiguration();
+            CohortWorkspaceService.EnsureDirectories(ConfigurationService.GetConfiguration());
+            RefreshStandardizedCsvPreview();
             await RefreshClientListSearchAsync(context.ClientListName);
             RestoreSaveButton();
 
@@ -117,8 +130,48 @@ public partial class CohortContextForm : Form
         }
     }
 
-    private void OnContextParameterChanged(object? sender, EventArgs e) =>
+    private async void btn_ExtractCsv_Click(object? sender, EventArgs e)
+    {
+        SetFormEnabled(false);
+        btn_ExtractCsv.Text = "Extracting...";
+        try
+        {
+            var configuration = ConfigurationService.GetConfiguration();
+            var (_, inputPdfDir, _) = CohortWorkspaceService.EnsureDirectories(configuration);
+            string clientListName = txt_ClientListName.Text.Trim();
+            string targetCsvPath = CohortWorkspaceService.GetStandardizedInputCsvPath(configuration, clientListName);
+
+            var parser = new PdfRosterParserService();
+            var records = await Task.Run(() => parser.ExtractRecordsFromPdfFolder(inputPdfDir));
+            if (records.Count == 0)
+            {
+                MessageBox.Show(this,
+                    $"No client records were found in PDFs inside:\n{inputPdfDir}\n\nPlace clinic schedule PDFs in this folder and try again.",
+                    "No Records Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            await Task.Run(() => CsvExporterService.SaveToCsv(records, targetCsvPath));
+            MessageBox.Show(this,
+                $"Extracted {records.Count} client record(s) from PDF roster.\n\nInput CSV created at:\n{targetCsvPath}",
+                "Extraction Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"PDF roster extraction failed.\n\n{ex.Message}", "Extraction Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            btn_ExtractCsv.Text = "Extract CSV from PDFs";
+            SetFormEnabled(true);
+        }
+    }
+
+    private void OnContextParameterChanged(object? sender, EventArgs e)
+    {
         UpdateClientListNameFromContextParameters();
+        RefreshStandardizedCsvPreview();
+    }
 
     private async void btn_LoadContext_Click(object? sender, EventArgs e) =>
         await LoadSelectedCohortContextAsync();
@@ -140,15 +193,15 @@ public partial class CohortContextForm : Form
 
     private void txt_ClientListName_TextChanged(object? sender, EventArgs e)
     {
-        if (_isSynchronizingClientListName || _isBindingContext)
+        if (!_isSynchronizingClientListName && !_isBindingContext)
         {
-            return;
+            _isUserCustomOverride = !string.Equals(
+                txt_ClientListName.Text.Trim(),
+                BuildDerivedClientListName(),
+                StringComparison.OrdinalIgnoreCase);
         }
 
-        _isUserCustomOverride = !string.Equals(
-            txt_ClientListName.Text.Trim(),
-            BuildDerivedClientListName(),
-            StringComparison.OrdinalIgnoreCase);
+        RefreshStandardizedCsvPreview();
     }
 
     private void BindContext(CohortContextEntity context)
@@ -181,6 +234,7 @@ public partial class CohortContextForm : Form
             txt_ClientListName.Text.Trim(),
             BuildDerivedClientListName(),
             StringComparison.OrdinalIgnoreCase);
+        RefreshStandardizedCsvPreview();
     }
 
     private bool TryBuildContextFromFields(out CohortContextEntity context, out string validationMessage)
@@ -234,6 +288,38 @@ public partial class CohortContextForm : Form
         }
 
         SetClientListNameText(BuildDerivedClientListName());
+    }
+
+    private void RefreshStandardizedCsvPreview()
+    {
+        try
+        {
+            txt_StandardizedCsvName.Text = CohortWorkspaceService.FormatStandardizedCsvFileName(
+                ConfigurationService.GetConfiguration(),
+                txt_ClientListName.Text);
+        }
+        catch
+        {
+            // Intermediate edits can be incomplete or invalid; saving shows the validation detail.
+            txt_StandardizedCsvName.Clear();
+        }
+    }
+
+    private static bool TryValidateStandardizedOutputPath(string clientListName, out string validationMessage)
+    {
+        try
+        {
+            _ = CohortWorkspaceService.GetStandardizedOutputCsvPath(
+                ConfigurationService.GetConfiguration(),
+                clientListName);
+            validationMessage = string.Empty;
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            validationMessage = $"The standardized CSV destination is invalid.\n\n{ex.Message}";
+            return false;
+        }
     }
 
     private string BuildDerivedClientListName() =>
@@ -316,6 +402,7 @@ public partial class CohortContextForm : Form
     private void SetFormEnabled(bool enabled)
     {
         grp_CohortContext.Enabled = enabled;
+        grp_PdfRosterExtraction.Enabled = enabled;
         btn_SaveCohortContext.Enabled = enabled;
     }
 
@@ -352,6 +439,12 @@ public partial class CohortContextForm : Form
                 return;
             }
 
+            if (!TryValidateStandardizedOutputPath(context.ClientListName, out string validationMessage))
+            {
+                MessageBox.Show(this, validationMessage, "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             bool activated = await _dbManager.SetActiveCohortContextAsync(context.CohortContextId);
             if (!activated)
             {
@@ -372,6 +465,7 @@ public partial class CohortContextForm : Form
             BindContext(context);
             UpdateAppsettings(context);
             ConfigurationService.ReloadConfiguration();
+            RefreshStandardizedCsvPreview();
             await RefreshClientListSearchAsync(context.ClientListName);
         }
         catch (Exception ex)

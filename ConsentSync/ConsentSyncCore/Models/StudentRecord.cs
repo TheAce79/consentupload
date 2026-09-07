@@ -6,20 +6,6 @@ using System.Threading.Tasks;
 
 namespace ConsentSyncCore.Models
 {
-    /// <summary>
-    /// Status of Client ID search for a student record
-    /// </summary>
-    public enum ClientIdStatus
-    {
-        /// <summary>Not yet searched</summary>
-        NotProcessed = 0,
-
-        /// <summary>Client ID found successfully</summary>
-        Found = 1,
-
-        /// <summary>Error occurred or no match found - needs manual review</summary>
-        NeedsManualReview = 2
-    }
     public class StudentRecord
     {
         public string LastName { get; set; } = string.Empty;

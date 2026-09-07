@@ -1,0 +1,20 @@
+namespace ConsentSyncCore.Models;
+
+public class ClinicPdfClientRecord
+{
+    public string? ClientId { get; set; }
+
+    public string FullName { get; set; } = string.Empty;
+
+    // Reserved for a future phase; do not infer name components from FullName.
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+    public string? MiddleName { get; set; }
+
+    /// <summary>Date of birth in yyyy/MM/dd format.</summary>
+    public string DateOfBirth { get; set; } = string.Empty;
+
+    public string? Medicare { get; set; }
+
+    public ClientIdStatus ClientIdStatus { get; set; } = ClientIdStatus.NotProcessed;
+}

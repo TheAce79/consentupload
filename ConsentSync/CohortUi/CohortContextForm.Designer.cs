@@ -21,6 +21,8 @@ partial class CohortContextForm
         cb_SearchClientListName = new ComboBox();
         lbl_SearchClientListName = new Label();
         btn_SaveCohortContext = new Button();
+        txt_StandardizedCsvName = new TextBox();
+        lbl_StandardizedCsvName = new Label();
         txt_ClientListName = new TextBox();
         lbl_ClientListName = new Label();
         txt_EncounterGroup = new TextBox();
@@ -35,7 +37,10 @@ partial class CohortContextForm
         lbl_Location = new Label();
         cb_Prefix = new ComboBox();
         lbl_Prefix = new Label();
+        grp_PdfRosterExtraction = new GroupBox();
+        btn_ExtractCsv = new Button();
         grp_CohortContext.SuspendLayout();
+        grp_PdfRosterExtraction.SuspendLayout();
         SuspendLayout();
         // 
         // grp_CohortContext
@@ -44,6 +49,8 @@ partial class CohortContextForm
         grp_CohortContext.Controls.Add(cb_SearchClientListName);
         grp_CohortContext.Controls.Add(lbl_SearchClientListName);
         grp_CohortContext.Controls.Add(btn_SaveCohortContext);
+        grp_CohortContext.Controls.Add(txt_StandardizedCsvName);
+        grp_CohortContext.Controls.Add(lbl_StandardizedCsvName);
         grp_CohortContext.Controls.Add(txt_ClientListName);
         grp_CohortContext.Controls.Add(lbl_ClientListName);
         grp_CohortContext.Controls.Add(txt_EncounterGroup);
@@ -60,7 +67,7 @@ partial class CohortContextForm
         grp_CohortContext.Controls.Add(lbl_Prefix);
         grp_CohortContext.Location = new Point(18, 18);
         grp_CohortContext.Name = "grp_CohortContext";
-        grp_CohortContext.Size = new Size(596, 414);
+        grp_CohortContext.Size = new Size(596, 450);
         grp_CohortContext.TabIndex = 0;
         grp_CohortContext.TabStop = false;
         grp_CohortContext.Text = "Phase 0 Cohort Context";
@@ -79,7 +86,6 @@ partial class CohortContextForm
         // 
         cb_SearchClientListName.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
         cb_SearchClientListName.AutoCompleteSource = AutoCompleteSource.CustomSource;
-        cb_SearchClientListName.DropDownStyle = ComboBoxStyle.DropDown;
         cb_SearchClientListName.FormattingEnabled = true;
         cb_SearchClientListName.Location = new Point(160, 39);
         cb_SearchClientListName.Name = "cb_SearchClientListName";
@@ -93,7 +99,7 @@ partial class CohortContextForm
         lbl_SearchClientListName.AutoSize = true;
         lbl_SearchClientListName.Location = new Point(18, 43);
         lbl_SearchClientListName.Name = "lbl_SearchClientListName";
-        lbl_SearchClientListName.Size = new Size(126, 20);
+        lbl_SearchClientListName.Size = new Size(102, 20);
         lbl_SearchClientListName.TabIndex = 0;
         lbl_SearchClientListName.Text = "Find saved list";
         // 
@@ -102,13 +108,30 @@ partial class CohortContextForm
         btn_SaveCohortContext.BackColor = Color.SeaGreen;
         btn_SaveCohortContext.FlatStyle = FlatStyle.Flat;
         btn_SaveCohortContext.ForeColor = Color.White;
-        btn_SaveCohortContext.Location = new Point(160, 360);
+        btn_SaveCohortContext.Location = new Point(160, 396);
         btn_SaveCohortContext.Name = "btn_SaveCohortContext";
         btn_SaveCohortContext.Size = new Size(180, 34);
         btn_SaveCohortContext.TabIndex = 17;
         btn_SaveCohortContext.Text = "Save Cohort Context";
         btn_SaveCohortContext.UseVisualStyleBackColor = false;
         btn_SaveCohortContext.Click += btn_SaveCohortContext_Click;
+        // 
+        // txt_StandardizedCsvName
+        // 
+        txt_StandardizedCsvName.Location = new Point(160, 304);
+        txt_StandardizedCsvName.Name = "txt_StandardizedCsvName";
+        txt_StandardizedCsvName.ReadOnly = true;
+        txt_StandardizedCsvName.Size = new Size(400, 27);
+        txt_StandardizedCsvName.TabIndex = 16;
+        // 
+        // lbl_StandardizedCsvName
+        // 
+        lbl_StandardizedCsvName.AutoSize = true;
+        lbl_StandardizedCsvName.Location = new Point(18, 307);
+        lbl_StandardizedCsvName.Name = "lbl_StandardizedCsvName";
+        lbl_StandardizedCsvName.Size = new Size(127, 20);
+        lbl_StandardizedCsvName.TabIndex = 15;
+        lbl_StandardizedCsvName.Text = "Standardized CSV";
         // 
         // txt_ClientListName
         // 
@@ -124,7 +147,7 @@ partial class CohortContextForm
         lbl_ClientListName.AutoSize = true;
         lbl_ClientListName.Location = new Point(18, 271);
         lbl_ClientListName.Name = "lbl_ClientListName";
-        lbl_ClientListName.Size = new Size(110, 20);
+        lbl_ClientListName.Size = new Size(111, 20);
         lbl_ClientListName.TabIndex = 13;
         lbl_ClientListName.Text = "Client list name";
         // 
@@ -140,7 +163,7 @@ partial class CohortContextForm
         lbl_EncounterGroup.AutoSize = true;
         lbl_EncounterGroup.Location = new Point(18, 235);
         lbl_EncounterGroup.Name = "lbl_EncounterGroup";
-        lbl_EncounterGroup.Size = new Size(121, 20);
+        lbl_EncounterGroup.Size = new Size(119, 20);
         lbl_EncounterGroup.TabIndex = 11;
         lbl_EncounterGroup.Text = "Encounter group";
         // 
@@ -156,7 +179,7 @@ partial class CohortContextForm
         lbl_Jurisdiction.AutoSize = true;
         lbl_Jurisdiction.Location = new Point(18, 199);
         lbl_Jurisdiction.Name = "lbl_Jurisdiction";
-        lbl_Jurisdiction.Size = new Size(82, 20);
+        lbl_Jurisdiction.Size = new Size(83, 20);
         lbl_Jurisdiction.TabIndex = 9;
         lbl_Jurisdiction.Text = "Jurisdiction";
         // 
@@ -230,15 +253,36 @@ partial class CohortContextForm
         lbl_Prefix.AutoSize = true;
         lbl_Prefix.Location = new Point(18, 85);
         lbl_Prefix.Name = "lbl_Prefix";
-        lbl_Prefix.Size = new Size(45, 20);
+        lbl_Prefix.Size = new Size(46, 20);
         lbl_Prefix.TabIndex = 1;
         lbl_Prefix.Text = "Prefix";
+        // 
+        // grp_PdfRosterExtraction
+        // 
+        grp_PdfRosterExtraction.Controls.Add(btn_ExtractCsv);
+        grp_PdfRosterExtraction.Location = new Point(635, 29);
+        grp_PdfRosterExtraction.Name = "grp_PdfRosterExtraction";
+        grp_PdfRosterExtraction.Size = new Size(424, 94);
+        grp_PdfRosterExtraction.TabIndex = 1;
+        grp_PdfRosterExtraction.TabStop = false;
+        grp_PdfRosterExtraction.Text = "Phase 1 - PDF Roster CSV Extraction";
+        // 
+        // btn_ExtractCsv
+        // 
+        btn_ExtractCsv.Location = new Point(160, 35);
+        btn_ExtractCsv.Name = "btn_ExtractCsv";
+        btn_ExtractCsv.Size = new Size(180, 32);
+        btn_ExtractCsv.TabIndex = 0;
+        btn_ExtractCsv.Text = "Extract CSV from PDFs";
+        btn_ExtractCsv.UseVisualStyleBackColor = true;
+        btn_ExtractCsv.Click += btn_ExtractCsv_Click;
         // 
         // CohortContextForm
         // 
         AutoScaleDimensions = new SizeF(8F, 20F);
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(636, 450);
+        ClientSize = new Size(1120, 594);
+        Controls.Add(grp_PdfRosterExtraction);
         Controls.Add(grp_CohortContext);
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
@@ -248,10 +292,13 @@ partial class CohortContextForm
         Load += CohortContextForm_Load;
         grp_CohortContext.ResumeLayout(false);
         grp_CohortContext.PerformLayout();
+        grp_PdfRosterExtraction.ResumeLayout(false);
         ResumeLayout(false);
     }
 
     private GroupBox grp_CohortContext;
+    private GroupBox grp_PdfRosterExtraction;
+    private Button btn_ExtractCsv;
     private ComboBox cb_SearchClientListName;
     private Label lbl_SearchClientListName;
     private Button btn_LoadContext;
@@ -269,5 +316,7 @@ partial class CohortContextForm
     private Label lbl_EncounterGroup;
     private TextBox txt_ClientListName;
     private Label lbl_ClientListName;
+    private TextBox txt_StandardizedCsvName;
+    private Label lbl_StandardizedCsvName;
     private Button btn_SaveCohortContext;
 }

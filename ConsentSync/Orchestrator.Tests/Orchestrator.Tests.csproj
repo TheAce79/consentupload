@@ -16,5 +16,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Orchestrator\Orchestrator.csproj" />
     <ProjectReference Include="..\ConsentSync.Data\ConsentSync.Data.csproj" />
+    <ProjectReference Include="..\ConsentSyncCore\ConsentSyncCore.csproj" />
   </ItemGroup>
 </Project>
