@@ -25,6 +25,9 @@ namespace ConsentSyncCore.Services.Phis
         private int? _firstNameIdx;
         private int? _lastNameIdx;
         private int? _medicareIdx;
+        private int? _middleNameIdx;
+        private int? _dateOfBirthIdx;
+        private int? _activeStatusIdx;
         private bool _columnIndicesInitialized = false;
 
         public PhisResultExtractor(IConfiguration config)
@@ -98,7 +101,10 @@ namespace ConsentSyncCore.Services.Phis
             {
                 ClientId = cells[_clientIdIdx!.Value].Text.Trim(),
                 FirstName = cells[_firstNameIdx!.Value].Text.Trim(),
-                LastName = cells[_lastNameIdx!.Value].Text.Trim()
+                LastName = cells[_lastNameIdx!.Value].Text.Trim(),
+                MiddleName = GetCellText(cells, _middleNameIdx),
+                DateOfBirth = GetCellText(cells, _dateOfBirthIdx),
+                ActiveStatus = GetCellText(cells, _activeStatusIdx)
             };
 
             // Extract Medicare if column exists
@@ -137,11 +143,16 @@ namespace ConsentSyncCore.Services.Phis
                 {
                     _medicareIdx = GetColumnIndexByName(driver, _columnHeaders.Medicare);
                 }
+
                 catch
                 {
                      LoggerService.LogInformation("   ⚠️  Medicare column not found");
                     _medicareIdx = null;
                 }
+
+                _middleNameIdx = TryGetColumnIndex(driver, _columnHeaders.MiddleName);
+                _dateOfBirthIdx = TryGetColumnIndex(driver, _columnHeaders.DateOfBirth);
+                _activeStatusIdx = TryGetColumnIndex(driver, _columnHeaders.ActiveStatus);
 
                 _columnIndicesInitialized = true;
                  LoggerService.LogInformation($"   ✅ Columns: ClientID={_clientIdIdx}, FirstName={_firstNameIdx}, LastName={_lastNameIdx}, Medicare={_medicareIdx?.ToString() ?? "N/A"}");
@@ -169,6 +180,19 @@ namespace ConsentSyncCore.Services.Phis
 
             throw new Exception($"Column '{columnName}' not found");
         }
+
+        private int? TryGetColumnIndex(IWebDriver driver, string columnName)
+        {
+            try { return GetColumnIndexByName(driver, columnName); }
+            catch
+            {
+                LoggerService.LogInformation($"   ⚠️  Optional PHIS column '{columnName}' not found");
+                return null;
+            }
+        }
+
+        private static string GetCellText(IReadOnlyList<IWebElement> cells, int? index) =>
+            index.HasValue && index.Value >= 0 && index.Value < cells.Count ? cells[index.Value].Text.Trim() : string.Empty;
 
 
 

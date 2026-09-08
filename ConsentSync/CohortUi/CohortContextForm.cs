@@ -5,6 +5,9 @@ using ConsentSync.Data.Entities;
 using ConsentSyncCore.Services.Csv;
 using ConsentSyncCore.Services.Configuration;
 using ConsentSyncCore.Services.Pdf;
+using ConsentSyncCore.Services.Browser;
+using ConsentSyncCore.Services.Phis;
+using IWebDriver = OpenQA.Selenium.IWebDriver;
 
 namespace CohortUi;
 
@@ -25,6 +28,7 @@ public partial class CohortContextForm : Form
     private bool _isUserCustomOverride;
     private bool _isBindingContext;
     private bool _isSynchronizingClientListName;
+    private bool _isPhase2Running;
 
     public CohortContextForm()
     {
@@ -164,6 +168,94 @@ public partial class CohortContextForm : Form
         {
             btn_ExtractCsv.Text = "Extract CSV from PDFs";
             SetFormEnabled(true);
+        }
+    }
+
+    private async void btn_SearchPhis_Click(object? sender, EventArgs e)
+    {
+        if (_isPhase2Running) return;
+        var config = ConfigurationService.GetConfiguration();
+        string clientListName = txt_ClientListName.Text.Trim();
+        string inputCsvPath;
+        string outputCsvPath;
+        try
+        {
+            inputCsvPath = CohortWorkspaceService.GetStandardizedInputCsvPath(config, clientListName);
+            outputCsvPath = CohortWorkspaceService.GetStandardizedOutputCsvPath(config, clientListName);
+            if (!File.Exists(inputCsvPath))
+            {
+                MessageBox.Show(this, $"Input CSV not found:\n{inputCsvPath}\n\nPlease extract or place a CSV in 1. InputFolder\\1 Input CSV first.", "File Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"The cohort CSV paths are invalid.\n\n{ex.Message}", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        List<ConsentSyncCore.Models.ClinicPdfClientRecord> records;
+        try { records = CsvImporterService.ReadFromCsv(inputCsvPath); }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Input CSV could not be read.\n\n{ex.Message}", "CSV Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+        if (records.Count == 0)
+        {
+            MessageBox.Show(this, "The input CSV contains no client records.", "No Records", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        _isPhase2Running = true;
+        SetFormEnabled(false);
+        btn_SearchPhis.Text = "Searching PHIS...";
+        pb_Phase2.Minimum = 0; pb_Phase2.Maximum = records.Count; pb_Phase2.Value = 0;
+        lbl_Phase2Progress.Text = $"0 / {records.Count}";
+        lbl_Phase2Status.Text = "Opening PHIS session...";
+        var progress = new Progress<Phase2Progress>(p =>
+        {
+            pb_Phase2.Maximum = p.Total;
+            pb_Phase2.Value = Math.Min(p.Current, p.Total);
+            lbl_Phase2Progress.Text = $"{p.Current} / {p.Total}";
+            lbl_Phase2Status.Text = $"Searching {p.DateOfBirth} — {p.StudentName}";
+        });
+
+        try
+        {
+            List<ConsentSyncCore.Models.ClinicPdfClientRecord> updated = await Task.Run(async () =>
+            {
+                IWebDriver driver = new ChromeDriverFactory(config).CreateDriver();
+                try
+                {
+                    var session = new PhisSessionManager(driver, config);
+                    if (!session.Login()) throw new InvalidOperationException("PHIS login was not completed.");
+                    var service = new PhisSearchService(driver, config, new PhisResultExtractor(config), session);
+                    return await new CohortPhisSearchRunner(service).ExecuteSearchAsync(records, progress);
+                }
+                finally { driver.Dispose(); }
+            });
+            CsvExporterService.SaveToCsv(updated, outputCsvPath);
+            MessageBox.Show(this, $"Phase 2 complete.\n\nEnriched CSV saved to:\n{outputCsvPath}", "Search Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"PHIS search stopped. The existing output CSV was preserved.\n\n{ex.Message}", "Search Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _isPhase2Running = false;
+            btn_SearchPhis.Text = "Search PHIS";
+            SetFormEnabled(true);
+        }
+    }
+
+    private void CohortContextForm_FormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (_isPhase2Running)
+        {
+            e.Cancel = true;
+            MessageBox.Show(this, "PHIS search is still running. Wait for it to finish before closing.", "Search Running", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 
@@ -403,6 +495,7 @@ public partial class CohortContextForm : Form
     {
         grp_CohortContext.Enabled = enabled;
         grp_PdfRosterExtraction.Enabled = enabled;
+        grp_PhisSearch.Enabled = enabled;
         btn_SaveCohortContext.Enabled = enabled;
     }
 

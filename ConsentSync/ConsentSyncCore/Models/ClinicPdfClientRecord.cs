@@ -17,4 +17,7 @@ public class ClinicPdfClientRecord
     public string? Medicare { get; set; }
 
     public ClientIdStatus ClientIdStatus { get; set; } = ClientIdStatus.NotProcessed;
+
+    /// <summary>Reason a PHIS resolution needs manual review.</summary>
+    public string? ErrorDetails { get; set; }
 }

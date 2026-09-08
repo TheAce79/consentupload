@@ -13,7 +13,7 @@ using ConsentSyncCore.Services.Configuration;
 
 namespace ConsentSyncCore.Services.Phis
 {
-    public partial class PhisSearchService
+    public partial class PhisSearchService : IPhisClientSearch
     {
         private readonly IWebDriver _driver;
         private readonly IConfiguration _config;
@@ -21,6 +21,7 @@ namespace ConsentSyncCore.Services.Phis
         private readonly PhisResultExtractor _resultExtractor;
         private readonly PhisSessionManager _sessionManager;
         private readonly PhisConfig _phisConfig;
+        private bool _lastResultsCompletenessVerified = true;
 
 
         // Constructor with dependency injection
@@ -97,7 +98,7 @@ namespace ConsentSyncCore.Services.Phis
 
                  LoggerService.LogInformation($"   📊 Found {results.Count} result(s)");
 
-                return SearchResult.IsSuccess(results);
+                return SearchResult.IsSuccess(results, _lastResultsCompletenessVerified);
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("Session expired"))
             {
@@ -161,7 +162,7 @@ namespace ConsentSyncCore.Services.Phis
 
                  LoggerService.LogInformation($"   ✅ Found: {results[0].FirstName} {results[0].LastName}");
 
-                return SearchResult.IsSuccess(results);
+                return SearchResult.IsSuccess(results, _lastResultsCompletenessVerified);
             }
             catch (Exception ex)
             {
@@ -199,7 +200,7 @@ namespace ConsentSyncCore.Services.Phis
                     return SearchResult.NoResults();
                 }
 
-                return SearchResult.IsSuccess(results);
+                return SearchResult.IsSuccess(results, _lastResultsCompletenessVerified);
             }
             catch (Exception ex)
             {
@@ -252,7 +253,7 @@ namespace ConsentSyncCore.Services.Phis
 
                  LoggerService.LogInformation($"   📊 Found {results.Count} result(s)");
 
-                return SearchResult.IsSuccess(results);
+                return SearchResult.IsSuccess(results, _lastResultsCompletenessVerified);
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("Session expired"))
             {
@@ -2009,7 +2010,41 @@ namespace ConsentSyncCore.Services.Phis
                 }
             });
 
+            _lastResultsCompletenessVerified = await EnsureAllResultsPerPageSelectedAsync();
             await Task.Delay(500); // Extra stability delay
+        }
+
+        private async Task<bool> EnsureAllResultsPerPageSelectedAsync()
+        {
+            try
+            {
+                var js = (IJavaScriptExecutor)_driver;
+                var result = js.ExecuteScript(@"
+                    var select = document.querySelector('select[name=""form:dataTable:dataTable_rppDD""]');
+                    if (!select || !select.options.length) return 'NOT_FOUND';
+                    var numeric = Array.from(select.options).filter(function (option) { return /^\d+$/.test(option.value); });
+                    if (!numeric.length) return 'NO_NUMERIC_OPTIONS';
+                    var max = numeric.reduce(function (best, option) { return parseInt(option.value, 10) > parseInt(best.value, 10) ? option : best; });
+                    if (select.value === max.value) return 'ALREADY_MAX';
+                    var widget = typeof PF === 'function' ? PF('widget_form_dataTable_dataTable') : null;
+                    if (widget && widget.getPaginator && widget.getPaginator()) widget.getPaginator().setRows(parseInt(max.value, 10));
+                    else { select.value = max.value; select.dispatchEvent(new Event('change', { bubbles: true })); }
+                    return 'UPDATED';");
+
+                if (string.Equals(result?.ToString(), "UPDATED", StringComparison.Ordinal))
+                {
+                    LoggerService.LogInformation("   ⚙️ Selected 'ALL' in PHIS paginator dropdown.");
+                    await Task.Delay(_phisConfig.AjaxWaitMs * 2);
+                    _wait.Until(d => d.FindElements(By.Id("form:dataTable:dataTable_data")).Count > 0);
+                }
+                return !string.Equals(result?.ToString(), "NOT_FOUND", StringComparison.Ordinal) &&
+                       !string.Equals(result?.ToString(), "NO_NUMERIC_OPTIONS", StringComparison.Ordinal);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogWarning($"   ⚠️ Could not set PHIS paginator to ALL: {ex.Message}");
+                return false;
+            }
         }
 
 

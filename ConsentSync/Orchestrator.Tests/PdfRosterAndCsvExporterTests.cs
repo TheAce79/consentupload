@@ -63,7 +63,7 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
     }
 
     [Fact]
-    public void SaveToCsv_WritesEightColumnsBomAndReplacesExistingOutput()
+    public void SaveToCsv_WritesNineColumnsBomAndReplacesExistingOutput()
     {
         string outputPath = Path.Combine(_directory, "roster.csv");
         File.WriteAllText(outputPath, "old output", Encoding.UTF8);
@@ -75,8 +75,8 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
         byte[] bytes = File.ReadAllBytes(outputPath);
         string csv = File.ReadAllText(outputPath, Encoding.UTF8);
         Assert.Equal([0xEF, 0xBB, 0xBF], bytes.Take(3));
-        Assert.StartsWith("\"ClientId\",\"FullName\",\"DateOfBirth\",\"Medicare\",\"ClientIdStatus\",\"FirstName\",\"LastName\",\"MiddleName\"", csv);
-        Assert.Contains("\"\",\"KOMBOU, LUC\",\"2017/10/01\",\"026547803\",\"0\",\"\",\"\",\"\"", csv);
+        Assert.StartsWith("\"ClientId\",\"FullName\",\"DateOfBirth\",\"Medicare\",\"ClientIdStatus\",\"FirstName\",\"LastName\",\"MiddleName\",\"ErrorDetails\"", csv);
+        Assert.Contains("\"\",\"KOMBOU, LUC\",\"2017/10/01\",\"026547803\",\"0\",\"\",\"\",\"\",\"\"", csv);
         Assert.DoesNotContain("old output", csv);
         Assert.Empty(Directory.EnumerateFiles(_directory, "*.tmp"));
     }

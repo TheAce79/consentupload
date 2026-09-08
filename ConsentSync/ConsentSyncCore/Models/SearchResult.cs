@@ -14,6 +14,8 @@ namespace ConsentSyncCore.Models
         public bool Success { get; private set; }
         public List<PhisSearchResult> Results { get; private set; } = new();
         public string? ErrorMessage { get; private set; }
+        /// <summary>False when PHIS returned rows but the complete result set could not be verified.</summary>
+        public bool ResultsComplete { get; private set; } = true;
 
         // Helper properties
         public bool HasResults => Results.Count > 0;
@@ -22,12 +24,13 @@ namespace ConsentSyncCore.Models
 
         private SearchResult() { }
 
-        public static SearchResult IsSuccess(List<PhisSearchResult> results)
+        public static SearchResult IsSuccess(List<PhisSearchResult> results, bool resultsComplete = true)
         {
             return new SearchResult
             {
                 Success = true,
-                Results = results
+                Results = results,
+                ResultsComplete = resultsComplete
             };
         }
 

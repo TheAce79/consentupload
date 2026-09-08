@@ -44,7 +44,9 @@ namespace ConsentSyncCore.Services.Configuration
                 FirstName = config["PhisAutomation:ColumnHeaders:FirstName"] ?? "First Name",
                 LastName = config["PhisAutomation:ColumnHeaders:LastName"] ?? "Last Name",
                 Medicare = config["PhisAutomation:ColumnHeaders:Medicare"] ?? "Health Card Number",
-                DateOfBirth = config["PhisAutomation:ColumnHeaders:DateOfBirth"] ?? "Date of Birth"
+                DateOfBirth = config["PhisAutomation:ColumnHeaders:DateOfBirth"] ?? "Date of Birth",
+                MiddleName = config["PhisAutomation:ColumnHeaders:MiddleName"] ?? "Middle Name",
+                ActiveStatus = config["PhisAutomation:ColumnHeaders:ActiveStatus"] ?? "Active Status"
             };
         }
 

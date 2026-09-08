@@ -53,6 +53,8 @@ namespace ConsentSyncCore.Services.ConfigurationPoco
         public string LastName { get; set; } = string.Empty;
         public string Medicare { get; set; } = string.Empty;
         public string DateOfBirth { get; set; } = string.Empty;
+        public string MiddleName { get; set; } = string.Empty;
+        public string ActiveStatus { get; set; } = string.Empty;
     }
 
 
