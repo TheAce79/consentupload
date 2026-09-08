@@ -83,6 +83,11 @@ public partial class CohortContextForm : Form
         try
         {
             LoggerService.LogInformation("\n═══ Phase 0 — Loading cohort context ═══");
+            LoggerService.LogInformation($"CohortUi executable: {Environment.ProcessPath}; application directory: {AppContext.BaseDirectory}");
+            var coreAssembly = typeof(PhisSearchService).Assembly;
+            string coreVersion = coreAssembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+                .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "unknown";
+            LoggerService.LogInformation($"PHIS core build: {coreVersion}; module ID: {coreAssembly.ManifestModule.ModuleVersionId}; paginator mode: ALL dropdown with total verification.");
             var configuration = ConfigurationService.GetConfiguration();
             CohortWorkspaceService.EnsureDirectories(configuration);
             _dbManager = new DbManager(configuration);

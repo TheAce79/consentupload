@@ -1,5 +1,11 @@
 ﻿# 1. Point to the ROOT workspace
-Set-Location -Path "$env:UserProfile\OneDrive\Phis"
+$ErrorActionPreference = 'Stop'
+$projectPath = Join-Path $PSScriptRoot 'CohortUi\CohortUi.csproj'
+$sourceSettingsPath = Join-Path $PSScriptRoot 'ConsentSyncCore\appsettings.json'
+if (!(Test-Path -LiteralPath $projectPath -PathType Leaf)) {
+    throw "CohortUi project not found: $projectPath"
+}
+Write-Host "Building CohortUi from: $projectPath" -ForegroundColor Cyan
 
 # 2. Define the OUTPUT destination for CohortUi
 $oneDrivePath = "$env:UserProfile\OneDrive\Phis\Publish-Output_Cohort"
@@ -9,15 +15,19 @@ if (!(Test-Path $oneDrivePath)) {
 }
 
 # 3. Publish the CohortUi project
-dotnet publish "consentupload\ConsentSync\CohortUi\CohortUi.csproj" `
+dotnet publish $projectPath `
   --configuration Release `
   --runtime win-x64 `
   --self-contained true `
   -p:PublishSingleFile=true `
   --output $oneDrivePath --nologo
 
+if ($LASTEXITCODE -ne 0) {
+    throw "CohortUi publish failed (exit code $LASTEXITCODE). No release ZIP was created."
+}
+
 # 4. Copy the settings from the core project folder
-Copy-Item "consentupload\ConsentSync\ConsentSyncCore\appsettings.json" `
+Copy-Item $sourceSettingsPath `
   "$oneDrivePath\appsettings.json" -Force
 
 # 5. Patch appsettings.json for Production Release
