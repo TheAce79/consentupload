@@ -8,6 +8,7 @@ partial class CohortContextForm
     {
         if (disposing && components is not null)
         {
+            UnsubscribeFromLogs();
             components.Dispose();
         }
 
@@ -44,9 +45,12 @@ partial class CohortContextForm
         lbl_Phase2Progress = new Label();
         pb_Phase2 = new ProgressBar();
         btn_SearchPhis = new Button();
+        grp_DebugLog = new GroupBox();
+        rtxt_Log = new RichTextBox();
         grp_CohortContext.SuspendLayout();
         grp_PdfRosterExtraction.SuspendLayout();
         grp_PhisSearch.SuspendLayout();
+        grp_DebugLog.SuspendLayout();
         SuspendLayout();
         // 
         // grp_CohortContext
@@ -330,12 +334,36 @@ partial class CohortContextForm
         lbl_Phase2Status.Size = new Size(384, 42);
         lbl_Phase2Status.TabIndex = 3;
         lbl_Phase2Status.Text = "Ready";
+        //
+        // grp_DebugLog
+        //
+        grp_DebugLog.Controls.Add(rtxt_Log);
+        grp_DebugLog.Location = new Point(18, 480);
+        grp_DebugLog.Name = "grp_DebugLog";
+        grp_DebugLog.Size = new Size(1041, 250);
+        grp_DebugLog.TabIndex = 3;
+        grp_DebugLog.TabStop = false;
+        grp_DebugLog.Text = "Debug Log";
+        //
+        // rtxt_Log
+        //
+        rtxt_Log.BackColor = Color.Black;
+        rtxt_Log.BorderStyle = BorderStyle.FixedSingle;
+        rtxt_Log.Dock = DockStyle.Fill;
+        rtxt_Log.Font = new Font("Consolas", 9F);
+        rtxt_Log.ForeColor = Color.LimeGreen;
+        rtxt_Log.Name = "rtxt_Log";
+        rtxt_Log.ReadOnly = true;
+        rtxt_Log.ScrollBars = RichTextBoxScrollBars.Vertical;
+        rtxt_Log.TabIndex = 0;
+        rtxt_Log.Text = "";
         // 
         // CohortContextForm
         // 
         AutoScaleDimensions = new SizeF(8F, 20F);
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(1120, 594);
+        ClientSize = new Size(1120, 750);
+        Controls.Add(grp_DebugLog);
         Controls.Add(grp_PhisSearch);
         Controls.Add(grp_PdfRosterExtraction);
         Controls.Add(grp_CohortContext);
@@ -350,6 +378,7 @@ partial class CohortContextForm
         grp_CohortContext.PerformLayout();
         grp_PdfRosterExtraction.ResumeLayout(false);
         grp_PhisSearch.ResumeLayout(false);
+        grp_DebugLog.ResumeLayout(false);
         ResumeLayout(false);
     }
 
@@ -381,4 +410,6 @@ partial class CohortContextForm
     private ProgressBar pb_Phase2;
     private Label lbl_Phase2Progress;
     private Label lbl_Phase2Status;
+    private GroupBox grp_DebugLog;
+    private RichTextBox rtxt_Log;
 }

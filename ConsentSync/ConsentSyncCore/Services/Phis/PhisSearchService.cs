@@ -2031,18 +2031,33 @@ namespace ConsentSyncCore.Services.Phis
                     else { select.value = max.value; select.dispatchEvent(new Event('change', { bubbles: true })); }
                     return 'UPDATED';");
 
-                if (string.Equals(result?.ToString(), "UPDATED", StringComparison.Ordinal))
+                string paginatorOutcome = result?.ToString() ?? "UNKNOWN";
+                LoggerService.LogInformation($"   PHIS paginator check: {paginatorOutcome}.");
+
+                if (string.Equals(paginatorOutcome, "UPDATED", StringComparison.Ordinal))
                 {
-                    LoggerService.LogInformation("   ⚙️ Selected 'ALL' in PHIS paginator dropdown.");
+                    LoggerService.LogInformation("   ⚙️ Selected the largest numeric page-size option in the PHIS paginator dropdown.");
                     await Task.Delay(_phisConfig.AjaxWaitMs * 2);
                     _wait.Until(d => d.FindElements(By.Id("form:dataTable:dataTable_data")).Count > 0);
                 }
-                return !string.Equals(result?.ToString(), "NOT_FOUND", StringComparison.Ordinal) &&
-                       !string.Equals(result?.ToString(), "NO_NUMERIC_OPTIONS", StringComparison.Ordinal);
+                else if (string.Equals(paginatorOutcome, "ALREADY_MAX", StringComparison.Ordinal))
+                {
+                    LoggerService.LogInformation("   PHIS paginator is already set to its largest numeric page-size option.");
+                }
+                else if (string.Equals(paginatorOutcome, "NOT_FOUND", StringComparison.Ordinal))
+                {
+                    LoggerService.LogWarning("   PHIS paginator dropdown was not found; result completeness cannot be verified.");
+                }
+                else if (string.Equals(paginatorOutcome, "NO_NUMERIC_OPTIONS", StringComparison.Ordinal))
+                {
+                    LoggerService.LogWarning("   PHIS paginator dropdown has no numeric page-size options; result completeness cannot be verified.");
+                }
+
+                return paginatorOutcome is not "NOT_FOUND" and not "NO_NUMERIC_OPTIONS";
             }
             catch (Exception ex)
             {
-                LoggerService.LogWarning($"   ⚠️ Could not set PHIS paginator to ALL: {ex.Message}");
+                LoggerService.LogError("Could not inspect or set the PHIS paginator page-size option.", ex);
                 return false;
             }
         }

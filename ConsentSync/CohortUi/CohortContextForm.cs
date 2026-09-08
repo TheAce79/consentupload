@@ -8,6 +8,7 @@ using ConsentSyncCore.Services.Pdf;
 using ConsentSyncCore.Services.Browser;
 using ConsentSyncCore.Services.Phis;
 using IWebDriver = OpenQA.Selenium.IWebDriver;
+using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 namespace CohortUi;
 
@@ -29,10 +30,51 @@ public partial class CohortContextForm : Form
     private bool _isBindingContext;
     private bool _isSynchronizingClientListName;
     private bool _isPhase2Running;
+    private bool _isLogSubscribed;
 
     public CohortContextForm()
     {
         InitializeComponent();
+        LoggerService.LogMessage += OnLogMessage;
+        _isLogSubscribed = true;
+    }
+
+    private void OnLogMessage(object? sender, LogEventArgs e)
+    {
+        if (IsDisposed || Disposing || !IsHandleCreated)
+        {
+            return;
+        }
+
+        try
+        {
+            BeginInvoke(() => AppendLogMessage(e));
+        }
+        catch (InvalidOperationException)
+        {
+            // The form is closing while a background PHIS operation emits a log message.
+        }
+    }
+
+    private void AppendLogMessage(LogEventArgs e)
+    {
+        if (IsDisposed || Disposing)
+        {
+            return;
+        }
+
+        rtxt_Log.SelectionStart = rtxt_Log.TextLength;
+        rtxt_Log.SelectionLength = 0;
+        rtxt_Log.SelectionColor = e.Level switch
+        {
+            LogLevel.Error or LogLevel.Critical => Color.Red,
+            LogLevel.Warning => Color.Yellow,
+            LogLevel.Debug => Color.Gray,
+            _ => Color.LimeGreen
+        };
+        rtxt_Log.AppendText(e.FormattedMessage + Environment.NewLine);
+        rtxt_Log.SelectionColor = rtxt_Log.ForeColor;
+        rtxt_Log.ScrollToCaret();
     }
 
     private async void CohortContextForm_Load(object? sender, EventArgs e)
@@ -40,6 +82,7 @@ public partial class CohortContextForm : Form
         SetFormEnabled(false);
         try
         {
+            LoggerService.LogInformation("\n═══ Phase 0 — Loading cohort context ═══");
             var configuration = ConfigurationService.GetConfiguration();
             CohortWorkspaceService.EnsureDirectories(configuration);
             _dbManager = new DbManager(configuration);
@@ -53,9 +96,11 @@ public partial class CohortContextForm : Form
             BindContext(_activeContext);
             RefreshStandardizedCsvPreview();
             await RefreshClientListSearchAsync(_activeContext.ClientListName);
+            LoggerService.LogInformation($"✅ Cohort context loaded: {_activeContext.ClientListName}");
         }
         catch (Exception ex)
         {
+            LoggerService.LogError("Cohort context could not be loaded.", ex);
             MessageBox.Show(
                 this,
                 $"Cohort context could not be loaded.\n\n{ex.Message}",
@@ -94,6 +139,7 @@ public partial class CohortContextForm : Form
 
         try
         {
+            LoggerService.LogInformation($"\n═══ Phase 0 — Saving cohort context: {context.ClientListName} ═══");
             int contextId = await _dbManager.SaveCohortContextAsync(context);
             context.CohortContextId = contextId;
             _activeContext = context;
@@ -109,6 +155,7 @@ public partial class CohortContextForm : Form
             RefreshStandardizedCsvPreview();
             await RefreshClientListSearchAsync(context.ClientListName);
             RestoreSaveButton();
+            LoggerService.LogInformation($"✅ Cohort context saved. Id: {context.CohortContextId}; Client list: {context.ClientListName}");
 
             MessageBox.Show(
                 this,
@@ -119,6 +166,7 @@ public partial class CohortContextForm : Form
         }
         catch (Exception ex)
         {
+            LoggerService.LogError("Cohort context could not be saved.", ex);
             RestoreSaveButton();
             MessageBox.Show(
                 this,
@@ -140,6 +188,7 @@ public partial class CohortContextForm : Form
         btn_ExtractCsv.Text = "Extracting...";
         try
         {
+            LoggerService.LogInformation("\n═══ Phase 1 — Extracting CSV from PDF roster ═══");
             var configuration = ConfigurationService.GetConfiguration();
             var (_, inputPdfDir, _) = CohortWorkspaceService.EnsureDirectories(configuration);
             string clientListName = txt_ClientListName.Text.Trim();
@@ -149,6 +198,7 @@ public partial class CohortContextForm : Form
             var records = await Task.Run(() => parser.ExtractRecordsFromPdfFolder(inputPdfDir));
             if (records.Count == 0)
             {
+                LoggerService.LogWarning($"No client records found in PDF folder: {inputPdfDir}");
                 MessageBox.Show(this,
                     $"No client records were found in PDFs inside:\n{inputPdfDir}\n\nPlace clinic schedule PDFs in this folder and try again.",
                     "No Records Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -156,12 +206,14 @@ public partial class CohortContextForm : Form
             }
 
             await Task.Run(() => CsvExporterService.SaveToCsv(records, targetCsvPath));
+            LoggerService.LogInformation($"✅ Extracted {records.Count} client record(s). Input CSV: {targetCsvPath}");
             MessageBox.Show(this,
                 $"Extracted {records.Count} client record(s) from PDF roster.\n\nInput CSV created at:\n{targetCsvPath}",
                 "Extraction Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
+            LoggerService.LogError("PDF roster extraction failed.", ex);
             MessageBox.Show(this, $"PDF roster extraction failed.\n\n{ex.Message}", "Extraction Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
@@ -184,12 +236,14 @@ public partial class CohortContextForm : Form
             outputCsvPath = CohortWorkspaceService.GetStandardizedOutputCsvPath(config, clientListName);
             if (!File.Exists(inputCsvPath))
             {
+                LoggerService.LogWarning($"Phase 2 input CSV was not found: {inputCsvPath}");
                 MessageBox.Show(this, $"Input CSV not found:\n{inputCsvPath}\n\nPlease extract or place a CSV in 1. InputFolder\\1 Input CSV first.", "File Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
         }
         catch (Exception ex)
         {
+            LoggerService.LogError("Cohort CSV path validation failed.", ex);
             MessageBox.Show(this, $"The cohort CSV paths are invalid.\n\n{ex.Message}", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
@@ -198,11 +252,13 @@ public partial class CohortContextForm : Form
         try { records = CsvImporterService.ReadFromCsv(inputCsvPath); }
         catch (Exception ex)
         {
+            LoggerService.LogError($"Phase 2 input CSV could not be read: {inputCsvPath}", ex);
             MessageBox.Show(this, $"Input CSV could not be read.\n\n{ex.Message}", "CSV Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
         if (records.Count == 0)
         {
+            LoggerService.LogWarning($"Phase 2 input CSV has no client records: {inputCsvPath}");
             MessageBox.Show(this, "The input CSV contains no client records.", "No Records", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -213,6 +269,7 @@ public partial class CohortContextForm : Form
         pb_Phase2.Minimum = 0; pb_Phase2.Maximum = records.Count; pb_Phase2.Value = 0;
         lbl_Phase2Progress.Text = $"0 / {records.Count}";
         lbl_Phase2Status.Text = "Opening PHIS session...";
+        LoggerService.LogInformation($"\n═══ Phase 2 — PHIS client ID resolution started ═══\n   Records: {records.Count}\n   Input CSV: {inputCsvPath}\n   Output CSV: {outputCsvPath}");
         var progress = new Progress<Phase2Progress>(p =>
         {
             pb_Phase2.Maximum = p.Total;
@@ -230,17 +287,20 @@ public partial class CohortContextForm : Form
                 {
                     var session = new PhisSessionManager(driver, config);
                     if (!session.Login()) throw new InvalidOperationException("PHIS login was not completed.");
+                    LoggerService.LogInformation("✅ PHIS session opened for Phase 2.");
                     var service = new PhisSearchService(driver, config, new PhisResultExtractor(config), session);
                     return await new CohortPhisSearchRunner(service).ExecuteSearchAsync(records, progress);
                 }
                 finally { driver.Dispose(); }
             });
             CsvExporterService.SaveToCsv(updated, outputCsvPath);
+            LoggerService.LogInformation($"✅ Phase 2 complete. Enriched CSV saved: {outputCsvPath}");
             MessageBox.Show(this, $"Phase 2 complete.\n\nEnriched CSV saved to:\n{outputCsvPath}", "Search Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"PHIS search stopped. The existing output CSV was preserved.\n\n{ex.Message}", "Search Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            LoggerService.LogError("Phase 2 PHIS search stopped. The existing output CSV was preserved.", ex);
+            MessageBox.Show(this, $"PHIS search stopped. The existing output CSV was preserved.\n\n{ex.Message}\n\nCheck the Debug Log for details.", "Search Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
@@ -256,7 +316,21 @@ public partial class CohortContextForm : Form
         {
             e.Cancel = true;
             MessageBox.Show(this, "PHIS search is still running. Wait for it to finish before closing.", "Search Running", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
         }
+
+        UnsubscribeFromLogs();
+    }
+
+    private void UnsubscribeFromLogs()
+    {
+        if (!_isLogSubscribed)
+        {
+            return;
+        }
+
+        LoggerService.LogMessage -= OnLogMessage;
+        _isLogSubscribed = false;
     }
 
     private void OnContextParameterChanged(object? sender, EventArgs e)

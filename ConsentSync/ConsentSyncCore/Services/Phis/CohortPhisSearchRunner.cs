@@ -22,32 +22,38 @@ public sealed class CohortPhisSearchRunner
         for (int i = 0; i < records.Count; i++)
         {
             ClinicPdfClientRecord record = records[i];
+            string recordLabel = $"Record {i + 1}/{records.Count} ({DisplayName(record)}, DOB {record.DateOfBirth})";
+            LoggerService.LogInformation($"\n🔎 Phase 2 {recordLabel}");
             progress?.Report(new Phase2Progress(i + 1, records.Count, record.DateOfBirth, DisplayName(record)));
             if (!DateTime.TryParseExact(record.DateOfBirth, "yyyy/MM/dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
             {
                 MarkFailed(record, "InvalidDateOfBirth");
+                LogOutcome(recordLabel, record);
                 continue;
             }
 
             SearchResult dobResult = await _searchService.SearchByDobAsync(record.DateOfBirth);
-            EnsureSearchSucceeded(dobResult, "DOB");
+            LogSearchResult(recordLabel, "DOB", dobResult);
+            EnsureSearchSucceeded(dobResult, "DOB", recordLabel);
             CandidateSelection candidates = GetActiveCandidates(dobResult.Results);
-            if (candidates.StatusUnavailable) { MarkFailed(record, "ActiveStatusUnavailable"); continue; }
-            if (candidates.Active.Count > 1) { MarkFailed(record, "MultipleClientsFoundInPhis"); continue; }
+            if (candidates.StatusUnavailable) { MarkFailed(record, "ActiveStatusUnavailable"); LogOutcome(recordLabel, record); continue; }
+            if (candidates.Active.Count > 1) { MarkFailed(record, "MultipleClientsFoundInPhis"); LogOutcome(recordLabel, record); continue; }
 
-            if (candidates.Active.Count == 1 && TryResolveByName(record, candidates.Active[0])) continue;
+            if (candidates.Active.Count == 1 && TryResolveByName(record, candidates.Active[0])) { LogOutcome(recordLabel, record); continue; }
 
             if (!string.IsNullOrWhiteSpace(record.Medicare))
             {
                 SearchResult medicareResult = await _searchService.SearchByMedicareAsync(record.Medicare);
-                EnsureSearchSucceeded(medicareResult, "Medicare");
+                LogSearchResult(recordLabel, "Medicare", medicareResult);
+                EnsureSearchSucceeded(medicareResult, "Medicare", recordLabel);
                 CandidateSelection medicareCandidates = GetActiveCandidates(medicareResult.Results);
-                if (medicareCandidates.StatusUnavailable) { MarkFailed(record, "ActiveStatusUnavailable"); continue; }
-                if (medicareCandidates.Active.Count > 1) { MarkFailed(record, "MultipleClientsFoundInPhis"); continue; }
-                if (medicareCandidates.Active.Count == 1 && TryMarkFound(record, medicareCandidates.Active[0])) continue;
+                if (medicareCandidates.StatusUnavailable) { MarkFailed(record, "ActiveStatusUnavailable"); LogOutcome(recordLabel, record); continue; }
+                if (medicareCandidates.Active.Count > 1) { MarkFailed(record, "MultipleClientsFoundInPhis"); LogOutcome(recordLabel, record); continue; }
+                if (medicareCandidates.Active.Count == 1 && TryMarkFound(record, medicareCandidates.Active[0])) { LogOutcome(recordLabel, record); continue; }
             }
 
             MarkFailed(record, candidates.Active.Count == 0 ? "NoActiveClientFoundInPhis" : "NameMatchBelowThreshold");
+            LogOutcome(recordLabel, record);
         }
         return records;
     }
@@ -83,11 +89,15 @@ public sealed class CohortPhisSearchRunner
         return new CandidateSelection(active, unknown);
     }
 
-    private static void EnsureSearchSucceeded(SearchResult result, string kind)
+    private static void EnsureSearchSucceeded(SearchResult result, string kind, string recordLabel)
     {
         if (!result.Success) throw new InvalidOperationException($"PHIS {kind} search failed: {result.ErrorMessage ?? "unknown error"}");
-        if (result.HasResults && !result.ResultsComplete) throw new InvalidOperationException($"PHIS {kind} results could not be verified as complete.");
+        if (result.HasResults && !result.ResultsComplete) throw new InvalidOperationException($"{recordLabel}: PHIS {kind} results could not be verified as complete.");
     }
+    private static void LogSearchResult(string recordLabel, string kind, SearchResult result) =>
+        LoggerService.LogInformation($"   {recordLabel}: {kind} search — Success={result.Success}; Results={result.Results.Count}; ResultsComplete={result.ResultsComplete}{(string.IsNullOrWhiteSpace(result.ErrorMessage) ? string.Empty : $"; Error={result.ErrorMessage}")}");
+    private static void LogOutcome(string recordLabel, ClinicPdfClientRecord record) =>
+        LoggerService.LogInformation($"   {recordLabel}: resolution outcome — Status={record.ClientIdStatus}; ClientId={record.ClientId ?? "(none)"}; Reason={record.ErrorDetails ?? "Resolved"}");
     private static void MarkFailed(ClinicPdfClientRecord record, string reason) { record.ClientId = null; record.ClientIdStatus = ClientIdStatus.NeedsManualReview; record.ErrorDetails = reason; }
     private static string DisplayName(ClinicPdfClientRecord r) => !string.IsNullOrWhiteSpace(r.FullName) ? r.FullName : JoinName(r.FirstName, r.MiddleName, r.LastName);
     private static string JoinName(params string?[] names) => string.Join(' ', names.Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n!.Trim()));
