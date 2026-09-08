@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ConsentSyncCore.Services.ConfigurationPoco;
 using ConsentSyncCore.Services.Configuration;
@@ -2016,51 +2017,138 @@ namespace ConsentSyncCore.Services.Phis
 
         private async Task<bool> EnsureAllResultsPerPageSelectedAsync()
         {
+            const string rowsPerPageName = "form:dataTable:dataTable_rppDD";
+            const string tableBodyId = "form:dataTable:dataTable_data";
+
             try
             {
-                var js = (IJavaScriptExecutor)_driver;
-                var result = js.ExecuteScript(@"
-                    var select = document.querySelector('select[name=""form:dataTable:dataTable_rppDD""]');
-                    if (!select || !select.options.length) return 'NOT_FOUND';
-                    var numeric = Array.from(select.options).filter(function (option) { return /^\d+$/.test(option.value); });
-                    if (!numeric.length) return 'NO_NUMERIC_OPTIONS';
-                    var max = numeric.reduce(function (best, option) { return parseInt(option.value, 10) > parseInt(best.value, 10) ? option : best; });
-                    if (select.value === max.value) return 'ALREADY_MAX';
-                    var widget = typeof PF === 'function' ? PF('widget_form_dataTable_dataTable') : null;
-                    if (widget && widget.getPaginator && widget.getPaginator()) widget.getPaginator().setRows(parseInt(max.value, 10));
-                    else { select.value = max.value; select.dispatchEvent(new Event('change', { bubbles: true })); }
-                    return 'UPDATED';");
-
-                string paginatorOutcome = result?.ToString() ?? "UNKNOWN";
-                LoggerService.LogInformation($"   PHIS paginator check: {paginatorOutcome}.");
-
-                if (string.Equals(paginatorOutcome, "UPDATED", StringComparison.Ordinal))
-                {
-                    LoggerService.LogInformation("   ⚙️ Selected the largest numeric page-size option in the PHIS paginator dropdown.");
-                    await Task.Delay(_phisConfig.AjaxWaitMs * 2);
-                    _wait.Until(d => d.FindElements(By.Id("form:dataTable:dataTable_data")).Count > 0);
-                }
-                else if (string.Equals(paginatorOutcome, "ALREADY_MAX", StringComparison.Ordinal))
-                {
-                    LoggerService.LogInformation("   PHIS paginator is already set to its largest numeric page-size option.");
-                }
-                else if (string.Equals(paginatorOutcome, "NOT_FOUND", StringComparison.Ordinal))
+                var rowsPerPageElement = _driver.FindElements(By.Name(rowsPerPageName)).FirstOrDefault();
+                if (rowsPerPageElement is null)
                 {
                     LoggerService.LogWarning("   PHIS paginator dropdown was not found; result completeness cannot be verified.");
-                }
-                else if (string.Equals(paginatorOutcome, "NO_NUMERIC_OPTIONS", StringComparison.Ordinal))
-                {
-                    LoggerService.LogWarning("   PHIS paginator dropdown has no numeric page-size options; result completeness cannot be verified.");
+                    return false;
                 }
 
-                return paginatorOutcome is not "NOT_FOUND" and not "NO_NUMERIC_OPTIONS";
+                var select = new SelectElement(rowsPerPageElement);
+                string? allRowsValue = FindAllRowsValue(select);
+                if (allRowsValue is null)
+                {
+                    LoggerService.LogWarning("   PHIS paginator has neither an ALL option nor the 500-row fallback; result completeness cannot be verified.");
+                    return false;
+                }
+
+                int expectedTotal = GetClientSearchTotal();
+                string selectedValue = GetSelectedValue(select);
+                LoggerService.LogInformation($"   PHIS paginator: selected={selectedValue}; ALL target={allRowsValue}; reported total={expectedTotal}.");
+
+                if (expectedTotal < 0)
+                {
+                    LoggerService.LogWarning("   PHIS reported no readable Total value; result completeness cannot be verified.");
+                    return false;
+                }
+
+                if (!string.Equals(selectedValue, allRowsValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    LoggerService.LogInformation($"   ⚙️ Selecting PHIS ALL rows option (value {allRowsValue}) through the paginator dropdown.");
+                    SelectAllRowsOption(select, allRowsValue);
+                    await Task.Delay(Math.Min(_phisConfig.AjaxWaitMs, 500));
+                }
+                else
+                {
+                    LoggerService.LogInformation("   PHIS paginator is already set to ALL rows.");
+                }
+
+                if (expectedTotal == 0)
+                {
+                    LoggerService.LogInformation("   PHIS reported zero results; no paginator expansion is required.");
+                    return true;
+                }
+
+                _wait.Until(d => IsClientSearchAllRowsLoaded(d, rowsPerPageName, tableBodyId, allRowsValue, expectedTotal));
+
+                int loadedRows = GetClientSearchRowCount();
+                string finalSelectedValue = GetSelectedValue(new SelectElement(_driver.FindElement(By.Name(rowsPerPageName))));
+                bool complete = string.Equals(finalSelectedValue, allRowsValue, StringComparison.OrdinalIgnoreCase) &&
+                    loadedRows == expectedTotal;
+                LoggerService.LogInformation($"   PHIS paginator verification: selected={finalSelectedValue}; loaded rows={loadedRows}; reported total={expectedTotal}; complete={complete}.");
+                return complete;
             }
             catch (Exception ex)
             {
-                LoggerService.LogError("Could not inspect or set the PHIS paginator page-size option.", ex);
+                LoggerService.LogError("Could not select or verify PHIS ALL paginator rows.", ex);
                 return false;
             }
         }
+
+        private static string? FindAllRowsValue(SelectElement select)
+        {
+            var allOption = select.Options.FirstOrDefault(option =>
+                option.Text.Trim().Equals("ALL", StringComparison.OrdinalIgnoreCase));
+            if (allOption is not null)
+            {
+                return allOption.GetAttribute("value")?.Trim();
+            }
+
+            return select.Options.FirstOrDefault(option =>
+                option.GetAttribute("value")?.Trim().Equals("500", StringComparison.OrdinalIgnoreCase) == true)
+                ?.GetAttribute("value")?.Trim();
+        }
+
+        private static void SelectAllRowsOption(SelectElement select, string allRowsValue)
+        {
+            try
+            {
+                select.SelectByText("ALL");
+            }
+            catch (NoSuchElementException)
+            {
+                select.SelectByValue(allRowsValue);
+            }
+        }
+
+        private bool IsClientSearchAllRowsLoaded(IWebDriver driver, string rowsPerPageName, string tableBodyId, string expectedRowsValue, int expectedTotal)
+        {
+            var rowsPerPageElement = driver.FindElements(By.Name(rowsPerPageName)).FirstOrDefault();
+            if (rowsPerPageElement is null ||
+                !string.Equals(GetSelectedValue(new SelectElement(rowsPerPageElement)), expectedRowsValue, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (!IsPrimeFacesAjaxQueueEmpty())
+            {
+                return false;
+            }
+
+            var tableBody = driver.FindElements(By.Id(tableBodyId)).FirstOrDefault();
+            int loadedRows = tableBody?.FindElements(By.XPath(".//tr[@role='row']")).Count ?? 0;
+            return loadedRows == expectedTotal;
+        }
+
+        private bool IsPrimeFacesAjaxQueueEmpty()
+        {
+            var js = (IJavaScriptExecutor)_driver;
+            return js.ExecuteScript(@"
+                return !(window.PrimeFaces && PrimeFaces.ajax && PrimeFaces.ajax.Queue &&
+                    typeof PrimeFaces.ajax.Queue.isEmpty === 'function') || PrimeFaces.ajax.Queue.isEmpty();") is true;
+        }
+
+        private int GetClientSearchTotal()
+        {
+            string text = _driver.FindElements(By.CssSelector("#form\\:dataTable\\:dataTable_paginator_bottom .ui-paginator-current, .ui-paginator-current"))
+                .FirstOrDefault()?.Text ?? string.Empty;
+            var match = Regex.Match(text, @"Total\s*:\s*(\d+)", RegexOptions.IgnoreCase);
+            return match.Success && int.TryParse(match.Groups[1].Value, out int total) ? total : -1;
+        }
+
+        private int GetClientSearchRowCount()
+        {
+            var tableBody = _driver.FindElements(By.Id("form:dataTable:dataTable_data")).FirstOrDefault();
+            return tableBody?.FindElements(By.XPath(".//tr[@role='row']")).Count ?? 0;
+        }
+
+        private static string GetSelectedValue(SelectElement select) =>
+            select.SelectedOption.GetAttribute("value")?.Trim() ?? string.Empty;
 
 
 

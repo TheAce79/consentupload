@@ -22,13 +22,38 @@ public sealed class CohortPhisSearchRunnerTests
     }
 
     [Fact]
-    public async Task ExecuteSearchAsync_MultipleActiveCandidatesImmediatelyNeedsReview()
+    public async Task ExecuteSearchAsync_OneMatchingNameAmongMultipleActiveCandidatesResolves()
     {
-        var search = new FakeSearch { Dob = Success(Active("1", "A", "B"), Active("2", "C", "D")) };
+        var search = new FakeSearch { Dob = Success(Active("1", "OTHER", "PERSON"), Active("2", "A", "B")) };
         var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01", Medicare = "001" };
         await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
-        Assert.Equal("MultipleClientsFoundInPhis", record.ErrorDetails);
+        Assert.Equal(ClientIdStatus.Found, record.ClientIdStatus);
+        Assert.Equal("2", record.ClientId);
         Assert.Equal(0, search.MedicareCalls);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_OneMatchingNameAmongEighteenActiveCandidatesResolves()
+    {
+        var candidates = Enumerable.Range(1, 17)
+            .Select(index => Active(index.ToString(), $"OTHER{index}", $"PERSON{index}"))
+            .Append(Active("18", "TARGET", "PERSON"))
+            .ToArray();
+        var record = new ClinicPdfClientRecord { FullName = "Target Person", DateOfBirth = "2017/10/01" };
+
+        await new CohortPhisSearchRunner(new FakeSearch { Dob = Success(candidates) }, 75).ExecuteSearchAsync([record]);
+
+        Assert.Equal(ClientIdStatus.Found, record.ClientIdStatus);
+        Assert.Equal("18", record.ClientId);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_MultipleMatchingNamesNeedManualReview()
+    {
+        var search = new FakeSearch { Dob = Success(Active("1", "A", "B"), Active("2", "B", "A")) };
+        var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01" };
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+        Assert.Equal("MultipleMatchingClientsFoundInPhis", record.ErrorDetails);
     }
 
     [Fact]

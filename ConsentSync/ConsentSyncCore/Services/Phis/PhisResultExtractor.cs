@@ -152,7 +152,7 @@ namespace ConsentSyncCore.Services.Phis
 
                 _middleNameIdx = TryGetColumnIndex(driver, _columnHeaders.MiddleName);
                 _dateOfBirthIdx = TryGetColumnIndex(driver, _columnHeaders.DateOfBirth);
-                _activeStatusIdx = TryGetColumnIndex(driver, _columnHeaders.ActiveStatus);
+                _activeStatusIdx = TryGetColumnIndex(driver, _columnHeaders.ActiveStatus, "Active");
 
                 _columnIndicesInitialized = true;
                  LoggerService.LogInformation($"   ✅ Columns: ClientID={_clientIdIdx}, FirstName={_firstNameIdx}, LastName={_lastNameIdx}, Medicare={_medicareIdx?.ToString() ?? "N/A"}");
@@ -181,14 +181,16 @@ namespace ConsentSyncCore.Services.Phis
             throw new Exception($"Column '{columnName}' not found");
         }
 
-        private int? TryGetColumnIndex(IWebDriver driver, string columnName)
+        private int? TryGetColumnIndex(IWebDriver driver, params string[] columnNames)
         {
-            try { return GetColumnIndexByName(driver, columnName); }
-            catch
+            foreach (string columnName in columnNames.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                LoggerService.LogInformation($"   ⚠️  Optional PHIS column '{columnName}' not found");
-                return null;
+                try { return GetColumnIndexByName(driver, columnName); }
+                catch { }
             }
+
+            LoggerService.LogInformation($"   ⚠️  Optional PHIS column '{string.Join("' or '", columnNames)}' not found");
+            return null;
         }
 
         private static string GetCellText(IReadOnlyList<IWebElement> cells, int? index) =>

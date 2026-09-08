@@ -37,9 +37,11 @@ public sealed class CohortPhisSearchRunner
             EnsureSearchSucceeded(dobResult, "DOB", recordLabel);
             CandidateSelection candidates = GetActiveCandidates(dobResult.Results);
             if (candidates.StatusUnavailable) { MarkFailed(record, "ActiveStatusUnavailable"); LogOutcome(recordLabel, record); continue; }
-            if (candidates.Active.Count > 1) { MarkFailed(record, "MultipleClientsFoundInPhis"); LogOutcome(recordLabel, record); continue; }
 
-            if (candidates.Active.Count == 1 && TryResolveByName(record, candidates.Active[0])) { LogOutcome(recordLabel, record); continue; }
+            List<PhisSearchResult> nameMatches = candidates.Active.Where(candidate => IsNameMatch(record, candidate)).ToList();
+            LoggerService.LogInformation($"   {recordLabel}: active DOB candidates={candidates.Active.Count}; qualifying name matches={nameMatches.Count}.");
+            if (nameMatches.Count == 1 && TryMarkFound(record, nameMatches[0])) { LogOutcome(recordLabel, record); continue; }
+            if (nameMatches.Count > 1) { MarkFailed(record, "MultipleMatchingClientsFoundInPhis"); LogOutcome(recordLabel, record); continue; }
 
             if (!string.IsNullOrWhiteSpace(record.Medicare))
             {
@@ -58,14 +60,14 @@ public sealed class CohortPhisSearchRunner
         return records;
     }
 
-    private bool TryResolveByName(ClinicPdfClientRecord record, PhisSearchResult candidate)
+    private bool IsNameMatch(ClinicPdfClientRecord record, PhisSearchResult candidate)
     {
         string sourceName = DisplayName(record);
         string forward = JoinName(candidate.FirstName, candidate.MiddleName, candidate.LastName);
         string reversed = JoinName(candidate.LastName, candidate.FirstName, candidate.MiddleName);
         if (IsTokenMultisetEqual(sourceName, forward) || IsTokenMultisetEqual(sourceName, reversed) ||
             Math.Max(CalculateSimilarity(sourceName, forward), CalculateSimilarity(sourceName, reversed)) >= _threshold)
-            return TryMarkFound(record, candidate);
+            return true;
         return false;
     }
 
