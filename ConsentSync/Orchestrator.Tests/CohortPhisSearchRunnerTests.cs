@@ -172,15 +172,129 @@ public sealed class CohortPhisSearchRunnerTests
             new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01" }]));
     }
 
-    private static PhisSearchResult Active(string id, string first, string last, string middle = "") => new() { ClientId = id, FirstName = first, LastName = last, MiddleName = middle, ActiveStatus = "Active" };
+    [Fact]
+    public async Task ExecuteSearchAsync_PopulatesEmptyEmailFromResolvedPreview()
+    {
+        var search = new FakeSearch
+        {
+            Dob = Success(Active("42", "A", "B")),
+            Preview = new PhisClientPreview { ClientId = "42", EmailAddresses = [new() { Address = "parent@example.test", IsPreferred = true }] }
+        };
+        var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01" };
+
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+
+        Assert.Equal("parent@example.test", record.Email);
+        Assert.Equal(1, search.PreviewCalls);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_PreservesExistingEmailAndSkipsPreview()
+    {
+        var search = new FakeSearch { Dob = Success(Active("42", "A", "B")) };
+        var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01", Email = "supplied value" };
+
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+
+        Assert.Equal("supplied value", record.Email);
+        Assert.Equal(0, search.PreviewCalls);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_LeavesEmailBlankWhenPreviewHasMultipleEligibleAddresses()
+    {
+        var search = new FakeSearch
+        {
+            Dob = Success(Active("42", "A", "B")),
+            Preview = new PhisClientPreview
+            {
+                ClientId = "42",
+                EmailAddresses = [new() { Address = "one@example.test" }, new() { Address = "two@example.test" }]
+            }
+        };
+        var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01" };
+
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+
+        Assert.Null(record.Email);
+        Assert.Equal(ClientIdStatus.Found, record.ClientIdStatus);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_DoesNotUsePreviewForUnresolvedRecord()
+    {
+        var search = new FakeSearch { Dob = Success(Active("42", "Other", "Person")) };
+        var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01" };
+
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+
+        Assert.Equal(0, search.PreviewCalls);
+        Assert.Equal(ClientIdStatus.NeedsManualReview, record.ClientIdStatus);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_UsesEmailFallbackWhenUniqueActiveResultHasSameDob()
+    {
+        var search = new FakeSearch
+        {
+            Dob = Success(Active("1", "Other", "Person")),
+            Email = Success(Active("42", "Different", "Name", dateOfBirth: "2017 Oct 01"))
+        };
+        var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01", Email = "parent@example.test" };
+
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+
+        Assert.Equal(ClientIdStatus.Found, record.ClientIdStatus);
+        Assert.Equal("42", record.ClientId);
+        Assert.Equal(1, search.EmailCalls);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_EmailDobMismatchNeedsManualReviewWithBestMatch()
+    {
+        var search = new FakeSearch
+        {
+            Dob = Success(Active("1", "Other", "Person")),
+            Email = Success(Active("42", "A", "B", dateOfBirth: "2017 Oct 02"))
+        };
+        var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01", Email = "parent@example.test" };
+
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+
+        Assert.Equal(ClientIdStatus.NeedsManualReview, record.ClientIdStatus);
+        Assert.Equal("EmailDateOfBirthMismatch", record.ErrorDetails);
+        Assert.Contains("#42#", record.BestMatch);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_EmailSearchFailureContinuesWithPriorOutcome()
+    {
+        var search = new FakeSearch { Dob = Success(Active("1", "Other", "Person")), ThrowOnEmailSearch = true };
+        var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01", Email = "parent@example.test" };
+
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+
+        Assert.Equal(ClientIdStatus.NeedsManualReview, record.ClientIdStatus);
+        Assert.Equal("NameMatchBelowThreshold", record.ErrorDetails);
+        Assert.Equal(1, search.EmailCalls);
+    }
+
+    private static PhisSearchResult Active(string id, string first, string last, string middle = "", string dateOfBirth = "") => new() { ClientId = id, FirstName = first, LastName = last, MiddleName = middle, DateOfBirth = dateOfBirth, ActiveStatus = "Active" };
     private static SearchResult Success(params PhisSearchResult[] results) => SearchResult.IsSuccess(results.ToList());
 
     private sealed class FakeSearch : IPhisClientSearch
     {
         public SearchResult Dob { get; init; } = SearchResult.NoResults();
         public SearchResult Medicare { get; init; } = SearchResult.NoResults();
+        public SearchResult Email { get; init; } = SearchResult.NoResults();
         public int MedicareCalls { get; private set; }
+        public int EmailCalls { get; private set; }
+        public bool ThrowOnEmailSearch { get; init; }
+        public int PreviewCalls { get; private set; }
+        public PhisClientPreview? Preview { get; init; }
         public Task<SearchResult> SearchByDobAsync(string dateOfBirth, string? expectedFirstName = null, string? expectedLastName = null, string? expectedMedicare = null) => Task.FromResult(Dob);
         public Task<SearchResult> SearchByMedicareAsync(string medicareNumber) { MedicareCalls++; return Task.FromResult(Medicare); }
+        public Task<SearchResult> SearchByEmailAsync(string email) { EmailCalls++; if (ThrowOnEmailSearch) throw new InvalidOperationException("browser failure"); return Task.FromResult(Email); }
+        public Task<PhisClientPreview?> GetClientPreviewAsync(string clientId) { PreviewCalls++; return Task.FromResult(Preview); }
     }
 }

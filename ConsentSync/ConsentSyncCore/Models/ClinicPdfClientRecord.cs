@@ -23,4 +23,7 @@ public class ClinicPdfClientRecord
 
     /// <summary>Highest-scoring PHIS candidate hint for manual review.</summary>
     public string? BestMatch { get; set; }
+
+    /// <summary>Email copied from the resolved PHIS client preview when the CSV did not supply one.</summary>
+    public string? Email { get; set; }
 }

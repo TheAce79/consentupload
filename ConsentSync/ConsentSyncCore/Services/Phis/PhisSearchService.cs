@@ -47,6 +47,50 @@ namespace ConsentSyncCore.Services.Phis
 
         #region Public API
 
+        /// <summary>
+        /// Opens the preview for an already-loaded search result and reads its email addresses.
+        /// A preview problem is recoverable: callers can retain a successful identity resolution.
+        /// </summary>
+        public async Task<PhisClientPreview?> GetClientPreviewAsync(string clientId)
+        {
+            if (string.IsNullOrWhiteSpace(clientId)) return null;
+
+            try
+            {
+                IWebElement row = FindSearchResultRow(clientId);
+                ClearSearchResultSelection();
+                IWebElement checkbox = row.FindElement(By.CssSelector(".ui-chkbox-box"));
+                ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", checkbox);
+                await Task.Delay(_phisConfig.AjaxWaitMs);
+
+                IWebElement previewButton = _wait.Until(d => d.FindElements(By.XPath(
+                    "//*[self::button or self::a or self::input][normalize-space(.)='Preview' or @value='Preview']"))
+                    .FirstOrDefault(element => element.Displayed && element.Enabled)
+                    ?? throw new NoSuchElementException("PHIS Preview button was not available."));
+                ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", previewButton);
+
+                _wait.Until(d => d.FindElements(By.CssSelector("[id*='clientPreview']")).Any(element => element.Displayed));
+                string previewClientId = ReadPreviewClientId();
+                if (!string.Equals(previewClientId, clientId, StringComparison.Ordinal))
+                {
+                    LoggerService.LogWarning($"   PHIS preview Client ID did not match requested Client ID {clientId}.");
+                    await ClosePreviewAsync();
+                    return null;
+                }
+
+                List<PhisEmailAddress> emails = await ReadPreviewEmailAddressesAsync();
+                await ClosePreviewAsync();
+                _sessionManager.UpdateActivity();
+                return new PhisClientPreview { ClientId = previewClientId, EmailAddresses = emails };
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogWarning($"   PHIS client preview could not be retrieved for Client ID {clientId}: {ex.Message}");
+                try { await ClosePreviewAsync(); } catch { }
+                return null;
+            }
+        }
+
 
 
         /// <summary>
@@ -269,12 +313,61 @@ namespace ConsentSyncCore.Services.Phis
         }
 
 
+        /// <summary>
+        /// Searches the PHIS advanced contact criteria by email. All failures are represented as
+        /// a failed result so cohort processing can continue with its prior outcome.
+        /// </summary>
+        public async Task<SearchResult> SearchByEmailAsync(string email)
+        {
+            try
+            {
+                if (!_sessionManager.EnsureSessionValid()) return SearchResult.Failed("Session validation failed");
+                await EnsureOnSearchPageAsync();
+                await ClearSearchFormAsync();
+                await ExecuteEmailSearchAsync(email);
+                await WaitForSearchResultsAsync();
+                List<PhisSearchResult> results = _resultExtractor.ExtractAllResults(_driver);
+                _sessionManager.UpdateActivity();
+                return results.Count == 0 ? SearchResult.NoResults() : SearchResult.IsSuccess(results, _lastResultsCompletenessVerified);
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogWarning($"   PHIS email search failed: {ex.Message}");
+                return SearchResult.Failed("Email search could not be completed.");
+            }
+        }
+
         #endregion Public API
 
 
 
 
         #region Search Execution Methods
+
+        private async Task ExecuteEmailSearchAsync(string email)
+        {
+            const string advancedPanel = "form:dataTable:clientSearchId:searchComponentId:clientSearchAdvanced_AdvancedSearchPanel";
+            const string contactPanel = "form:dataTable:clientSearchId:searchComponentId:clientSearchAdvanced_ContactPanel";
+            const string emailInput = "form:dataTable:clientSearchId:searchComponentId:clientSearchAdvanced_Email:email";
+
+            ExpandPanelIfCollapsed(advancedPanel);
+            ExpandPanelIfCollapsed(contactPanel);
+            IWebElement input = _wait.Until(d => d.FindElement(By.Id(emailInput)));
+            ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input', { bubbles: true })); arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", input, email);
+            if (!string.Equals(input.GetAttribute("value")?.Trim(), email, StringComparison.Ordinal))
+                throw new InvalidOperationException("PHIS email search field could not be populated.");
+            await ClickSearchButtonAsync();
+        }
+
+        private void ExpandPanelIfCollapsed(string panelId)
+        {
+            IWebElement panel = _wait.Until(d => d.FindElement(By.Id(panelId)));
+            string? collapsed = _driver.FindElements(By.Id(panelId + "_collapsed")).FirstOrDefault()?.GetAttribute("value");
+            if (!string.Equals(collapsed, "true", StringComparison.OrdinalIgnoreCase)) return;
+            IWebElement toggler = panel.FindElement(By.CssSelector(".ui-panel-titlebar-icon"));
+            ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", toggler);
+            _wait.Until(d => !string.Equals(d.FindElement(By.Id(panelId + "_collapsed")).GetAttribute("value"), "true", StringComparison.OrdinalIgnoreCase));
+        }
 
 
 
@@ -1950,6 +2043,84 @@ namespace ConsentSyncCore.Services.Phis
 
 
         #region Helper Methods
+
+        private IWebElement FindSearchResultRow(string clientId)
+        {
+            IWebElement table = _wait.Until(d => d.FindElement(By.Id("form:dataTable:dataTable")));
+            int clientIdColumn = table.FindElements(By.CssSelector("thead th"))
+                .Select((header, index) => new { header, index })
+                .FirstOrDefault(item => item.header.Text.Trim().Equals("Client ID", StringComparison.OrdinalIgnoreCase))?.index
+                ?? throw new InvalidOperationException("PHIS Client ID column was not found.");
+            IWebElement? row = table.FindElements(By.CssSelector("tbody tr[data-rk], tbody tr[role='row']"))
+                .FirstOrDefault(candidate => candidate.FindElements(By.TagName("td")).Count > clientIdColumn &&
+                    candidate.FindElements(By.TagName("td"))[clientIdColumn].Text.Trim().Equals(clientId, StringComparison.Ordinal));
+            return row ?? throw new InvalidOperationException($"Resolved Client ID {clientId} was not found in the current PHIS results.");
+        }
+
+        private void ClearSearchResultSelection()
+        {
+            foreach (IWebElement selected in _driver.FindElements(By.CssSelector("#form\\:dataTable\\:dataTable_data .ui-chkbox-box.ui-state-active")))
+                ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", selected);
+        }
+
+        private string ReadPreviewClientId()
+        {
+            IWebElement label = _wait.Until(d => d.FindElements(By.CssSelector("[id*='clientPreview'] [id$='clientInfoId_label']"))
+                .FirstOrDefault(element => element.Text.Trim().Equals("Client ID:", StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException("PHIS preview Client ID was not available."));
+            return label.FindElement(By.XPath("following::span[contains(@class, 'phsdsm-text')][1]")).Text.Trim();
+        }
+
+        private async Task<List<PhisEmailAddress>> ReadPreviewEmailAddressesAsync()
+        {
+            IWebElement? panel = _driver.FindElements(By.CssSelector("[id$='clientEmailAddressPanel']")).FirstOrDefault();
+            if (panel is null) return [];
+
+            IWebElement? table = panel.FindElements(By.CssSelector("table")).FirstOrDefault();
+            if (table is null) return [];
+            int emailColumn = GetPreviewColumnIndex(table, "emailColumn");
+            int preferredColumn = GetPreviewColumnIndex(table, "emailPreferredColumn");
+            var emails = new List<PhisEmailAddress>();
+            string? previousPage = null;
+
+            while (true)
+            {
+                foreach (IWebElement row in table.FindElements(By.CssSelector("tbody tr[role='row']")))
+                {
+                    IReadOnlyCollection<IWebElement> cells = row.FindElements(By.TagName("td"));
+                    if (cells.Count <= Math.Max(emailColumn, preferredColumn)) continue;
+                    string address = cells.ElementAt(emailColumn).Text.Trim();
+                    string preferred = cells.ElementAt(preferredColumn).Text.Trim();
+                    emails.Add(new PhisEmailAddress { Address = address, IsPreferred = preferred.Equals("Preferred", StringComparison.OrdinalIgnoreCase) || preferred.Equals("Yes", StringComparison.OrdinalIgnoreCase) || preferred.Equals("True", StringComparison.OrdinalIgnoreCase) });
+                }
+
+                IWebElement? next = panel.FindElements(By.CssSelector(".ui-paginator-next")).FirstOrDefault();
+                if (next is null || (next.GetAttribute("class") ?? string.Empty).Contains("ui-state-disabled")) break;
+                string pageMarker = string.Join("|", table.FindElements(By.CssSelector("tbody tr[role='row']")).Select(row => row.Text));
+                if (pageMarker == previousPage) break;
+                previousPage = pageMarker;
+                ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", next);
+                _wait.Until(_ => string.Join("|", table.FindElements(By.CssSelector("tbody tr[role='row']")).Select(row => row.Text)) != pageMarker);
+                await Task.Delay(Math.Min(_phisConfig.AjaxWaitMs, 300));
+            }
+            return emails;
+        }
+
+        private static int GetPreviewColumnIndex(IWebElement table, string columnIdSuffix) =>
+            table.FindElements(By.CssSelector("thead th")).Select((header, index) => new { header, index })
+                .FirstOrDefault(item => (item.header.GetAttribute("id") ?? string.Empty).EndsWith(columnIdSuffix, StringComparison.Ordinal))?.index
+                ?? throw new InvalidOperationException($"PHIS preview column '{columnIdSuffix}' was not found.");
+
+        private async Task ClosePreviewAsync()
+        {
+            IWebElement? close = _driver.FindElements(By.CssSelector("[id*='clientPreview'] .ui-dialog-titlebar-close, [id*='clientPreview'] [aria-label='Close']"))
+                .FirstOrDefault(element => element.Displayed);
+            if (close is null) return;
+            ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", close);
+            _wait.Until(d => !d.FindElements(By.CssSelector("[id*='clientPreview'] .ui-dialog-titlebar-close, [id*='clientPreview'] [aria-label='Close']"))
+                .Any(element => element.Displayed));
+            await Task.Delay(Math.Min(_phisConfig.AjaxWaitMs, 300));
+        }
 
 
         /// <summary>

@@ -45,7 +45,7 @@ public static class CsvImporterService
                     Medicare = NullIfEmpty(Get(csv, "Medicare")), ClientIdStatus = (ClientIdStatus)statusValue,
                     FirstName = NullIfEmpty(Get(csv, "FirstName")), LastName = NullIfEmpty(Get(csv, "LastName")),
                     MiddleName = NullIfEmpty(Get(csv, "MiddleName")), ErrorDetails = NullIfEmpty(Get(csv, "ErrorDetails")),
-                    BestMatch = NullIfEmpty(Get(csv, "BestMatch"))
+                    BestMatch = NullIfEmpty(Get(csv, "BestMatch")), Email = NullIfEmpty(Get(csv, "Email"))
                 });
             }
             catch (Exception ex) when (ex is not FormatException || !ex.Message.Contains("row", StringComparison.OrdinalIgnoreCase))

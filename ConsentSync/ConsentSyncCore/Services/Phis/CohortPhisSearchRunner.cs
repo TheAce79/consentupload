@@ -43,7 +43,7 @@ public sealed class CohortPhisSearchRunner
             SetBestMatch(record, scoredDobCandidates);
             List<CandidateScore> nameMatches = scoredDobCandidates.Where(candidate => candidate.IsTokenMatch || candidate.Score >= _threshold).ToList();
             LoggerService.LogInformation($"   {recordLabel}: active DOB candidates={candidates.Active.Count}; qualifying name matches={nameMatches.Count}.");
-            if (nameMatches.Count == 1) { MarkFound(record, nameMatches[0]); LogOutcome(recordLabel, record); continue; }
+            if (nameMatches.Count == 1) { await MarkFoundAsync(record, nameMatches[0]); LogOutcome(recordLabel, record); continue; }
             if (nameMatches.Count > 1) { MarkFailed(record, "MultipleMatchingClientsFound"); LogOutcome(recordLabel, record); continue; }
 
             if (!string.IsNullOrWhiteSpace(record.Medicare))
@@ -56,7 +56,13 @@ public sealed class CohortPhisSearchRunner
                 List<CandidateScore> scoredMedicareCandidates = ScoreCandidates(record, medicareCandidates.Active);
                 if (scoredMedicareCandidates.Count > 0) SetBestMatch(record, scoredMedicareCandidates);
                 if (scoredMedicareCandidates.Count > 1) { MarkFailed(record, "MultipleClientsFoundInPhis"); LogOutcome(recordLabel, record); continue; }
-                if (scoredMedicareCandidates.Count == 1) { MarkFound(record, scoredMedicareCandidates[0]); LogOutcome(recordLabel, record); continue; }
+                if (scoredMedicareCandidates.Count == 1) { await MarkFoundAsync(record, scoredMedicareCandidates[0]); LogOutcome(recordLabel, record); continue; }
+            }
+
+            if (IsValidEmail(record.Email) && await TryResolveByEmailAsync(record, recordLabel))
+            {
+                LogOutcome(recordLabel, record);
+                continue;
             }
 
             MarkFailed(record, candidates.Active.Count == 0 ? "NoActiveClientFoundInPhis" : "NameMatchBelowThreshold");
@@ -85,14 +91,97 @@ public sealed class CohortPhisSearchRunner
         if (best is not null) record.BestMatch = FormatBestMatch(best.Candidate, best.Score);
     }
 
-    private static void MarkFound(ClinicPdfClientRecord record, CandidateScore scoredCandidate)
+    private async Task MarkFoundAsync(ClinicPdfClientRecord record, CandidateScore scoredCandidate)
     {
         PhisSearchResult candidate = scoredCandidate.Candidate;
         if (string.IsNullOrWhiteSpace(candidate.ClientId)) { MarkFailed(record, "MissingClientId"); return; }
         record.ClientId = candidate.ClientId; record.ClientIdStatus = ClientIdStatus.Found; record.FirstName = candidate.FirstName;
         record.LastName = candidate.LastName; record.MiddleName = candidate.MiddleName; record.ErrorDetails = null;
         record.BestMatch = FormatBestMatch(candidate, scoredCandidate.Score);
+        await PopulateEmailAsync(record);
     }
+
+    private async Task PopulateEmailAsync(ClinicPdfClientRecord record)
+    {
+        if (!string.IsNullOrWhiteSpace(record.Email) || string.IsNullOrWhiteSpace(record.ClientId)) return;
+
+        try
+        {
+            PhisClientPreview? preview = await _searchService.GetClientPreviewAsync(record.ClientId);
+            if (preview is null || !string.Equals(preview.ClientId, record.ClientId, StringComparison.Ordinal))
+            {
+                LoggerService.LogWarning($"   PHIS preview was unavailable or did not match resolved Client ID {record.ClientId}; email was not populated.");
+                return;
+            }
+
+            List<PhisEmailAddress> valid = preview.EmailAddresses
+                .Select(address => new PhisEmailAddress { Address = address.Address.Trim(), IsPreferred = address.IsPreferred })
+                .Where(address => IsValidEmail(address.Address))
+                .GroupBy(address => address.Address, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new PhisEmailAddress { Address = group.First().Address, IsPreferred = group.Any(address => address.IsPreferred) })
+                .ToList();
+            List<PhisEmailAddress> preferred = valid.Where(address => address.IsPreferred).ToList();
+            IReadOnlyList<PhisEmailAddress> choice = preferred.Count > 0 ? preferred : valid;
+            if (choice.Count == 1) record.Email = choice[0].Address;
+            else if (choice.Count > 1) LoggerService.LogWarning($"   PHIS preview has multiple eligible email addresses for Client ID {record.ClientId}; email was not populated.");
+            else LoggerService.LogInformation($"   PHIS preview has no valid email address for Client ID {record.ClientId}.");
+        }
+        catch (Exception ex)
+        {
+            LoggerService.LogWarning($"   PHIS email preview could not be read for Client ID {record.ClientId}: {ex.Message}");
+        }
+    }
+
+    private static bool IsValidEmail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        try { return new System.Net.Mail.MailAddress(value).Address.Equals(value, StringComparison.OrdinalIgnoreCase); }
+        catch { return false; }
+    }
+
+    private async Task<bool> TryResolveByEmailAsync(ClinicPdfClientRecord record, string recordLabel)
+    {
+        try
+        {
+            SearchResult emailResult = await _searchService.SearchByEmailAsync(record.Email!.Trim());
+            LogSearchResult(recordLabel, "Email", emailResult);
+            if (!emailResult.Success || (emailResult.HasResults && !emailResult.ResultsComplete))
+            {
+                LoggerService.LogWarning($"   {recordLabel}: PHIS email fallback failed or was incomplete; continuing without email resolution.");
+                return false;
+            }
+
+            CandidateSelection candidates = GetActiveCandidates(emailResult.Results);
+            if (candidates.StatusUnavailable)
+            {
+                LoggerService.LogWarning($"   {recordLabel}: PHIS email fallback returned an unavailable client status; continuing without email resolution.");
+                return false;
+            }
+
+            List<CandidateScore> scored = ScoreCandidates(record, candidates.Active);
+            List<CandidateScore> sameDob = scored.Where(candidate => DatesMatch(record.DateOfBirth, candidate.Candidate.DateOfBirth)).ToList();
+            if (sameDob.Count == 1) { await MarkFoundAsync(record, sameDob[0]); return true; }
+            if (sameDob.Count > 1) { SetBestMatch(record, sameDob); MarkFailed(record, "MultipleClientsFoundByEmailAndDateOfBirth"); return true; }
+            if (scored.Count > 0)
+            {
+                SetBestMatch(record, scored);
+                bool unavailableDob = scored.Any(candidate => !TryNormalizeDate(candidate.Candidate.DateOfBirth, out _));
+                MarkFailed(record, unavailableDob ? "EmailDateOfBirthUnavailable" : "EmailDateOfBirthMismatch");
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerService.LogWarning($"   {recordLabel}: PHIS email fallback failed; continuing without email resolution. {ex.Message}");
+        }
+        return false;
+    }
+
+    private static bool DatesMatch(string left, string right) =>
+        TryNormalizeDate(left, out DateOnly leftDate) && TryNormalizeDate(right, out DateOnly rightDate) && leftDate == rightDate;
+
+    private static bool TryNormalizeDate(string value, out DateOnly date) =>
+        DateOnly.TryParseExact(value.Trim(), ["yyyy/MM/dd", "yyyy-MM-dd", "yyyy MMM dd", "yyyy MMMM dd"], CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out date);
 
     private static CandidateSelection GetActiveCandidates(IEnumerable<PhisSearchResult> results)
     {

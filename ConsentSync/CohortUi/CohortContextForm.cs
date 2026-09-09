@@ -299,8 +299,11 @@ public partial class CohortContextForm : Form
                 finally { driver.Dispose(); }
             });
             CsvExporterService.SaveToCsv(updated, outputCsvPath);
+            int manualReviewCount = updated.Count(record => record.ClientIdStatus == ConsentSyncCore.Models.ClientIdStatus.NeedsManualReview);
             LoggerService.LogInformation($"✅ Phase 2 complete. Enriched CSV saved: {outputCsvPath}");
-            MessageBox.Show(this, $"Phase 2 complete.\n\nEnriched CSV saved to:\n{outputCsvPath}", "Search Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this,
+                $"PHIS search complete.\n\nTotal records: {updated.Count}\nRecords needing manual review: {manualReviewCount}\n\nEnriched CSV saved to:\n{outputCsvPath}",
+                "Search Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {

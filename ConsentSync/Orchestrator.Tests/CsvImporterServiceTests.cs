@@ -41,6 +41,14 @@ public sealed class CsvImporterServiceTests : IDisposable
     }
 
     [Fact]
+    public void ReadFromCsv_PreservesOptionalEmail()
+    {
+        string path = Path.Combine(_directory, "email.csv");
+        CsvExporterService.SaveToCsv([new ClinicPdfClientRecord { FullName = "Name", DateOfBirth = "2017/10/01", Email = "parent@example.test" }], path);
+        Assert.Equal("parent@example.test", Assert.Single(CsvImporterService.ReadFromCsv(path)).Email);
+    }
+
+    [Fact]
     public void ReadFromCsv_ReportsMalformedRows()
     {
         string path = Path.Combine(_directory, "bad.csv");
