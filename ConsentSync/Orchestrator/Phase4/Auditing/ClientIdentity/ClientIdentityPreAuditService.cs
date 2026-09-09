@@ -10,7 +10,7 @@ namespace Orchestrator.Phase4.Auditing.ClientIdentity;
 
 public sealed class ClientIdentityPreAuditService
 {
-    private static readonly string[] RequiredUploadHeaders = ["ClientID", "Last Name", "First Name", "VerifStatus", "FailureReason", "Remarks By Melisa"];
+    private static readonly string[] RequiredUploadHeaders = ["ClientID", "Last Name", "First Name", "VerifStatus", "FailureReason"];
     private static readonly string[] RequiredRosterHeaders = ["ClientId", "ClientName", "DateOfBirth", "Gender"];
     private static readonly HashSet<string> ClientIdentityAuditHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -64,7 +64,7 @@ public sealed class ClientIdentityPreAuditService
             var uploadRow = new UploadAuditRow(
                 GetField(rawFields, headers["ClientID"]), GetField(rawFields, headers["Last Name"]),
                 GetField(rawFields, headers["First Name"]), GetField(rawFields, headers["VerifStatus"]),
-                GetField(rawFields, headers["FailureReason"]), GetField(rawFields, headers["Remarks By Melisa"]));
+                GetField(rawFields, headers["FailureReason"]), GetOptionalField(rawFields, headers, "Remarks By Melisa"));
             string normalizedClientId = NormalizeClientId(uploadRow.RawClientId);
             if (!string.IsNullOrEmpty(normalizedClientId)) uniqueClientIds.Add(normalizedClientId);
 
@@ -399,6 +399,8 @@ public sealed class ClientIdentityPreAuditService
     private static string TryGetUniqueRosterName(string clientId, IReadOnlyDictionary<string, List<MassImmunisationRosterRecord>> rosterByClientId) => rosterByClientId.TryGetValue(clientId, out List<MassImmunisationRosterRecord>? matches) && matches.Count == 1 ? matches[0].ClientName : string.Empty;
     private static string NormalizeClientId(string value) => (value ?? string.Empty).Trim();
     private static string GetField(IReadOnlyList<string> row, int index) => index >= 0 && index < row.Count ? row[index] ?? string.Empty : string.Empty;
+    private static string GetOptionalField(IReadOnlyList<string> row, IReadOnlyDictionary<string, int> headerIndexes, string header) =>
+        headerIndexes.TryGetValue(header, out int index) ? GetField(row, index) : string.Empty;
 
     private sealed record CsvTable(string[] Headers, List<string[]> Rows);
     private sealed record UploadAuditRow(string RawClientId, string RawLastName, string RawFirstName, string RawVerifStatus, string RawFailureReason, string RawRemarksByMelisa);

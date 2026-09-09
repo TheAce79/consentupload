@@ -23,6 +23,8 @@ namespace ConsentSyncCore.Services.Phis
         private readonly PhisSessionManager _sessionManager;
         private readonly PhisConfig _phisConfig;
         private bool _lastResultsCompletenessVerified = true;
+        private const string PreviewDialogId = "form:dataTable:clientPreview:previewDialog";
+        private const string PreviewOverlayId = "form:dataTable:clientPreview:previewDialog_modal";
 
 
         // Constructor with dependency injection
@@ -69,25 +71,26 @@ namespace ConsentSyncCore.Services.Phis
                     ?? throw new NoSuchElementException("PHIS Preview button was not available."));
                 ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", previewButton);
 
-                _wait.Until(d => d.FindElements(By.CssSelector("[id*='clientPreview']")).Any(element => element.Displayed));
-                string previewClientId = ReadPreviewClientId();
+                string previewClientId = WaitForPreviewClientId();
                 if (!string.Equals(previewClientId, clientId, StringComparison.Ordinal))
                 {
                     LoggerService.LogWarning($"   PHIS preview Client ID did not match requested Client ID {clientId}.");
-                    await ClosePreviewAsync();
                     return null;
                 }
 
                 List<PhisEmailAddress> emails = await ReadPreviewEmailAddressesAsync();
-                await ClosePreviewAsync();
                 _sessionManager.UpdateActivity();
                 return new PhisClientPreview { ClientId = previewClientId, EmailAddresses = emails };
             }
             catch (Exception ex)
             {
                 LoggerService.LogWarning($"   PHIS client preview could not be retrieved for Client ID {clientId}: {ex.Message}");
-                try { await ClosePreviewAsync(); } catch { }
                 return null;
+            }
+            finally
+            {
+                if (!await EnsurePreviewClosedAsync())
+                    LoggerService.LogWarning("   PHIS client preview could not be closed; search page recovery failed.");
             }
         }
 
@@ -2063,12 +2066,22 @@ namespace ConsentSyncCore.Services.Phis
                 ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", selected);
         }
 
-        private string ReadPreviewClientId()
+        private string WaitForPreviewClientId()
         {
-            IWebElement label = _wait.Until(d => d.FindElements(By.CssSelector("[id*='clientPreview'] [id$='clientInfoId_label']"))
-                .FirstOrDefault(element => element.Text.Trim().Equals("Client ID:", StringComparison.OrdinalIgnoreCase))
-                ?? throw new InvalidOperationException("PHIS preview Client ID was not available."));
-            return label.FindElement(By.XPath("following::span[contains(@class, 'phsdsm-text')][1]")).Text.Trim();
+            string? clientId = _wait.Until(d =>
+            {
+            try
+            {
+                IWebElement? label = d.FindElements(By.CssSelector("[id*='clientPreview'] [id$='clientInfoId_label']"))
+                    .FirstOrDefault(element => element.Displayed && element.Text.Trim().Equals("Client ID:", StringComparison.OrdinalIgnoreCase));
+                if (label is null) return null;
+                string value = label.FindElement(By.XPath("following::span[contains(@class, 'phsdsm-text')][1]")).Text.Trim();
+                return string.IsNullOrWhiteSpace(value) ? null : value;
+            }
+            catch (StaleElementReferenceException) { return null; }
+            catch (NoSuchElementException) { return null; }
+            });
+            return clientId ?? throw new InvalidOperationException("PHIS preview Client ID was not available.");
         }
 
         private async Task<List<PhisEmailAddress>> ReadPreviewEmailAddressesAsync()
@@ -2111,15 +2124,62 @@ namespace ConsentSyncCore.Services.Phis
                 .FirstOrDefault(item => (item.header.GetAttribute("id") ?? string.Empty).EndsWith(columnIdSuffix, StringComparison.Ordinal))?.index
                 ?? throw new InvalidOperationException($"PHIS preview column '{columnIdSuffix}' was not found.");
 
-        private async Task ClosePreviewAsync()
+        private async Task<bool> EnsurePreviewClosedAsync()
         {
-            IWebElement? close = _driver.FindElements(By.CssSelector("[id*='clientPreview'] .ui-dialog-titlebar-close, [id*='clientPreview'] [aria-label='Close']"))
-                .FirstOrDefault(element => element.Displayed);
-            if (close is null) return;
-            ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", close);
-            _wait.Until(d => !d.FindElements(By.CssSelector("[id*='clientPreview'] .ui-dialog-titlebar-close, [id*='clientPreview'] [aria-label='Close']"))
-                .Any(element => element.Displayed));
-            await Task.Delay(Math.Min(_phisConfig.AjaxWaitMs, 300));
+            if (!IsPreviewOpen()) return true;
+
+            try
+            {
+                IWebElement? close = _driver.FindElements(By.CssSelector($"[id='{PreviewDialogId}'] .ui-dialog-titlebar-close, [id^='{PreviewDialogId}'] .ui-dialog-titlebar-close"))
+                    .FirstOrDefault(element => element.Displayed);
+                if (close is not null) ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", close);
+                await Task.Delay(Math.Min(_phisConfig.AjaxWaitMs, 300));
+                if (!IsPreviewOpen()) return true;
+
+                ((IJavaScriptExecutor)_driver).ExecuteScript(@"
+                    var dialogId = arguments[0];
+                    if (!window.PrimeFaces || !PrimeFaces.widgets) return;
+                    Object.keys(PrimeFaces.widgets).forEach(function(key) {
+                        var widget = PrimeFaces.widgets[key];
+                        if (widget && widget.cfg && widget.cfg.id === dialogId && typeof widget.hide === 'function') widget.hide();
+                    });", PreviewDialogId);
+                _wait.Until(_ => !IsPreviewOpen());
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogWarning($"   PHIS preview close did not complete: {ex.Message}");
+            }
+
+            try
+            {
+                _driver.Navigate().GoToUrl(_phisConfig.SearchUrl);
+                await Task.Delay(_phisConfig.PageLoadDelayMs);
+                _wait.Until(d => d.FindElements(By.Id("form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input")).Count > 0);
+                return !IsPreviewOpen();
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogWarning($"   PHIS search page recovery failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private bool IsPreviewOverlayVisible()
+        {
+            try { return _driver.FindElements(By.Id(PreviewOverlayId)).Any(element => element.Displayed); }
+            catch (StaleElementReferenceException) { return true; }
+        }
+
+        private bool IsPreviewOpen()
+        {
+            if (IsPreviewOverlayVisible()) return true;
+            try
+            {
+                return _driver.FindElements(By.CssSelector($"[id='{PreviewDialogId}'].ui-dialog, [id^='{PreviewDialogId}'] .ui-dialog"))
+                    .Any(element => element.Displayed);
+            }
+            catch (StaleElementReferenceException) { return true; }
         }
 
 
@@ -2150,7 +2210,14 @@ namespace ConsentSyncCore.Services.Phis
         /// </summary>
         private async Task ClickSearchButtonAsync()
         {
-            var searchButton = _driver.FindElement(By.Id("actionMenuSearch:commandButtonId"));
+            if (!await EnsurePreviewClosedAsync())
+                throw new InvalidOperationException("PHIS client preview overlay could not be cleared before search.");
+            _wait.Until(_ => IsPrimeFacesAjaxQueueEmpty());
+            var searchButton = _wait.Until(d =>
+            {
+                IWebElement button = d.FindElement(By.Id("actionMenuSearch:commandButtonId"));
+                return button.Displayed && button.Enabled ? button : null;
+            });
             searchButton.Click();
 
              LoggerService.LogInformation($"   🔎 Search clicked");
@@ -2328,6 +2395,8 @@ namespace ConsentSyncCore.Services.Phis
         /// </summary>
         private async Task EnsureOnSearchPageAsync()
         {
+            if (!await EnsurePreviewClosedAsync())
+                throw new InvalidOperationException("PHIS client preview overlay could not be cleared before opening search.");
             var searchForm = _driver.FindElements(By.Id(
                 "form:dataTable:clientSearchId:searchComponentId:clientSearchBasic_dobAgeCriteriaType:clientSearchBasic_dobAgeCriteriaTypeDob:dateInput_input"));
 
@@ -2355,6 +2424,8 @@ namespace ConsentSyncCore.Services.Phis
         /// </summary>
         private async Task ClearSearchFormAsync()
         {
+            if (!await EnsurePreviewClosedAsync())
+                throw new InvalidOperationException("PHIS client preview overlay could not be cleared before resetting search criteria.");
             try
             {
                 var resetButton = _driver.FindElements(By.Id("actionMenuReset:commandButtonId"));
