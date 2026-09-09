@@ -22,6 +22,7 @@ public sealed class CohortPhisSearchRunner
         for (int i = 0; i < records.Count; i++)
         {
             ClinicPdfClientRecord record = records[i];
+            record.BestMatch = null;
             string recordLabel = $"Record {i + 1}/{records.Count} ({DisplayName(record)}, DOB {record.DateOfBirth})";
             LoggerService.LogInformation($"\n🔎 Phase 2 {recordLabel}");
             progress?.Report(new Phase2Progress(i + 1, records.Count, record.DateOfBirth, DisplayName(record)));
@@ -38,10 +39,12 @@ public sealed class CohortPhisSearchRunner
             CandidateSelection candidates = GetActiveCandidates(dobResult.Results);
             if (candidates.StatusUnavailable) { MarkFailed(record, "ActiveStatusUnavailable"); LogOutcome(recordLabel, record); continue; }
 
-            List<PhisSearchResult> nameMatches = candidates.Active.Where(candidate => IsNameMatch(record, candidate)).ToList();
+            List<CandidateScore> scoredDobCandidates = ScoreCandidates(record, candidates.Active);
+            SetBestMatch(record, scoredDobCandidates);
+            List<CandidateScore> nameMatches = scoredDobCandidates.Where(candidate => candidate.IsTokenMatch || candidate.Score >= _threshold).ToList();
             LoggerService.LogInformation($"   {recordLabel}: active DOB candidates={candidates.Active.Count}; qualifying name matches={nameMatches.Count}.");
-            if (nameMatches.Count == 1 && TryMarkFound(record, nameMatches[0])) { LogOutcome(recordLabel, record); continue; }
-            if (nameMatches.Count > 1) { MarkFailed(record, "MultipleMatchingClientsFoundInPhis"); LogOutcome(recordLabel, record); continue; }
+            if (nameMatches.Count == 1) { MarkFound(record, nameMatches[0]); LogOutcome(recordLabel, record); continue; }
+            if (nameMatches.Count > 1) { MarkFailed(record, "MultipleMatchingClientsFound"); LogOutcome(recordLabel, record); continue; }
 
             if (!string.IsNullOrWhiteSpace(record.Medicare))
             {
@@ -50,8 +53,10 @@ public sealed class CohortPhisSearchRunner
                 EnsureSearchSucceeded(medicareResult, "Medicare", recordLabel);
                 CandidateSelection medicareCandidates = GetActiveCandidates(medicareResult.Results);
                 if (medicareCandidates.StatusUnavailable) { MarkFailed(record, "ActiveStatusUnavailable"); LogOutcome(recordLabel, record); continue; }
-                if (medicareCandidates.Active.Count > 1) { MarkFailed(record, "MultipleClientsFoundInPhis"); LogOutcome(recordLabel, record); continue; }
-                if (medicareCandidates.Active.Count == 1 && TryMarkFound(record, medicareCandidates.Active[0])) { LogOutcome(recordLabel, record); continue; }
+                List<CandidateScore> scoredMedicareCandidates = ScoreCandidates(record, medicareCandidates.Active);
+                if (scoredMedicareCandidates.Count > 0) SetBestMatch(record, scoredMedicareCandidates);
+                if (scoredMedicareCandidates.Count > 1) { MarkFailed(record, "MultipleClientsFoundInPhis"); LogOutcome(recordLabel, record); continue; }
+                if (scoredMedicareCandidates.Count == 1) { MarkFound(record, scoredMedicareCandidates[0]); LogOutcome(recordLabel, record); continue; }
             }
 
             MarkFailed(record, candidates.Active.Count == 0 ? "NoActiveClientFoundInPhis" : "NameMatchBelowThreshold");
@@ -60,23 +65,33 @@ public sealed class CohortPhisSearchRunner
         return records;
     }
 
-    private bool IsNameMatch(ClinicPdfClientRecord record, PhisSearchResult candidate)
+    private List<CandidateScore> ScoreCandidates(ClinicPdfClientRecord record, IEnumerable<PhisSearchResult> candidates)
     {
         string sourceName = DisplayName(record);
-        string forward = JoinName(candidate.FirstName, candidate.MiddleName, candidate.LastName);
-        string reversed = JoinName(candidate.LastName, candidate.FirstName, candidate.MiddleName);
-        if (IsTokenMultisetEqual(sourceName, forward) || IsTokenMultisetEqual(sourceName, reversed) ||
-            Math.Max(CalculateSimilarity(sourceName, forward), CalculateSimilarity(sourceName, reversed)) >= _threshold)
-            return true;
-        return false;
+        return candidates.Select(candidate =>
+        {
+            string forward = JoinName(candidate.FirstName, candidate.MiddleName, candidate.LastName);
+            string reversed = JoinName(candidate.LastName, candidate.FirstName, candidate.MiddleName);
+            bool tokenMatch = IsTokenMultisetEqual(sourceName, forward) || IsTokenMultisetEqual(sourceName, reversed) ||
+                              IsTokenSubsetMatch(sourceName, forward) || IsTokenSubsetMatch(sourceName, reversed);
+            double score = tokenMatch ? 100d : Math.Max(CalculateSimilarity(sourceName, forward), CalculateSimilarity(sourceName, reversed));
+            return new CandidateScore(candidate, score, tokenMatch);
+        }).ToList();
     }
 
-    private static bool TryMarkFound(ClinicPdfClientRecord record, PhisSearchResult candidate)
+    private static void SetBestMatch(ClinicPdfClientRecord record, IEnumerable<CandidateScore> candidates)
     {
-        if (string.IsNullOrWhiteSpace(candidate.ClientId)) { MarkFailed(record, "MissingClientId"); return true; }
+        CandidateScore? best = candidates.OrderByDescending(candidate => candidate.Score).FirstOrDefault();
+        if (best is not null) record.BestMatch = FormatBestMatch(best.Candidate, best.Score);
+    }
+
+    private static void MarkFound(ClinicPdfClientRecord record, CandidateScore scoredCandidate)
+    {
+        PhisSearchResult candidate = scoredCandidate.Candidate;
+        if (string.IsNullOrWhiteSpace(candidate.ClientId)) { MarkFailed(record, "MissingClientId"); return; }
         record.ClientId = candidate.ClientId; record.ClientIdStatus = ClientIdStatus.Found; record.FirstName = candidate.FirstName;
         record.LastName = candidate.LastName; record.MiddleName = candidate.MiddleName; record.ErrorDetails = null;
-        return true;
+        record.BestMatch = FormatBestMatch(candidate, scoredCandidate.Score);
     }
 
     private static CandidateSelection GetActiveCandidates(IEnumerable<PhisSearchResult> results)
@@ -104,6 +119,18 @@ public sealed class CohortPhisSearchRunner
     private static string DisplayName(ClinicPdfClientRecord r) => !string.IsNullOrWhiteSpace(r.FullName) ? r.FullName : JoinName(r.FirstName, r.MiddleName, r.LastName);
     private static string JoinName(params string?[] names) => string.Join(' ', names.Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n!.Trim()));
     internal static bool IsTokenMultisetEqual(string a, string b) => Tokenize(a).OrderBy(x => x, StringComparer.Ordinal).SequenceEqual(Tokenize(b).OrderBy(x => x, StringComparer.Ordinal));
+    internal static bool IsTokenSubsetMatch(string source, string candidate)
+    {
+        string[] sourceTokens = Tokenize(source).ToArray();
+        if (sourceTokens.Length == 0) return false;
+        var candidateCounts = Tokenize(candidate).GroupBy(token => token).ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        foreach (string token in sourceTokens)
+        {
+            if (!candidateCounts.TryGetValue(token, out int count) || count == 0) return false;
+            candidateCounts[token] = count - 1;
+        }
+        return true;
+    }
     internal static double CalculateSimilarity(string a, string b)
     {
         string left = string.Concat(Tokenize(a)); string right = string.Concat(Tokenize(b));
@@ -117,6 +144,10 @@ public sealed class CohortPhisSearchRunner
     private static IEnumerable<string> Tokenize(string value) => RemoveDiacritics(value).ToUpperInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries);
     private static string RemoveDiacritics(string value) { var sb = new StringBuilder(); foreach (char c in value.Normalize(NormalizationForm.FormD)) if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark) sb.Append(char.IsLetterOrDigit(c) ? c : ' '); return sb.ToString().Normalize(NormalizationForm.FormC); }
     private sealed record CandidateSelection(List<PhisSearchResult> Active, bool StatusUnavailable);
+    private sealed record CandidateScore(PhisSearchResult Candidate, double Score, bool IsTokenMatch);
+    private static string FormatBestMatch(PhisSearchResult candidate, double score) =>
+        $"{TrimOrEmpty(candidate.FirstName)}#{TrimOrEmpty(candidate.LastName)}#{TrimOrEmpty(candidate.MiddleName)}#{TrimOrEmpty(candidate.ClientId)}#{score.ToString("F1", CultureInfo.InvariantCulture)}%";
+    private static string TrimOrEmpty(string? value) => value?.Trim() ?? string.Empty;
 }
 
 public sealed record Phase2Progress(int Current, int Total, string DateOfBirth, string StudentName);

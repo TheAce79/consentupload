@@ -20,4 +20,7 @@ public class ClinicPdfClientRecord
 
     /// <summary>Reason a PHIS resolution needs manual review.</summary>
     public string? ErrorDetails { get; set; }
+
+    /// <summary>Highest-scoring PHIS candidate hint for manual review.</summary>
+    public string? BestMatch { get; set; }
 }

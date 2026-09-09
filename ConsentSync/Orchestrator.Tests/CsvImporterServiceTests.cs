@@ -29,6 +29,18 @@ public sealed class CsvImporterServiceTests : IDisposable
     }
 
     [Fact]
+    public void ReadFromCsv_AcceptsNineColumnsAndTenColumnBestMatch()
+    {
+        string nineColumnPath = Path.Combine(_directory, "nine.csv");
+        File.WriteAllText(nineColumnPath, "ClientId,FullName,DateOfBirth,Medicare,ClientIdStatus,FirstName,LastName,MiddleName,ErrorDetails\n001,Name,2017/10/01,,2,,,,Reason\n", Encoding.UTF8);
+        Assert.Null(Assert.Single(CsvImporterService.ReadFromCsv(nineColumnPath)).BestMatch);
+
+        string tenColumnPath = Path.Combine(_directory, "ten.csv");
+        CsvExporterService.SaveToCsv([new ClinicPdfClientRecord { ClientId = "001", FullName = "Name", DateOfBirth = "2017/10/01", ClientIdStatus = ClientIdStatus.NeedsManualReview, BestMatch = "A#B##1#75.0%" }], tenColumnPath);
+        Assert.Equal("A#B##1#75.0%", Assert.Single(CsvImporterService.ReadFromCsv(tenColumnPath)).BestMatch);
+    }
+
+    [Fact]
     public void ReadFromCsv_ReportsMalformedRows()
     {
         string path = Path.Combine(_directory, "bad.csv");

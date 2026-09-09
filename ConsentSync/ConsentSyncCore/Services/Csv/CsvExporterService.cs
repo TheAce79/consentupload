@@ -24,11 +24,11 @@ public static class CsvExporterService
             }))
             {
                 csv.WriteField("ClientId"); csv.WriteField("FullName"); csv.WriteField("DateOfBirth"); csv.WriteField("Medicare");
-                csv.WriteField("ClientIdStatus"); csv.WriteField("FirstName"); csv.WriteField("LastName"); csv.WriteField("MiddleName"); csv.WriteField("ErrorDetails"); csv.NextRecord();
+                csv.WriteField("ClientIdStatus"); csv.WriteField("FirstName"); csv.WriteField("LastName"); csv.WriteField("MiddleName"); csv.WriteField("ErrorDetails"); csv.WriteField("BestMatch"); csv.NextRecord();
                 foreach (ClinicPdfClientRecord record in records)
                 {
                     csv.WriteField(record.ClientId); csv.WriteField(record.FullName); csv.WriteField(record.DateOfBirth); csv.WriteField(record.Medicare);
-                    csv.WriteField((int)record.ClientIdStatus); csv.WriteField(record.FirstName); csv.WriteField(record.LastName); csv.WriteField(record.MiddleName); csv.WriteField(record.ErrorDetails); csv.NextRecord();
+                    csv.WriteField((int)record.ClientIdStatus); csv.WriteField(record.FirstName); csv.WriteField(record.LastName); csv.WriteField(record.MiddleName); csv.WriteField(record.ErrorDetails); csv.WriteField(record.BestMatch); csv.NextRecord();
                 }
             }
 
