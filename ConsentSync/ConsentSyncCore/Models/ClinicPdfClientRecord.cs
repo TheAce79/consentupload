@@ -26,4 +26,7 @@ public class ClinicPdfClientRecord
 
     /// <summary>Email copied from the resolved PHIS client preview when the CSV did not supply one.</summary>
     public string? Email { get; set; }
+
+    /// <summary>Telephone supplied by the CSV for preview identity verification.</summary>
+    public string? Phone { get; set; }
 }

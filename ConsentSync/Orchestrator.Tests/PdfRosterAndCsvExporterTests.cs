@@ -20,9 +20,10 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
             "★10h50 KOMBOU TCHAPDU, LUC OLIVIER (2017-10-01) 026 547 803",
             "9h05- Jamila Diallo 2022-09-06",
             "8h30 1/2 Élodie D'Arcy 2020-03-20",
-            "— = + @, • TSENGUE TSENGUE, ESTHER-LYDIA 2016-01-25",
-            "CIP 2020-03-20",
-            "Invalid Person 2020-02-30",
+            "10:00 - 10:30 — = + @, • TSENGUE TSENGUE, ESTHER-LYDIA 2016-01-25",
+            "10h55 Élodie D'Arcy 2020-03-20",
+            "11:00 - 11:30 CIP 2020-03-20",
+            "11h25 Invalid Person 2020-02-30",
             "Élodie D'Arcy 2020-03-20"
         ]);
 
@@ -53,7 +54,7 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
         try
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
-            ClinicPdfClientRecord record = Assert.Single(PdfRosterParserService.ExtractRecordsFromLines(["Marie Curie 2022-09-06"]));
+            ClinicPdfClientRecord record = Assert.Single(PdfRosterParserService.ExtractRecordsFromLines(["14h10 Marie Curie 2022-09-06"]));
             Assert.Equal("2022/09/06", record.DateOfBirth);
         }
         finally
@@ -63,7 +64,49 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
     }
 
     [Fact]
-    public void SaveToCsv_WritesElevenColumnsBomAndReplacesExistingOutput()
+    public void ExtractRecordsFromLines_ParsesOnlyPrimaryLineOfEachAppointmentBlock()
+    {
+        List<ClinicPdfClientRecord> records = PdfRosterParserService.ExtractRecordsFromLines([
+            "14:00 - 14:30 1h50 Rebaab Kaur REhal 2022-07-07 (harteet kaur 519-216-3098)",
+            "14:10 - 14:50 ★2h10 1/2 Czion Jay 2020-02-26 (Maria 778-325-0589) VB-A, Ratt DO NOT BOOK -- J'ai appelé le client",
+            "à plusieurs reprises pour l'informer que la clinique du 17 septembre est annulée",
+            "2026-08-05: La cliente ne répond pas et retourne pas mes appels",
+            "2026-09-09 : La cliente ne répond pas et retourne pas mes appels",
+            "14:30 - 15:00 2h25 2/2 Huxley McGillivary - 2017-12-12 (Kathelyn 506-962-6763) 923758213 - LK - A"
+        ]);
+
+        Assert.Collection(records,
+            record => { Assert.Equal("Rebaab Kaur REhal", record.FullName); Assert.Equal("2022/07/07", record.DateOfBirth); },
+            record => { Assert.Equal("Czion Jay", record.FullName); Assert.Equal("2020/02/26", record.DateOfBirth); },
+            record => { Assert.Equal("Huxley McGillivary", record.FullName); Assert.Equal("2017/12/12", record.DateOfBirth); Assert.Equal("923758213", record.Medicare); });
+    }
+
+    [Fact]
+    public void ExtractRecordsFromLines_UsesNextLineForStandaloneRangeAndIgnoresUntimedContent()
+    {
+        List<ClinicPdfClientRecord> records = PdfRosterParserService.ExtractRecordsFromLines([
+            "Clinic roster 17 September",
+            "Untimed Client 2020-01-01",
+            "14:00 - 14:30",
+            "★2h10 1/2 Czion Jay 2020-02-26",
+            "2026-08-05: Comment Person 2019-03-04",
+            "14:30 - 15:00",
+            "DO NOT BOOK",
+            "Later Comment 2018-04-05",
+            "15:00 - 15:30",
+            "15h00 Nova Timmons 2026-07-17",
+            "16:00 - 16:30",
+            "Invalid Person 2020-02-30",
+            "Later Valid Person 2020-02-20"
+        ]);
+
+        Assert.Collection(records,
+            record => { Assert.Equal("Czion Jay", record.FullName); Assert.Equal("2020/02/26", record.DateOfBirth); },
+            record => { Assert.Equal("Nova Timmons", record.FullName); Assert.Equal("2026/07/17", record.DateOfBirth); });
+    }
+
+    [Fact]
+    public void SaveToCsv_WritesTwelveColumnsBomAndReplacesExistingOutput()
     {
         string outputPath = Path.Combine(_directory, "roster.csv");
         File.WriteAllText(outputPath, "old output", Encoding.UTF8);
@@ -75,8 +118,8 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
         byte[] bytes = File.ReadAllBytes(outputPath);
         string csv = File.ReadAllText(outputPath, Encoding.UTF8);
         Assert.Equal([0xEF, 0xBB, 0xBF], bytes.Take(3));
-        Assert.StartsWith("\"ClientId\",\"FullName\",\"DateOfBirth\",\"Medicare\",\"ClientIdStatus\",\"FirstName\",\"LastName\",\"MiddleName\",\"ErrorDetails\",\"BestMatch\",\"Email\"", csv);
-        Assert.Contains("\"\",\"KOMBOU, LUC\",\"2017/10/01\",\"026547803\",\"0\",\"\",\"\",\"\",\"\",\"\",\"\"", csv);
+        Assert.StartsWith("\"ClientId\",\"FullName\",\"DateOfBirth\",\"Medicare\",\"ClientIdStatus\",\"FirstName\",\"LastName\",\"MiddleName\",\"ErrorDetails\",\"BestMatch\",\"Phone\",\"Email\"", csv);
+        Assert.Contains("\"\",\"KOMBOU, LUC\",\"2017/10/01\",\"026547803\",\"0\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"", csv);
         Assert.DoesNotContain("old output", csv);
         Assert.Empty(Directory.EnumerateFiles(_directory, "*.tmp"));
     }

@@ -49,6 +49,19 @@ public sealed class CsvImporterServiceTests : IDisposable
     }
 
     [Fact]
+    public void ReadFromCsv_AcceptsContactAliasesAndRoundTripsCanonicalFields()
+    {
+        string input = Path.Combine(_directory, "contacts.csv");
+        File.WriteAllText(input, "ClientId,FullName,DateOfBirth,Medicare,ClientIdStatus,FirstName,LastName,MiddleName,Telephone Number,Email Address\n1,Name,2017/10/01,,0,,,,506-721-2234,parent@example.test\n", Encoding.UTF8);
+        ClinicPdfClientRecord record = Assert.Single(CsvImporterService.ReadFromCsv(input));
+        Assert.Equal("506-721-2234", record.Phone); Assert.Equal("parent@example.test", record.Email);
+        string output = Path.Combine(_directory, "contacts-out.csv");
+        CsvExporterService.SaveToCsv([record], output);
+        ClinicPdfClientRecord reread = Assert.Single(CsvImporterService.ReadFromCsv(output));
+        Assert.Equal(record.Phone, reread.Phone); Assert.Equal(record.Email, reread.Email);
+    }
+
+    [Fact]
     public void ReadFromCsv_ReportsMalformedRows()
     {
         string path = Path.Combine(_directory, "bad.csv");

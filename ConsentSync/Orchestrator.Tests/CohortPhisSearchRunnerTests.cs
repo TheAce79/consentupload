@@ -109,6 +109,67 @@ public sealed class CohortPhisSearchRunnerTests
     }
 
     [Fact]
+    public async Task ExecuteSearchAsync_LowNameScorePreviewMedicareMatchResolvesWithoutFallback()
+    {
+        var search = new FakeSearch
+        {
+            Dob = Success(Active("1", "OTHER", "PERSON")),
+            Medicare = Success(Active("9", "SHOULD", "NOTSEARCH")),
+            Preview = new PhisClientPreview { ClientId = "1", HealthCardNumber = "9227 318-31" }
+        };
+        var record = new ClinicPdfClientRecord { FullName = "Wrong Name", DateOfBirth = "2017/10/01", Medicare = "922731831" };
+
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+
+        Assert.Equal(ClientIdStatus.Found, record.ClientIdStatus);
+        Assert.Equal("1", record.ClientId);
+        Assert.Equal("OTHER#PERSON##1#75.0%", record.BestMatch);
+        Assert.Equal(0, search.MedicareCalls);
+        Assert.Equal(1, search.PreviewCalls);
+    }
+
+    [Theory]
+    [InlineData("(506) 721-2234", "506-721-2234")]
+    [InlineData("+1 506 721 2234", "5067212234")]
+    public async Task ExecuteSearchAsync_LowNameScorePreviewPreferredPhoneMatchResolves(string phone, string previewPhone)
+    {
+        var search = new FakeSearch { Dob = Success(Active("1", "OTHER", "PERSON")), Preview = new PhisClientPreview { ClientId = "1", PreferredTelephoneNumber = previewPhone } };
+        var record = new ClinicPdfClientRecord { FullName = "Wrong Name", DateOfBirth = "2017/10/01", Phone = phone };
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+        Assert.Equal(ClientIdStatus.Found, record.ClientIdStatus);
+        Assert.Equal(0, search.MedicareCalls);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_LowNameScorePreviewEmailMatchResolves()
+    {
+        var search = new FakeSearch { Dob = Success(Active("1", "OTHER", "PERSON")), Preview = new PhisClientPreview { ClientId = "1", EmailAddresses = [new() { Address = "Parent@Example.Test" }] } };
+        var record = new ClinicPdfClientRecord { FullName = "Wrong Name", DateOfBirth = "2017/10/01", Email = "parent@example.test" };
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+        Assert.Equal(ClientIdStatus.Found, record.ClientIdStatus);
+        Assert.Equal(1, search.PreviewCalls);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_MalformedPhoneDoesNotVerifyPreview()
+    {
+        var search = new FakeSearch { Dob = Success(Active("1", "OTHER", "PERSON")), Preview = new PhisClientPreview { ClientId = "1", PreferredTelephoneNumber = "506-721-2234" } };
+        var record = new ClinicPdfClientRecord { FullName = "Wrong Name", DateOfBirth = "2017/10/01", Phone = "call 506-721-2234" };
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+        Assert.Equal(ClientIdStatus.NeedsManualReview, record.ClientIdStatus);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_WrongPreviewClientDoesNotResolveAndUsesFallback()
+    {
+        var search = new FakeSearch { Dob = Success(Active("1", "OTHER", "PERSON")), Medicare = Success(Active("9", "PHIS", "NAME")), Preview = new PhisClientPreview { ClientId = "stale", HealthCardNumber = "002" } };
+        var record = new ClinicPdfClientRecord { FullName = "Wrong Name", DateOfBirth = "2017/10/01", Medicare = "002" };
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
+        Assert.Equal("9", record.ClientId);
+        Assert.Equal(1, search.MedicareCalls);
+    }
+
+    [Fact]
     public async Task ExecuteSearchAsync_NoMedicareResultRetainsDobHintAndClearsStaleHint()
     {
         var search = new FakeSearch { Dob = Success(Active("1", "OTHER", "PERSON")), Medicare = SearchResult.NoResults() };
@@ -221,14 +282,14 @@ public sealed class CohortPhisSearchRunnerTests
     }
 
     [Fact]
-    public async Task ExecuteSearchAsync_DoesNotUsePreviewForUnresolvedRecord()
+    public async Task ExecuteSearchAsync_UsesPreviewForUnresolvedRecordBeforeManualReview()
     {
         var search = new FakeSearch { Dob = Success(Active("42", "Other", "Person")) };
         var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01" };
 
         await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync([record]);
 
-        Assert.Equal(0, search.PreviewCalls);
+        Assert.Equal(1, search.PreviewCalls);
         Assert.Equal(ClientIdStatus.NeedsManualReview, record.ClientIdStatus);
     }
 

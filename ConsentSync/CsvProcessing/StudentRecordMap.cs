@@ -19,6 +19,8 @@ namespace CsvProcessing
             Map(m => m.FirstName).Name("First Name", "Prénom", "Prenom");
             Map(m => m.DateOfBirth).Name("Date of Birth", "Date de naissance", "DOB");
             Map(m => m.MedicareNumber).Name("Medicare Number", "No d'assurance-maladie", "Numéro d'assurance maladie", "No assurance maladie");
+            Map(m => m.Phone).Name("Phone", "Phone Number", "Telephone Number").Optional();
+            Map(m => m.Email).Name("Email", "Email Address").Optional();
             Map(m => m.ConsentStatus).Name("Consent Status", "Statut de consentement");
             Map(m => m.School).Name("School", "École", "Ecole");
             Map(m => m.Grade).Name("Grade", "Année", "Annee", "Niveau");

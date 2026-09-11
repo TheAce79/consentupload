@@ -45,7 +45,8 @@ public static class CsvImporterService
                     Medicare = NullIfEmpty(Get(csv, "Medicare")), ClientIdStatus = (ClientIdStatus)statusValue,
                     FirstName = NullIfEmpty(Get(csv, "FirstName")), LastName = NullIfEmpty(Get(csv, "LastName")),
                     MiddleName = NullIfEmpty(Get(csv, "MiddleName")), ErrorDetails = NullIfEmpty(Get(csv, "ErrorDetails")),
-                    BestMatch = NullIfEmpty(Get(csv, "BestMatch")), Email = NullIfEmpty(Get(csv, "Email"))
+                    BestMatch = NullIfEmpty(Get(csv, "BestMatch")), Email = FirstNonBlank(csv, "Email", "Email Address"),
+                    Phone = FirstNonBlank(csv, "Phone", "Phone Number", "Telephone Number")
                 });
             }
             catch (Exception ex) when (ex is not FormatException || !ex.Message.Contains("row", StringComparison.OrdinalIgnoreCase))
@@ -58,4 +59,5 @@ public static class CsvImporterService
 
     private static string Get(CsvReader csv, string header) => csv.TryGetField(header, out string? value) ? value ?? string.Empty : string.Empty;
     private static string? NullIfEmpty(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
+    private static string? FirstNonBlank(CsvReader csv, params string[] headers) => headers.Select(header => NullIfEmpty(Get(csv, header))).FirstOrDefault(value => value is not null);
 }

@@ -19,14 +19,14 @@ public sealed class CohortWorkspaceServiceTests : IDisposable
         var second = CohortWorkspaceService.EnsureDirectories(config);
 
         Assert.Equal(first, second);
-        Assert.True(Directory.Exists(Path.Combine(_tempDirectory, "Cohort", "1. InputFolder", "1 Input CSV")));
-        Assert.True(Directory.Exists(Path.Combine(_tempDirectory, "Cohort", "1. InputFolder", "2 Input PDF")));
-        Assert.True(Directory.Exists(Path.Combine(_tempDirectory, "Cohort", "2. OutputFolder", "2 Output CSV")));
+        Assert.True(Directory.Exists(Path.Combine(_tempDirectory, "Cohort", "CIPMONCTONSP20260910", "1. InputFolder", "1 Input CSV")));
+        Assert.True(Directory.Exists(Path.Combine(_tempDirectory, "Cohort", "CIPMONCTONSP20260910", "1. InputFolder", "2 Input PDF")));
+        Assert.True(Directory.Exists(Path.Combine(_tempDirectory, "Cohort", "CIPMONCTONSP20260910", "2. OutputFolder", "2 Output CSV")));
         Assert.Equal(
-            Path.Combine(_tempDirectory, "Cohort", "2. OutputFolder", "2 Output CSV", "CIPMONCTONSP20260910_Cohort.csv"),
+            Path.Combine(_tempDirectory, "Cohort", "CIPMONCTONSP20260910", "2. OutputFolder", "2 Output CSV", "CIPMONCTONSP20260910_Cohort.csv"),
             CohortWorkspaceService.GetStandardizedOutputCsvPath(config, "CIPMONCTONSP20260910"));
         Assert.Equal(
-            Path.Combine(_tempDirectory, "Cohort", "1. InputFolder", "1 Input CSV", "CIPMONCTONSP20260910_Cohort.csv"),
+            Path.Combine(_tempDirectory, "Cohort", "CIPMONCTONSP20260910", "1. InputFolder", "1 Input CSV", "CIPMONCTONSP20260910_Cohort.csv"),
             CohortWorkspaceService.GetStandardizedInputCsvPath(config, "CIPMONCTONSP20260910"));
     }
 
@@ -57,11 +57,41 @@ public sealed class CohortWorkspaceServiceTests : IDisposable
 
         string path = CohortWorkspaceService.GetStandardizedOutputCsvPath(config, "testlist");
 
-        Assert.Equal(Path.Combine(_tempDirectory, "Custom Cohorts", "Outbound", "Exports", "TESTLIST_Processed.csv"), path);
+        Assert.Equal(Path.Combine(_tempDirectory, "Custom Cohorts", "TESTLIST", "Outbound", "Exports", "TESTLIST_Processed.csv"), path);
         Assert.True(Directory.Exists(Path.GetDirectoryName(path)!));
         Assert.Equal(
-            Path.Combine(_tempDirectory, "Custom Cohorts", "Inbound", "Csv", "TESTLIST_Processed.csv"),
+            Path.Combine(_tempDirectory, "Custom Cohorts", "TESTLIST", "Inbound", "Csv", "TESTLIST_Processed.csv"),
             CohortWorkspaceService.GetStandardizedInputCsvPath(config, "testlist"));
+    }
+
+    [Fact]
+    public void ResolveWorkspacePaths_UsesExplicitNameWithoutCreatingDirectories()
+    {
+        IConfiguration config = CreateConfiguration(new Dictionary<string, string?>
+        {
+            ["CohortContext:LastClientListName"] = "ANOTHERLIST",
+            ["CohortContext:Workspace:BaseCohortPath"] = "{basedirectory}\\Cohort\\{clientlistname}"
+        });
+
+        var paths = CohortWorkspaceService.ResolveWorkspacePaths(config, " cipmonctonsp20260910 ");
+
+        Assert.Equal(Path.Combine(_tempDirectory, "Cohort", "CIPMONCTONSP20260910", "1. InputFolder", "1 Input CSV"), paths.inputCsvDir);
+        Assert.False(Directory.Exists(Path.Combine(_tempDirectory, "Cohort")));
+    }
+
+    [Fact]
+    public void EnsureDirectories_IsolatesDifferentClientListsAndPreservesExistingFiles()
+    {
+        IConfiguration config = CreateConfiguration();
+        var first = CohortWorkspaceService.EnsureDirectories(config, "firstlist");
+        string preservedFile = Path.Combine(first.inputCsvDir, "keep.txt");
+        File.WriteAllText(preservedFile, "keep");
+
+        var second = CohortWorkspaceService.EnsureDirectories(config, "secondlist");
+
+        Assert.NotEqual(first.inputCsvDir, second.inputCsvDir);
+        Assert.True(File.Exists(preservedFile));
+        Assert.True(Directory.Exists(second.outputCsvDir));
     }
 
     [Theory]
@@ -92,7 +122,11 @@ public sealed class CohortWorkspaceServiceTests : IDisposable
 
     private IConfiguration CreateConfiguration(IDictionary<string, string?>? values = null)
     {
-        var settings = new Dictionary<string, string?> { ["BaseDirectory"] = _tempDirectory };
+        var settings = new Dictionary<string, string?>
+        {
+            ["BaseDirectory"] = _tempDirectory,
+            ["CohortContext:LastClientListName"] = "CIPMONCTONSP20260910"
+        };
         if (values is not null)
         {
             foreach (var pair in values)

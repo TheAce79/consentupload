@@ -436,6 +436,8 @@ namespace CsvProcessing
             record["Grade"] = student.Grade;
             record["Date of Birth"] = student.DateOfBirth;
             record["Medicare Number"] = student.MedicareNumber;
+            record["Phone"] = student.Phone;
+            record["Email"] = student.Email;
             record["Consent Status"] = student.ConsentStatus;
             record["Tdap"] = student.Tdap;
             record["HPV"] = student.HPV;
@@ -459,6 +461,8 @@ namespace CsvProcessing
                 Grade = record["Grade"],
                 DateOfBirth = record["Date of Birth"],
                 MedicareNumber = record["Medicare Number"],
+                Phone = record["Phone"],
+                Email = record["Email"],
                 ConsentStatus = record["Consent Status"],
                 Tdap = record["Tdap"],
                 HPV = record["HPV"],

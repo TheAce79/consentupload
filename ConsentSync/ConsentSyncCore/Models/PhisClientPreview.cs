@@ -4,6 +4,8 @@ namespace ConsentSyncCore.Models;
 public sealed class PhisClientPreview
 {
     public string ClientId { get; init; } = string.Empty;
+    public string? HealthCardNumber { get; init; }
+    public string? PreferredTelephoneNumber { get; init; }
     public IReadOnlyList<PhisEmailAddress> EmailAddresses { get; init; } = [];
 }
 

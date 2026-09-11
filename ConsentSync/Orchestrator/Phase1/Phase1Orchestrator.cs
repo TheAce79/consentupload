@@ -499,6 +499,27 @@ namespace Orchestrator.Phase1
                 else
                 {
                      LoggerService.LogInformation($"   ⚠️  Score too low: {score:F2}% (threshold: {threshold}%)");
+                    PhisClientPreview? preview = null;
+                    try
+                    {
+                        preview = await _searchService!.GetClientPreviewAsync(bestMatch.ClientId);
+                        string? matchedIdentifier = PhisPreviewIdentityVerifier.GetMatchingIdentifier(
+                            student.MedicareNumber, student.Phone, student.Email, preview, bestMatch.ClientId);
+                        if (matchedIdentifier is not null)
+                        {
+                            student.ClientId = bestMatch.ClientId;
+                            student.ClientIdStatus = ClientIdStatus.Found;
+                            student.BestMatch = $"{bestMatch.FirstName}#{bestMatch.LastName}#{bestMatch.ClientId}#{threshold.ToString("F1", CultureInfo.InvariantCulture)}%";
+                            result.FoundCount++;
+                            LoggerService.LogInformation($"   ✅ Client ID verified in PHIS preview by {matchedIdentifier}: {bestMatch.ClientId}");
+                            return true;
+                        }
+                        LoggerService.LogInformation("   ℹ️  PHIS preview did not verify the candidate; continuing fallback searches.");
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggerService.LogWarning($"   PHIS preview verification failed; continuing fallback searches. {ex.Message}");
+                    }
                     // ✅ Pass original best match to fallback searches
                     return await TryFallbackSearchesAsync(student, result, suggestion, bestMatch, score, rosterSuggestion);
                 }

@@ -29,6 +29,7 @@ public partial class CohortContextForm : Form
     private bool _isUserCustomOverride;
     private bool _isBindingContext;
     private bool _isSynchronizingClientListName;
+    private bool _hasSavedContext;
     private bool _isPhase2Running;
     private bool _isLogSubscribed;
 
@@ -89,19 +90,16 @@ public partial class CohortContextForm : Form
                 .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "unknown";
             LoggerService.LogInformation($"PHIS core build: {coreVersion}; module ID: {coreAssembly.ManifestModule.ModuleVersionId}; paginator mode: ALL dropdown with total verification.");
             var configuration = ConfigurationService.GetConfiguration();
-            CohortWorkspaceService.EnsureDirectories(configuration);
             _dbManager = new DbManager(configuration);
             await _dbManager.InitializeAsync();
 
-            _activeContext = await _dbManager.GetActiveCohortContextAsync()
-                ?? CreateContextFromConfiguration();
+            CohortContextEntity draftContext = CreateContextFromConfiguration();
 
-            await LoadPrefixesAsync(_activeContext.Prefix);
-            await LoadLocationsAsync(_activeContext.Location);
-            BindContext(_activeContext);
-            RefreshStandardizedCsvPreview();
-            await RefreshClientListSearchAsync(_activeContext.ClientListName);
-            LoggerService.LogInformation($"✅ Cohort context loaded: {_activeContext.ClientListName}");
+            await LoadPrefixesAsync(draftContext.Prefix);
+            await LoadLocationsAsync(draftContext.Location);
+            BindNewContext(draftContext);
+            await RefreshClientListSearchAsync();
+            LoggerService.LogInformation("✅ Cohort context draft loaded. Select a date and save, or load a saved list.");
         }
         catch (Exception ex)
         {
@@ -139,6 +137,8 @@ public partial class CohortContextForm : Form
             return;
         }
 
+        _hasSavedContext = false;
+        UpdateProcessingAvailability();
         btn_SaveCohortContext.Enabled = false;
         btn_SaveCohortContext.Text = "Saving...";
 
@@ -156,7 +156,8 @@ public partial class CohortContextForm : Form
 
             UpdateAppsettings(context);
             ConfigurationService.ReloadConfiguration();
-            CohortWorkspaceService.EnsureDirectories(ConfigurationService.GetConfiguration());
+            CohortWorkspaceService.EnsureDirectories(ConfigurationService.GetConfiguration(), context.ClientListName);
+            _hasSavedContext = true;
             RefreshStandardizedCsvPreview();
             await RefreshClientListSearchAsync(context.ClientListName);
             RestoreSaveButton();
@@ -183,20 +184,24 @@ public partial class CohortContextForm : Form
         finally
         {
             RestoreSaveButton();
-            UpdateClientListNameFromContextParameters();
+            UpdateProcessingAvailability();
         }
     }
 
     private async void btn_ExtractCsv_Click(object? sender, EventArgs e)
     {
+        if (!TryGetSavedClientListName(out string clientListName))
+        {
+            return;
+        }
+
         SetFormEnabled(false);
         btn_ExtractCsv.Text = "Extracting...";
         try
         {
             LoggerService.LogInformation("\n═══ Phase 1 — Extracting CSV from PDF roster ═══");
             var configuration = ConfigurationService.GetConfiguration();
-            var (_, inputPdfDir, _) = CohortWorkspaceService.EnsureDirectories(configuration);
-            string clientListName = txt_ClientListName.Text.Trim();
+            var (_, inputPdfDir, _) = CohortWorkspaceService.EnsureDirectories(configuration, clientListName);
             string targetCsvPath = CohortWorkspaceService.GetStandardizedInputCsvPath(configuration, clientListName);
 
             var parser = new PdfRosterParserService();
@@ -231,8 +236,12 @@ public partial class CohortContextForm : Form
     private async void btn_SearchPhis_Click(object? sender, EventArgs e)
     {
         if (_isPhase2Running) return;
+        if (!TryGetSavedClientListName(out string clientListName))
+        {
+            return;
+        }
+
         var config = ConfigurationService.GetConfiguration();
-        string clientListName = txt_ClientListName.Text.Trim();
         string inputCsvPath;
         string outputCsvPath;
         try
@@ -343,6 +352,17 @@ public partial class CohortContextForm : Form
 
     private void OnContextParameterChanged(object? sender, EventArgs e)
     {
+        if (ReferenceEquals(sender, dtp_CohortDate))
+        {
+            dtp_CohortDate.CustomFormat = dtp_CohortDate.Checked ? "yyyy-MM-dd" : " ";
+        }
+
+        if (!_isBindingContext)
+        {
+            _hasSavedContext = false;
+            UpdateProcessingAvailability();
+        }
+
         UpdateClientListNameFromContextParameters();
         RefreshStandardizedCsvPreview();
     }
@@ -373,6 +393,8 @@ public partial class CohortContextForm : Form
                 txt_ClientListName.Text.Trim(),
                 BuildDerivedClientListName(),
                 StringComparison.OrdinalIgnoreCase);
+            _hasSavedContext = false;
+            UpdateProcessingAvailability();
         }
 
         RefreshStandardizedCsvPreview();
@@ -387,9 +409,7 @@ public partial class CohortContextForm : Form
             SelectOrAppendComboItem(cb_Location, context.Location);
 
             txt_Type.Text = context.Type;
-            dtp_CohortDate.Value = context.CohortDate == default
-                ? DateTime.Today
-                : context.CohortDate.Date;
+            SetCohortDate(context.CohortDate == default ? null : context.CohortDate.Date);
             txt_Jurisdiction.Text = context.Jurisdiction;
             txt_EncounterGroup.Text = context.EncounterGroup;
 
@@ -411,6 +431,27 @@ public partial class CohortContextForm : Form
         RefreshStandardizedCsvPreview();
     }
 
+    private void BindNewContext(CohortContextEntity context)
+    {
+        BindContext(new CohortContextEntity
+        {
+            Prefix = context.Prefix,
+            Location = context.Location,
+            Type = context.Type,
+            Jurisdiction = context.Jurisdiction,
+            EncounterGroup = context.EncounterGroup,
+            CohortDate = default,
+            ClientListName = string.Empty
+        });
+        _activeContext = null;
+        _isUserCustomOverride = false;
+        _hasSavedContext = false;
+        SetCohortDate(null);
+        SetClientListNameText(string.Empty);
+        RefreshStandardizedCsvPreview();
+        UpdateProcessingAvailability();
+    }
+
     private bool TryBuildContextFromFields(out CohortContextEntity context, out string validationMessage)
     {
         context = new CohortContextEntity
@@ -422,7 +463,7 @@ public partial class CohortContextForm : Form
             Type = txt_Type.Text.Trim(),
             Jurisdiction = txt_Jurisdiction.Text.Trim(),
             EncounterGroup = txt_EncounterGroup.Text.Trim(),
-            CohortDate = dtp_CohortDate.Value.Date,
+            CohortDate = dtp_CohortDate.Checked ? dtp_CohortDate.Value.Date : default,
             IsActive = true,
             CreatedOn = DateTime.UtcNow
         };
@@ -430,6 +471,12 @@ public partial class CohortContextForm : Form
         context.ClientListName = string.IsNullOrWhiteSpace(txt_ClientListName.Text)
             ? BuildDerivedClientListName()
             : txt_ClientListName.Text.Trim().ToUpperInvariant();
+
+        if (!dtp_CohortDate.Checked)
+        {
+            validationMessage = "Cohort date is required before saving a client list.";
+            return false;
+        }
 
         if (string.IsNullOrWhiteSpace(context.Prefix) ||
             string.IsNullOrWhiteSpace(context.Location) ||
@@ -483,9 +530,10 @@ public partial class CohortContextForm : Form
     {
         try
         {
-            _ = CohortWorkspaceService.GetStandardizedOutputCsvPath(
-                ConfigurationService.GetConfiguration(),
-                clientListName);
+            _ = CohortWorkspaceService.ResolveWorkspacePaths(
+                ConfigurationService.GetConfiguration(), clientListName);
+            _ = CohortWorkspaceService.FormatStandardizedCsvFileName(
+                ConfigurationService.GetConfiguration(), clientListName);
             validationMessage = string.Empty;
             return true;
         }
@@ -496,9 +544,17 @@ public partial class CohortContextForm : Form
         }
     }
 
-    private string BuildDerivedClientListName() =>
-        $"{cb_Prefix.Text.Trim()}{cb_Location.Text.Trim()}{txt_Type.Text.Trim()}{dtp_CohortDate.Value:yyyyMMdd}"
+    private string BuildDerivedClientListName() => !dtp_CohortDate.Checked
+        ? string.Empty
+        : $"{cb_Prefix.Text.Trim()}{cb_Location.Text.Trim()}{txt_Type.Text.Trim()}{dtp_CohortDate.Value:yyyyMMdd}"
             .ToUpperInvariant();
+
+    private void SetCohortDate(DateTime? date)
+    {
+        dtp_CohortDate.Value = date ?? DateTime.Today;
+        dtp_CohortDate.Checked = date.HasValue;
+        dtp_CohortDate.CustomFormat = date.HasValue ? "yyyy-MM-dd" : " ";
+    }
 
     private void SetClientListNameText(string value)
     {
@@ -576,9 +632,32 @@ public partial class CohortContextForm : Form
     private void SetFormEnabled(bool enabled)
     {
         grp_CohortContext.Enabled = enabled;
-        grp_PdfRosterExtraction.Enabled = enabled;
-        grp_PhisSearch.Enabled = enabled;
+        grp_PdfRosterExtraction.Enabled = enabled && _hasSavedContext;
+        grp_PhisSearch.Enabled = enabled && _hasSavedContext;
         btn_SaveCohortContext.Enabled = enabled;
+    }
+
+    private void UpdateProcessingAvailability()
+    {
+        if (!IsDisposed && !Disposing)
+        {
+            grp_PdfRosterExtraction.Enabled = _hasSavedContext;
+            grp_PhisSearch.Enabled = _hasSavedContext;
+        }
+    }
+
+    private bool TryGetSavedClientListName(out string clientListName)
+    {
+        clientListName = _activeContext?.ClientListName ?? string.Empty;
+        if (_hasSavedContext && !string.IsNullOrWhiteSpace(clientListName))
+        {
+            return true;
+        }
+
+        MessageBox.Show(this,
+            "Save the cohort context or load a saved client list before processing files.",
+            "Save Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        return false;
     }
 
     private async Task LoadSelectedCohortContextAsync()
@@ -598,6 +677,8 @@ public partial class CohortContextForm : Form
 
         btn_LoadContext.Enabled = false;
         btn_LoadContext.Text = "Loading...";
+        _hasSavedContext = false;
+        UpdateProcessingAvailability();
 
         try
         {
@@ -640,8 +721,11 @@ public partial class CohortContextForm : Form
             BindContext(context);
             UpdateAppsettings(context);
             ConfigurationService.ReloadConfiguration();
+            CohortWorkspaceService.EnsureDirectories(ConfigurationService.GetConfiguration(), context.ClientListName);
+            _hasSavedContext = true;
             RefreshStandardizedCsvPreview();
             await RefreshClientListSearchAsync(context.ClientListName);
+            UpdateProcessingAvailability();
         }
         catch (Exception ex)
         {

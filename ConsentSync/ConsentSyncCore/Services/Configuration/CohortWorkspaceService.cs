@@ -5,7 +5,7 @@ namespace ConsentSyncCore.Services.Configuration;
 public static class CohortWorkspaceService
 {
     private const string WorkspaceSection = "CohortContext:Workspace";
-    private const string DefaultBaseCohortPath = "{BaseDirectory}\\Cohort";
+    private const string DefaultBaseCohortPath = "{BaseDirectory}\\Cohort\\{ClientListName}";
     private const string DefaultInputFolder = "1. InputFolder";
     private const string DefaultOutputFolder = "2. OutputFolder";
     private const string DefaultInputCsvFolder = "1 Input CSV";
@@ -14,8 +14,13 @@ public static class CohortWorkspaceService
     private const string DefaultCsvFormat = "{ClientListName}_Cohort.csv";
 
     public static (string inputCsvDir, string inputPdfDir, string outputCsvDir) EnsureDirectories(IConfiguration config)
+        => EnsureDirectories(config, config?["CohortContext:LastClientListName"]);
+
+    public static (string inputCsvDir, string inputPdfDir, string outputCsvDir) EnsureDirectories(
+        IConfiguration config,
+        string? clientListName)
     {
-        var paths = ResolveWorkspacePaths(config);
+        var paths = ResolveWorkspacePathsCore(config, clientListName);
         Directory.CreateDirectory(paths.InputCsvDir);
         Directory.CreateDirectory(paths.InputPdfDir);
         Directory.CreateDirectory(paths.OutputCsvDir);
@@ -25,14 +30,14 @@ public static class CohortWorkspaceService
     public static string GetStandardizedOutputCsvPath(IConfiguration config, string clientListName)
     {
         string fileName = FormatStandardizedCsvFileName(config, clientListName);
-        var (_, _, outputCsvDir) = EnsureDirectories(config);
+        var (_, _, outputCsvDir) = EnsureDirectories(config, clientListName);
         return Path.Combine(outputCsvDir, fileName);
     }
 
     public static string GetStandardizedInputCsvPath(IConfiguration config, string clientListName)
     {
         string fileName = FormatStandardizedCsvFileName(config, clientListName);
-        var (inputCsvDir, _, _) = EnsureDirectories(config);
+        var (inputCsvDir, _, _) = EnsureDirectories(config, clientListName);
         return Path.Combine(inputCsvDir, fileName);
     }
 
@@ -40,13 +45,7 @@ public static class CohortWorkspaceService
     {
         ArgumentNullException.ThrowIfNull(config);
 
-        string normalizedName = clientListName?.Trim().ToUpperInvariant() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(normalizedName))
-        {
-            throw new ArgumentException("Client list name is required.", nameof(clientListName));
-        }
-
-        ValidateFileNameSegment(normalizedName, nameof(clientListName));
+        string normalizedName = NormalizeClientListName(clientListName);
 
         string pattern = config[$"{WorkspaceSection}:FileNaming:StandardizedCsvFormat"] ?? DefaultCsvFormat;
         if (!pattern.Contains("{ClientListName}", StringComparison.Ordinal))
@@ -63,9 +62,20 @@ public static class CohortWorkspaceService
         return fileName;
     }
 
-    private static WorkspacePaths ResolveWorkspacePaths(IConfiguration config)
+    /// <summary>Resolves a cohort's directories without creating them.</summary>
+    public static (string inputCsvDir, string inputPdfDir, string outputCsvDir) ResolveWorkspacePaths(
+        IConfiguration config,
+        string? clientListName)
+    {
+        WorkspacePaths paths = ResolveWorkspacePathsCore(config, clientListName);
+        return (paths.InputCsvDir, paths.InputPdfDir, paths.OutputCsvDir);
+    }
+
+    private static WorkspacePaths ResolveWorkspacePathsCore(IConfiguration config, string? clientListName)
     {
         ArgumentNullException.ThrowIfNull(config);
+
+        string normalizedName = NormalizeClientListName(clientListName);
 
         string? baseDirectory = config["BaseDirectory"]?.Trim();
         if (string.IsNullOrWhiteSpace(baseDirectory))
@@ -74,16 +84,22 @@ public static class CohortWorkspaceService
         }
 
         string fullBaseDirectory = Path.GetFullPath(baseDirectory);
-        string configuredCohortPath = (config[$"{WorkspaceSection}:BaseCohortPath"] ?? DefaultBaseCohortPath)
-            .Replace("{BaseDirectory}", fullBaseDirectory, StringComparison.Ordinal);
+        string configuredTemplate = config[$"{WorkspaceSection}:BaseCohortPath"] ?? DefaultBaseCohortPath;
+        bool includesClientListName = configuredTemplate.Contains("{ClientListName}", StringComparison.OrdinalIgnoreCase);
+        string configuredCohortPath = configuredTemplate
+            .Replace("{BaseDirectory}", fullBaseDirectory, StringComparison.OrdinalIgnoreCase)
+            .Replace("{ClientListName}", normalizedName, StringComparison.OrdinalIgnoreCase);
         if (configuredCohortPath.Contains('{') || configuredCohortPath.Contains('}'))
         {
             throw new InvalidOperationException("The cohort workspace path contains an unresolved placeholder.");
         }
 
-        string cohortPath = Path.GetFullPath(Path.IsPathRooted(configuredCohortPath)
+        string configuredBasePath = Path.GetFullPath(Path.IsPathRooted(configuredCohortPath)
             ? configuredCohortPath
             : Path.Combine(fullBaseDirectory, configuredCohortPath));
+        string cohortPath = includesClientListName
+            ? configuredBasePath
+            : ResolveChildPath(configuredBasePath, normalizedName, "BaseCohortPath");
         EnsureContained(fullBaseDirectory, cohortPath, "BaseCohortPath");
 
         string inputFolder = ResolveChildPath(cohortPath, config[$"{WorkspaceSection}:InputFolder"] ?? DefaultInputFolder, "InputFolder");
@@ -93,6 +109,18 @@ public static class CohortWorkspaceService
         string outputCsvDir = ResolveChildPath(outputFolder, config[$"{WorkspaceSection}:SubFolders:OutputCsv"] ?? DefaultOutputCsvFolder, "SubFolders:OutputCsv");
 
         return new WorkspacePaths(inputCsvDir, inputPdfDir, outputCsvDir);
+    }
+
+    private static string NormalizeClientListName(string? clientListName)
+    {
+        string normalizedName = clientListName?.Trim().ToUpperInvariant() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            throw new ArgumentException("Client list name is required.", nameof(clientListName));
+        }
+
+        ValidateFileNameSegment(normalizedName, nameof(clientListName));
+        return normalizedName;
     }
 
     private static string ResolveChildPath(string parent, string child, string settingName)

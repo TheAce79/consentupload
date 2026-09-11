@@ -167,6 +167,7 @@ partial class CohortContextForm
         txt_EncounterGroup.Name = "txt_EncounterGroup";
         txt_EncounterGroup.Size = new Size(400, 27);
         txt_EncounterGroup.TabIndex = 12;
+        txt_EncounterGroup.TextChanged += OnContextParameterChanged;
         // 
         // lbl_EncounterGroup
         // 
@@ -183,6 +184,7 @@ partial class CohortContextForm
         txt_Jurisdiction.Name = "txt_Jurisdiction";
         txt_Jurisdiction.Size = new Size(400, 27);
         txt_Jurisdiction.TabIndex = 10;
+        txt_Jurisdiction.TextChanged += OnContextParameterChanged;
         // 
         // lbl_Jurisdiction
         // 
@@ -197,6 +199,7 @@ partial class CohortContextForm
         // 
         dtp_CohortDate.CustomFormat = "yyyy-MM-dd";
         dtp_CohortDate.Format = DateTimePickerFormat.Custom;
+        dtp_CohortDate.ShowCheckBox = true;
         dtp_CohortDate.Location = new Point(160, 159);
         dtp_CohortDate.Name = "dtp_CohortDate";
         dtp_CohortDate.Size = new Size(200, 27);

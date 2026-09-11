@@ -9,10 +9,11 @@ namespace ConsentSyncCore.Services.Pdf;
 public class PdfRosterParserService
 {
     private static readonly Regex NameDobRegex = new(
-        @"(?<FullName>[\p{L}\s,'\-.]+?)\s*\(?\b(?<DOB>\d{4}-\d{2}-\d{2})\b\)?",
+        @"^\s*(?<FullName>[\p{L}\s,'\-.]+?)\s*\(?\b(?<DOB>\d{4}-\d{2}-\d{2})\b\)?",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex MedicareRegex = new(@"\b(?:\d{9}|\d{3}\s?\d{3}\s?\d{3})\b", RegexOptions.Compiled);
-    private static readonly Regex AppointmentPrefixRegex = new(@"^\s*[\u2605]?\s*\d{1,2}h\d{2}\s*(?:\d/\d)?", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex TimeRangePrefixRegex = new(@"^\s*\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\b\s*", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex AppointmentPrefixRegex = new(@"^\s*[\u2605]?\s*\d{1,2}h\d{2}\s*(?:\d+\s*/\s*\d+)?\s*(?:[-–—]\s*)?", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
 
     public List<ClinicPdfClientRecord> ExtractRecordsFromPdfFolder(string inputPdfDir)
@@ -43,9 +44,26 @@ public class PdfRosterParserService
     public static List<ClinicPdfClientRecord> ExtractRecordsFromLines(IEnumerable<string> lines)
     {
         var records = new List<ClinicPdfClientRecord>();
-        foreach (string line in lines)
+        string[] pageLines = lines.ToArray();
+
+        for (int index = 0; index < pageLines.Length; index++)
         {
-            string cleanLine = AppointmentPrefixRegex.Replace(line, string.Empty).Trim();
+            string line = pageLines[index];
+            if (!StartsAppointmentBlock(line)) continue;
+
+            string cleanLine = RemoveAppointmentPrefixes(line);
+            if (string.IsNullOrWhiteSpace(cleanLine))
+            {
+                int primaryLineIndex = FindNextContentLine(pageLines, index + 1);
+                if (primaryLineIndex < 0 || TimeRangePrefixRegex.IsMatch(pageLines[primaryLineIndex])) continue;
+
+                // Consume this block's primary line even if it cannot be parsed.
+                index = primaryLineIndex;
+                cleanLine = RemoveAppointmentPrefixes(pageLines[primaryLineIndex]);
+            }
+
+            cleanLine = cleanLine.TrimStart('-', '=', '+', '@', ',', ' ', '\t', '–', '—', '•', '●', '▪', '◦');
+
             Match match = NameDobRegex.Match(cleanLine);
             if (!match.Success || !DateOnly.TryParseExact(match.Groups["DOB"].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly parsedDob))
             {
@@ -58,7 +76,7 @@ public class PdfRosterParserService
                 .Trim();
             if (fullName.Length < 3 || fullName.Equals("CIP", StringComparison.OrdinalIgnoreCase)) continue;
 
-            Match medicare = MedicareRegex.Match(line);
+            Match medicare = MedicareRegex.Match(cleanLine);
             records.Add(new ClinicPdfClientRecord
             {
                 FullName = fullName,
@@ -68,6 +86,25 @@ public class PdfRosterParserService
         }
 
         return records;
+    }
+
+    private static bool StartsAppointmentBlock(string line) =>
+        TimeRangePrefixRegex.IsMatch(line) || AppointmentPrefixRegex.IsMatch(line);
+
+    private static string RemoveAppointmentPrefixes(string line)
+    {
+        string result = TimeRangePrefixRegex.Replace(line, string.Empty);
+        return AppointmentPrefixRegex.Replace(result, string.Empty).Trim();
+    }
+
+    private static int FindNextContentLine(IReadOnlyList<string> lines, int startIndex)
+    {
+        for (int index = startIndex; index < lines.Count; index++)
+        {
+            if (!string.IsNullOrWhiteSpace(lines[index])) return index;
+        }
+
+        return -1;
     }
 
     private static IEnumerable<string> ReconstructLines(IEnumerable<Word> words)

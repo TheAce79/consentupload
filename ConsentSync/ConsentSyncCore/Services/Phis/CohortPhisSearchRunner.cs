@@ -46,6 +46,25 @@ public sealed class CohortPhisSearchRunner
             if (nameMatches.Count == 1) { await MarkFoundAsync(record, nameMatches[0]); LogOutcome(recordLabel, record); continue; }
             if (nameMatches.Count > 1) { MarkFailed(record, "MultipleMatchingClientsFound"); LogOutcome(recordLabel, record); continue; }
 
+            CandidateScore? previewCandidate = scoredDobCandidates.OrderByDescending(candidate => candidate.Score).FirstOrDefault();
+            if (previewCandidate is not null && !string.IsNullOrWhiteSpace(previewCandidate.Candidate.ClientId))
+            {
+                try
+                {
+                    PhisClientPreview? preview = await _searchService.GetClientPreviewAsync(previewCandidate.Candidate.ClientId);
+                    string? matchedIdentifier = PhisPreviewIdentityVerifier.GetMatchingIdentifier(record.Medicare, record.Phone, record.Email, preview, previewCandidate.Candidate.ClientId);
+                    if (matchedIdentifier is not null)
+                    {
+                        LoggerService.LogInformation($"   {recordLabel}: PHIS preview verified candidate by {matchedIdentifier}.");
+                        await MarkFoundAsync(record, new CandidateScore(previewCandidate.Candidate, _threshold, false), preview);
+                        LogOutcome(recordLabel, record);
+                        continue;
+                    }
+                    LoggerService.LogInformation($"   {recordLabel}: PHIS preview did not verify the below-threshold candidate; continuing fallbacks.");
+                }
+                catch (Exception ex) { LoggerService.LogWarning($"   {recordLabel}: PHIS preview verification failed; continuing fallbacks. {ex.Message}"); }
+            }
+
             if (!string.IsNullOrWhiteSpace(record.Medicare))
             {
                 SearchResult medicareResult = await _searchService.SearchByMedicareAsync(record.Medicare);
@@ -91,23 +110,23 @@ public sealed class CohortPhisSearchRunner
         if (best is not null) record.BestMatch = FormatBestMatch(best.Candidate, best.Score);
     }
 
-    private async Task MarkFoundAsync(ClinicPdfClientRecord record, CandidateScore scoredCandidate)
+    private async Task MarkFoundAsync(ClinicPdfClientRecord record, CandidateScore scoredCandidate, PhisClientPreview? preview = null)
     {
         PhisSearchResult candidate = scoredCandidate.Candidate;
         if (string.IsNullOrWhiteSpace(candidate.ClientId)) { MarkFailed(record, "MissingClientId"); return; }
         record.ClientId = candidate.ClientId; record.ClientIdStatus = ClientIdStatus.Found; record.FirstName = candidate.FirstName;
         record.LastName = candidate.LastName; record.MiddleName = candidate.MiddleName; record.ErrorDetails = null;
         record.BestMatch = FormatBestMatch(candidate, scoredCandidate.Score);
-        await PopulateEmailAsync(record);
+        await PopulateEmailAsync(record, preview);
     }
 
-    private async Task PopulateEmailAsync(ClinicPdfClientRecord record)
+    private async Task PopulateEmailAsync(ClinicPdfClientRecord record, PhisClientPreview? preview = null)
     {
         if (!string.IsNullOrWhiteSpace(record.Email) || string.IsNullOrWhiteSpace(record.ClientId)) return;
 
         try
         {
-            PhisClientPreview? preview = await _searchService.GetClientPreviewAsync(record.ClientId);
+            preview ??= await _searchService.GetClientPreviewAsync(record.ClientId);
             if (preview is null || !string.Equals(preview.ClientId, record.ClientId, StringComparison.Ordinal))
             {
                 LoggerService.LogWarning($"   PHIS preview was unavailable or did not match resolved Client ID {record.ClientId}; email was not populated.");

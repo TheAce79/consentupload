@@ -59,14 +59,23 @@ namespace ConsentSyncCore.Services.Phis
 
             try
             {
+                if (!await EnsurePreviewClosedAsync())
+                    throw new InvalidOperationException("PHIS preview overlay could not be cleared before preview.");
                 IWebElement row = FindSearchResultRow(clientId);
                 ClearSearchResultSelection();
                 IWebElement checkbox = row.FindElement(By.CssSelector(".ui-chkbox-box"));
                 ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", checkbox);
+                _wait.Until(_ => (checkbox.GetAttribute("class") ?? string.Empty).Contains("ui-state-active"));
                 await Task.Delay(_phisConfig.AjaxWaitMs);
 
-                IWebElement previewButton = _wait.Until(d => d.FindElements(By.XPath(
-                    "//*[self::button or self::a or self::input][normalize-space(.)='Preview' or @value='Preview']"))
+                IWebElement contextButton = _wait.Until(d => d.FindElements(By.Id("form:dataTable:selectButtonId:actionButtonId:commandButtonId"))
+                    .FirstOrDefault(element => element.Displayed && element.Enabled)
+                    ?? throw new NoSuchElementException("PHIS Set In Context button was not available."));
+                ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", contextButton);
+                _wait.Until(_ => IsPrimeFacesAjaxQueueEmpty());
+                await Task.Delay(_phisConfig.AjaxWaitMs);
+
+                IWebElement previewButton = _wait.Until(d => d.FindElements(By.Id("form:dataTable:clientPreview:previewButtonId4:commandButtonId"))
                     .FirstOrDefault(element => element.Displayed && element.Enabled)
                     ?? throw new NoSuchElementException("PHIS Preview button was not available."));
                 ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", previewButton);
@@ -79,8 +88,16 @@ namespace ConsentSyncCore.Services.Phis
                 }
 
                 List<PhisEmailAddress> emails = await ReadPreviewEmailAddressesAsync();
+                IWebElement dialog = _wait.Until(d => d.FindElements(By.Id(PreviewDialogId)).FirstOrDefault(element => element.Displayed)
+                    ?? throw new NoSuchElementException("PHIS Preview dialog was not available."));
                 _sessionManager.UpdateActivity();
-                return new PhisClientPreview { ClientId = previewClientId, EmailAddresses = emails };
+                return new PhisClientPreview
+                {
+                    ClientId = previewClientId,
+                    HealthCardNumber = ReadPreviewLabeledValue(dialog, "Health Card Number:"),
+                    PreferredTelephoneNumber = ExtractPhoneFromPreviewValue(ReadPreviewLabeledValue(dialog, "Preferred Telephone Number:")),
+                    EmailAddresses = emails
+                };
             }
             catch (Exception ex)
             {
@@ -2064,6 +2081,24 @@ namespace ConsentSyncCore.Services.Phis
         {
             foreach (IWebElement selected in _driver.FindElements(By.CssSelector("#form\\:dataTable\\:dataTable_data .ui-chkbox-box.ui-state-active")))
                 ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", selected);
+        }
+
+        private static string? ReadPreviewLabeledValue(IWebElement dialog, string labelText)
+        {
+            IWebElement? label = dialog.FindElements(By.XPath(".//*[normalize-space(text())='" + labelText + "']"))
+                .FirstOrDefault(element => element.Displayed);
+            if (label is null) return null;
+            string value = label.FindElement(By.XPath("following::span[contains(@class, 'phsdsm-text')][1]")).Text.Trim();
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            int separator = value.IndexOf(" - ", StringComparison.Ordinal);
+            return separator >= 0 ? value[..separator].Trim() : value;
+        }
+
+        private static string? ExtractPhoneFromPreviewValue(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            Match match = Regex.Match(value, @"(?:\+?1[\s().-]*)?(?:\(?\d{3}\)?[\s.-]*)\d{3}[\s.-]*\d{4}");
+            return match.Success ? match.Value : null;
         }
 
         private string WaitForPreviewClientId()
