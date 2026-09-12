@@ -211,7 +211,8 @@ public sealed class PhisCohortService
 
     private void SelectStaticCohortType()
     {
-        IWebElement input = WaitForVisible(CohortTypeInputId);
+        // PrimeFaces keeps the real select inside ui-helper-hidden-accessible; it is present but never displayed.
+        IWebElement input = WaitForPresent(CohortTypeInputId);
         if (string.Equals(input.GetAttribute("value"), "STATIC", StringComparison.OrdinalIgnoreCase)) return;
 
         string menuId = "maintainCohortForm:CohortType:selectOneMenu";
@@ -220,7 +221,7 @@ public sealed class PhisCohortService
             .SingleOrDefault(element => element.Displayed));
         ClickReliably(staticOption);
         WaitForAjaxQueue();
-        input = WaitForVisible(CohortTypeInputId);
+        input = WaitForPresent(CohortTypeInputId);
         if (!string.Equals(input.GetAttribute("value"), "STATIC", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("PHIS cohort type could not be set to Static.");
     }
@@ -314,6 +315,12 @@ public sealed class PhisCohortService
     {
         IWebElement element = d.FindElement(By.Id(id));
         return element.Displayed ? element : null;
+    });
+
+    private IWebElement WaitForPresent(string id) => _wait.Until(d =>
+    {
+        try { return d.FindElement(By.Id(id)); }
+        catch (NoSuchElementException) { return null; }
     });
 
     private bool IsDisplayed(string id) => _driver.FindElements(By.Id(id)).Any(element => element.Displayed);
