@@ -389,13 +389,33 @@ public partial class CohortContextForm
 
             btn_CreatePhisCohort.Text = "Searching Cohort...";
             await Task.Run(() => cohortService.SearchAsync(criterion, criterionValue));
+            btn_CreatePhisCohort.Text = "Checking Search Results...";
+            CohortCreationResult creationResult = await Task.Run(() => cohortService.CreateIfSearchReturnedNoResultsAsync(clientListName));
 
-            MessageBox.Show(this,
-                $"Client ID list file exported and PHIS cohort search submitted.\n\n" +
-                $"File Location:\n{targetPath}\n\n" +
-                $"Total Client IDs exported: {clientIds.Count}\n" +
-                $"Search criterion: {(criterion == CohortSearchCriterion.CohortId ? "Cohort ID" : "Client List Name")}",
-                "PHIS Search Submitted", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            string fileDetails = $"\n\nClient ID file:\n{targetPath}\n\nTotal Client IDs exported: {clientIds.Count}";
+            switch (creationResult.Status)
+            {
+                case CohortCreationStatus.Created:
+                    LoggerService.LogInformation(creationResult.Message);
+                    MessageBox.Show(this, creationResult.Message + fileDetails + "\n\nClient association has not been performed.",
+                        "PHIS Cohort Created", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    break;
+                case CohortCreationStatus.SaveUnverified:
+                    LoggerService.LogWarning(creationResult.Message);
+                    MessageBox.Show(this, creationResult.Message + fileDetails + "\n\nReview the open PHIS page before continuing. Client association has not been performed.",
+                        "PHIS Save Needs Review", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    break;
+                case CohortCreationStatus.ExistingResults:
+                    LoggerService.LogInformation(creationResult.Message);
+                    MessageBox.Show(this, creationResult.Message + fileDetails,
+                        "PHIS Cohort Already Exists", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    break;
+                default:
+                    LoggerService.LogWarning(creationResult.Message);
+                    MessageBox.Show(this, creationResult.Message + fileDetails,
+                        "PHIS Search Result Not Confirmed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    break;
+            }
         }
         catch (Exception ex)
         {

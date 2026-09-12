@@ -57,6 +57,28 @@ public sealed class PhisCohortServiceTests
         Assert.Equal(1, page.SearchClicks);
     }
 
+    [Fact]
+    public async Task CreateIfSearchReturnedNoResultsAsync_DoesNotCreateWhenSearchHasResults()
+    {
+        var page = new FakeSearchCohortPage { EmptyResultText = "1 result found" };
+
+        CohortCreationResult result = await page.CreateService().CreateIfSearchReturnedNoResultsAsync("CIPMONCTONSP20260917");
+
+        Assert.Equal(CohortCreationStatus.ExistingResults, result.Status);
+        Assert.False(result.CohortWasSaved);
+    }
+
+    [Fact]
+    public async Task CreateIfSearchReturnedNoResultsAsync_DoesNotCreateWhenEmptyStateIsMissing()
+    {
+        var page = new FakeSearchCohortPage();
+
+        CohortCreationResult result = await page.CreateService().CreateIfSearchReturnedNoResultsAsync("CIPMONCTONSP20260917");
+
+        Assert.Equal(CohortCreationStatus.SearchResultUnavailable, result.Status);
+        Assert.False(result.CohortWasSaved);
+    }
+
     private sealed class FakeSearchCohortPage
     {
         public const string SearchUrl = "https://phis.example/phsdsm/ClientWeb/pages/cohort/searchCohort.xhtml?tab=review";
@@ -64,12 +86,14 @@ public sealed class PhisCohortServiceTests
         private const string CohortIdInputId = "form:CohortSearchCriteria_QueryID:inputText";
         private const string CohortNameInputId = "form:CohortName:inputText";
         private const string SearchButtonId = "actionMenuSearch:commandButtonId";
+        private const string EmptyResultsId = "form:DataTable:emptyMessageId";
 
         public string Url { get; set; } = SearchUrl;
         public string CohortIdValue { get; set; } = string.Empty;
         public string CohortNameValue { get; set; } = string.Empty;
         public bool CohortNameDisplayed { get; set; } = true;
         public bool ThrowOnUrlRead { get; set; }
+        public string? EmptyResultText { get; set; }
         public int SearchClicks { get; private set; }
 
         public PhisCohortService CreateService()
@@ -105,6 +129,7 @@ public sealed class PhisCohortServiceTests
             CohortIdInputId => CreateElement(value: () => CohortIdValue, setValue: value => CohortIdValue = value),
             CohortNameInputId => CreateElement(displayed: CohortNameDisplayed, value: () => CohortNameValue, setValue: value => CohortNameValue = value),
             SearchButtonId => CreateElement(onClick: () => SearchClicks++),
+            EmptyResultsId when EmptyResultText is not null => CreateElement(text: () => EmptyResultText),
             _ => null
         };
 
@@ -118,11 +143,13 @@ public sealed class PhisCohortServiceTests
         private static IWebElement CreateElement(
             bool displayed = true,
             Func<string>? value = null,
+            Func<string>? text = null,
             Action<string>? setValue = null,
             Action? onClick = null) => SeleniumDispatchProxy.Create<IWebElement>((method, arguments) => method.Name switch
         {
             "get_Displayed" => displayed,
             "get_Enabled" => true,
+            "get_Text" => text?.Invoke() ?? string.Empty,
             "GetAttribute" => arguments![0] as string == "value" ? value?.Invoke() ?? string.Empty : null,
             "Clear" => ClearValue(setValue),
             "SendKeys" => SetValue(setValue, arguments![0] as string ?? string.Empty),
