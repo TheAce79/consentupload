@@ -79,6 +79,20 @@ public sealed class PhisCohortServiceTests
         Assert.False(result.CohortWasSaved);
     }
 
+    [Fact]
+    public async Task CreateIfSearchReturnedNoResultsAsync_ExtractsTheUniqueExactClientListMatch()
+    {
+        var page = new FakeSearchCohortPage
+        {
+            SearchResultRows = [new(24250, "CIPMONCTONSP20260917")]
+        };
+
+        CohortCreationResult result = await page.CreateService().CreateIfSearchReturnedNoResultsAsync("CIPMONCTONSP20260917");
+
+        Assert.Equal(CohortCreationStatus.ExistingResults, result.Status);
+        Assert.Equal(24250, result.PhisCohortId);
+    }
+
     private sealed class FakeSearchCohortPage
     {
         public const string SearchUrl = "https://phis.example/phsdsm/ClientWeb/pages/cohort/searchCohort.xhtml?tab=review";
@@ -94,6 +108,7 @@ public sealed class PhisCohortServiceTests
         public bool CohortNameDisplayed { get; set; } = true;
         public bool ThrowOnUrlRead { get; set; }
         public string? EmptyResultText { get; set; }
+        public List<(int CohortId, string CohortName)> SearchResultRows { get; set; } = [];
         public int SearchClicks { get; private set; }
 
         public PhisCohortService CreateService()
@@ -108,6 +123,10 @@ public sealed class PhisCohortServiceTests
                 if (method.Name == "FindElements")
                 {
                     string id = ExtractId(arguments![0]!);
+                    if (id.Contains("DataTable", StringComparison.Ordinal) && id.Contains("tr", StringComparison.Ordinal))
+                    {
+                        return new ReadOnlyCollection<IWebElement>(SearchResultRows.Select(row => CreateResultRow(row.CohortId, row.CohortName)).ToList());
+                    }
                     IWebElement? element = FindElement(id);
                     return new ReadOnlyCollection<IWebElement>(element is null ? [] : [element]);
                 }
@@ -160,6 +179,27 @@ public sealed class PhisCohortServiceTests
         private static object? ClearValue(Action<string>? setValue) { setValue?.Invoke(string.Empty); return null; }
         private static object? SetValue(Action<string>? setValue, string value) { setValue?.Invoke(value); return null; }
         private static object? Click(Action? onClick) { onClick?.Invoke(); return null; }
+
+        private static IWebElement CreateResultRow(int cohortId, string cohortName) => SeleniumDispatchProxy.Create<IWebElement>((method, arguments) =>
+        {
+            if (method.Name == "get_Displayed") return true;
+            if (method.Name == "FindElements")
+            {
+                string locator = arguments![0]!.ToString() ?? string.Empty;
+                if (locator.Contains("td[role='gridcell']", StringComparison.Ordinal))
+                {
+                    IWebElement[] cells =
+                    [
+                        CreateElement(text: () => string.Empty),
+                        CreateElement(text: () => string.Empty),
+                        CreateElement(text: () => cohortId.ToString()),
+                        CreateElement(text: () => cohortName)
+                    ];
+                    return new ReadOnlyCollection<IWebElement>(cells);
+                }
+            }
+            throw new NotSupportedException(method.Name);
+        });
     }
 
     private class SeleniumDispatchProxy : DispatchProxy

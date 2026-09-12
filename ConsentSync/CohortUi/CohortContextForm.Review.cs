@@ -406,6 +406,10 @@ public partial class CohortContextForm
                         "PHIS Save Needs Review", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     break;
                 case CohortCreationStatus.ExistingResults:
+                    if (creationResult.PhisCohortId is int existingCohortId)
+                    {
+                        await PersistPhisCohortIdAsync(existingCohortId);
+                    }
                     LoggerService.LogInformation(creationResult.Message);
                     MessageBox.Show(this, creationResult.Message + fileDetails,
                         "PHIS Cohort Already Exists", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -431,6 +435,20 @@ public partial class CohortContextForm
             btn_CreatePhisCohort.Text = "Create PHIS Cohort";
             SetFormEnabled(true);
         }
+    }
+
+    private async Task PersistPhisCohortIdAsync(int phisCohortId)
+    {
+        if (_activeContext is null || _dbManager is null)
+        {
+            throw new InvalidOperationException("The active cohort context is unavailable, so the PHIS Cohort ID cannot be saved.");
+        }
+
+        _activeContext.PhisCohortId = phisCohortId;
+        await _dbManager.SaveCohortContextAsync(_activeContext);
+        _phisCohortId.Text = phisCohortId.ToString();
+        UpdateReviewAvailability();
+        LoggerService.LogInformation($"Saved PHIS Cohort ID {phisCohortId} to cohort context {_activeContext.CohortContextId} ({_activeContext.ClientListName}).");
     }
 
     private async Task EnsureCohortPhisSessionAsync(Microsoft.Extensions.Configuration.IConfiguration config)

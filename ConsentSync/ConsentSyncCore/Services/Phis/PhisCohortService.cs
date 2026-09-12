@@ -20,7 +20,7 @@ public enum CohortCreationStatus
     SaveUnverified
 }
 
-public sealed record CohortCreationResult(CohortCreationStatus Status, string Message)
+public sealed record CohortCreationResult(CohortCreationStatus Status, string Message, int? PhisCohortId = null)
 {
     public bool CohortWasSaved => Status is CohortCreationStatus.Created or CohortCreationStatus.SaveUnverified;
 }
@@ -126,7 +126,12 @@ public sealed class PhisCohortService
 
         SearchResultState searchState = GetSearchResultState();
         if (searchState == SearchResultState.ResultsFound)
-            return new(CohortCreationStatus.ExistingResults, "PHIS returned existing cohort search results; no cohort was created.");
+        {
+            int? existingCohortId = ExtractMatchingCohortId(name);
+            return existingCohortId.HasValue
+                ? new(CohortCreationStatus.ExistingResults, $"PHIS returned existing cohort ID {existingCohortId} for '{name}'; no cohort was created.", existingCohortId)
+                : new(CohortCreationStatus.ExistingResults, "PHIS returned existing cohort search results, but no unique exact Client List Name match was found; no cohort was created.");
+        }
         if (searchState != SearchResultState.Empty)
             return new(CohortCreationStatus.SearchResultUnavailable, "PHIS search results could not be confirmed as exactly 'No search results.'; no cohort was created.");
 
@@ -165,6 +170,21 @@ public sealed class PhisCohortService
         return hasRows ? SearchResultState.ResultsFound : SearchResultState.Unavailable;
     }
 
+    private int? ExtractMatchingCohortId(string clientListName)
+    {
+        IReadOnlyList<int> matchingIds = _driver.FindElements(By.CssSelector("#form\\:DataTable\\:dataTable_data tr[role='row']"))
+            .Where(row => row.Displayed)
+            .Select(row => row.FindElements(By.CssSelector("td[role='gridcell']")))
+            .Where(cells => cells.Count >= 4 && string.Equals(cells[3].Text.Trim(), clientListName, StringComparison.OrdinalIgnoreCase))
+            .Select(cells => int.TryParse(cells[2].Text.Trim(), out int cohortId) ? (int?)cohortId : null)
+            .Where(cohortId => cohortId.HasValue)
+            .Select(cohortId => cohortId!.Value)
+            .Distinct()
+            .ToList();
+
+        return matchingIds.Count == 1 ? matchingIds[0] : null;
+    }
+
     private void ClickCreateCohort()
     {
         ClickReliably(WaitForEnabled(CreateCohortButtonId));
@@ -195,10 +215,10 @@ public sealed class PhisCohortService
         if (string.Equals(input.GetAttribute("value"), "STATIC", StringComparison.OrdinalIgnoreCase)) return;
 
         string menuId = "maintainCohortForm:CohortType:selectOneMenu";
-        WaitForVisible(menuId).Click();
+        ClickReliably(WaitForVisible(menuId));
         IWebElement staticOption = _wait.Until(d => d.FindElements(By.XPath("//*[contains(@class, 'ui-selectonemenu-item') and (normalize-space(.)='Static' or @data-label='Static' or @data-value='STATIC')]") )
             .SingleOrDefault(element => element.Displayed));
-        staticOption.Click();
+        ClickReliably(staticOption);
         WaitForAjaxQueue();
         input = WaitForVisible(CohortTypeInputId);
         if (!string.Equals(input.GetAttribute("value"), "STATIC", StringComparison.OrdinalIgnoreCase))
@@ -263,7 +283,7 @@ public sealed class PhisCohortService
         }
     }
 
-    private void WaitForTransientOverlays() => _wait.Until(_ => !_driver.FindElements(By.CssSelector("#blockUI, .ui-blockui, .ui-growl-item"))
+    private void WaitForTransientOverlays() => _wait.Until(_ => !_driver.FindElements(By.Id("blockUI"))
         .Any(element => element.Displayed));
 
     private IWebElement WaitForEnabled(string id) => _wait.Until(d =>
