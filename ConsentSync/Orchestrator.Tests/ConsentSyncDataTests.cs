@@ -141,6 +141,49 @@ public sealed class ConsentSyncDataTests : IDisposable
     }
 
     [Fact]
+    public async Task PreloadCacheForDatesAsync_LoadsOnlyNormalizedRosterDatesAndReplacesPreviousSubset()
+    {
+        var manager = CreateManager();
+        await manager.BulkSaveClientCacheAsync([
+            Client("ONE", "2020/02/26", "1"), Client("TWO", "2017-12-12", "2"), Client("THREE", "2015/01/01", "3")
+        ]);
+
+        await manager.PreloadCacheForDatesAsync(["2020-02-26", "12/12/2017", "not-a-date"]);
+        var cache = (Dictionary<string, PhisClientCacheEntity>)typeof(DbManager)
+            .GetField("_primaryMemoryCache", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(manager)!;
+        Assert.Equal(2, cache.Count);
+        Assert.DoesNotContain(cache.Values, row => row.ClientId == "3");
+
+        await manager.PreloadCacheForDatesAsync(["2015/01/01"]);
+        Assert.Single(cache);
+        Assert.Equal("3", Assert.Single(cache.Values).ClientId);
+
+        await using var connection = OpenConnection();
+        Assert.Contains("IX_PhisClientCache_DateOfBirth", await connection.QueryAsync<string>(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='IX_PhisClientCache_DateOfBirth';"));
+    }
+
+    [Fact]
+    public async Task BulkSaveClientCacheAsync_UpsertsAndNormalizesDates()
+    {
+        var manager = CreateManager();
+        await manager.BulkSaveClientCacheAsync([Client("SAME", "2020-02-26", "001")]);
+        await manager.BulkSaveClientCacheAsync([Client("SAME", "26/02/2020", "002")]);
+        await using var connection = OpenConnection();
+        var row = await connection.QuerySingleAsync<PhisClientCacheEntity>("SELECT * FROM PhisClientCache;");
+        Assert.Equal("002", row.ClientId);
+        Assert.Equal("2020/02/26", row.DateOfBirth);
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM PhisClientCache;"));
+    }
+
+    private static PhisClientCacheEntity Client(string name, string dob, string id) => new()
+    {
+        CacheKey = DbManager.BuildCacheKey(name, dob), ClientId = id, FullName = name, DateOfBirth = dob,
+        Source = ClientSource.ManualReview
+    };
+
+    [Fact]
     public async Task SaveCohortContextAsync_ActivatesLatestAndDeactivatesPrevious()
     {
         var manager = CreateManager();

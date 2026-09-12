@@ -36,6 +36,7 @@ public partial class CohortContextForm : Form
     public CohortContextForm()
     {
         InitializeComponent();
+        InitializeWorkflowTabs();
         LoggerService.LogMessage += OnLogMessage;
         _isLogSubscribed = true;
     }
@@ -119,6 +120,7 @@ public partial class CohortContextForm : Form
 
     private async void btn_SaveCohortContext_Click(object? sender, EventArgs e)
     {
+        if (_formBusy) return;
         if (_dbManager is null)
         {
             MessageBox.Show(this, "Database manager is not ready yet.", "Not Ready", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -137,7 +139,9 @@ public partial class CohortContextForm : Form
             return;
         }
 
+        if (!ConfirmReviewTransition()) return;
         _hasSavedContext = false;
+        SetFormEnabled(false);
         UpdateProcessingAvailability();
         btn_SaveCohortContext.Enabled = false;
         btn_SaveCohortContext.Text = "Saving...";
@@ -158,6 +162,7 @@ public partial class CohortContextForm : Form
             ConfigurationService.ReloadConfiguration();
             CohortWorkspaceService.EnsureDirectories(ConfigurationService.GetConfiguration(), context.ClientListName);
             _hasSavedContext = true;
+            LoadActiveReview();
             RefreshStandardizedCsvPreview();
             await RefreshClientListSearchAsync(context.ClientListName);
             RestoreSaveButton();
@@ -184,6 +189,7 @@ public partial class CohortContextForm : Form
         finally
         {
             RestoreSaveButton();
+            SetFormEnabled(true);
             UpdateProcessingAvailability();
         }
     }
@@ -241,6 +247,8 @@ public partial class CohortContextForm : Form
             return;
         }
 
+        if (!ConfirmReviewTransition()) return;
+
         var config = ConfigurationService.GetConfiguration();
         string inputCsvPath;
         string outputCsvPath;
@@ -277,6 +285,17 @@ public partial class CohortContextForm : Form
             return;
         }
 
+        try
+        {
+            await _dbManager!.PreloadCacheForDatesAsync(records.Select(record => record.DateOfBirth));
+            int cacheHits = await ResolveCachedClientIdsAsync(records);
+            LoggerService.LogInformation($"Cohort cache preload completed for {records.Select(record => record.DateOfBirth).Distinct().Count()} roster DOB value(s). Cache hits: {cacheHits}; PHIS required: {records.Count - cacheHits}.");
+        }
+        catch (Exception ex)
+        {
+            LoggerService.LogWarning($"Cohort cache preload failed; PHIS search will continue for all records. {ex.Message}");
+        }
+
         _isPhase2Running = true;
         SetFormEnabled(false);
         btn_SearchPhis.Text = "Searching PHIS...";
@@ -294,7 +313,8 @@ public partial class CohortContextForm : Form
 
         try
         {
-            List<ConsentSyncCore.Models.ClinicPdfClientRecord> updated = await Task.Run(async () =>
+            List<ConsentSyncCore.Models.ClinicPdfClientRecord> remaining = records.Where(record => record.ClientIdStatus != ConsentSyncCore.Models.ClientIdStatus.Found || string.IsNullOrWhiteSpace(record.ClientId)).ToList();
+            List<ConsentSyncCore.Models.ClinicPdfClientRecord> updated = remaining.Count == 0 ? records : await Task.Run(async () =>
             {
                 IWebDriver driver = new ChromeDriverFactory(config).CreateDriver();
                 try
@@ -303,11 +323,14 @@ public partial class CohortContextForm : Form
                     if (!session.Login()) throw new InvalidOperationException("PHIS login was not completed.");
                     LoggerService.LogInformation("✅ PHIS session opened for Phase 2.");
                     var service = new PhisSearchService(driver, config, new PhisResultExtractor(config), session);
-                    return await new CohortPhisSearchRunner(service).ExecuteSearchAsync(records, progress);
+                    await new CohortPhisSearchRunner(service).ExecuteSearchAsync(remaining, progress);
+                    return records;
                 }
                 finally { driver.Dispose(); }
             });
             CsvExporterService.SaveToCsv(updated, outputCsvPath);
+            LoadActiveReview();
+            _workflowTabs.SelectedTab = _reviewTab;
             int manualReviewCount = updated.Count(record => record.ClientIdStatus == ConsentSyncCore.Models.ClientIdStatus.NeedsManualReview);
             LoggerService.LogInformation($"✅ Phase 2 complete. Enriched CSV saved: {outputCsvPath}");
             MessageBox.Show(this,
@@ -327,15 +350,39 @@ public partial class CohortContextForm : Form
         }
     }
 
+    private async Task<int> ResolveCachedClientIdsAsync(IEnumerable<ConsentSyncCore.Models.ClinicPdfClientRecord> records)
+    {
+        if (_dbManager is null) return 0;
+        int hits = 0;
+        foreach (var record in records)
+        {
+            string cacheKey = DbManager.BuildCacheKey(record.FullName, record.DateOfBirth);
+            if (string.IsNullOrWhiteSpace(cacheKey)) continue;
+            string? clientId = await _dbManager.GetClientIdAsync(cacheKey);
+            if (string.IsNullOrWhiteSpace(clientId)) continue;
+            record.ClientId = clientId;
+            record.ClientIdStatus = ConsentSyncCore.Models.ClientIdStatus.Found;
+            record.ErrorDetails = null;
+            record.BestMatch = null;
+            hits++;
+        }
+        return hits;
+    }
+
     private void CohortContextForm_FormClosing(object? sender, FormClosingEventArgs e)
     {
-        if (_isPhase2Running)
+        if (_formBusy || _isPhase2Running)
         {
             e.Cancel = true;
-            MessageBox.Show(this, "PHIS search is still running. Wait for it to finish before closing.", "Search Running", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "An operation is still running. Wait for it to finish before closing.", "Operation Running", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
+        if (!ConfirmReviewTransition())
+        {
+            e.Cancel = true;
+            return;
+        }
         UnsubscribeFromLogs();
     }
 
@@ -490,6 +537,11 @@ public partial class CohortContextForm : Form
         }
 
         bool updateExistingContext = IsSameCohortIdentity(_activeContext, context);
+        if (!updateExistingContext)
+        {
+            context.PhisCohortId = null;
+            context.PhisClientListId = null;
+        }
         context.CohortContextId = updateExistingContext
             ? _activeContext?.CohortContextId ?? 0
             : 0;
@@ -631,18 +683,21 @@ public partial class CohortContextForm : Form
 
     private void SetFormEnabled(bool enabled)
     {
+        _formBusy = !enabled;
         grp_CohortContext.Enabled = enabled;
         grp_PdfRosterExtraction.Enabled = enabled && _hasSavedContext;
         grp_PhisSearch.Enabled = enabled && _hasSavedContext;
         btn_SaveCohortContext.Enabled = enabled;
+        UpdateReviewAvailability();
     }
 
     private void UpdateProcessingAvailability()
     {
         if (!IsDisposed && !Disposing)
         {
-            grp_PdfRosterExtraction.Enabled = _hasSavedContext;
-            grp_PhisSearch.Enabled = _hasSavedContext;
+            grp_PdfRosterExtraction.Enabled = _hasSavedContext && !_formBusy;
+            grp_PhisSearch.Enabled = _hasSavedContext && !_formBusy;
+            UpdateReviewAvailability();
         }
     }
 
@@ -662,6 +717,8 @@ public partial class CohortContextForm : Form
 
     private async Task LoadSelectedCohortContextAsync()
     {
+        if (_formBusy) return;
+        if (!ConfirmReviewTransition()) return;
         if (_dbManager is null)
         {
             MessageBox.Show(this, "Database manager is not ready yet.", "Not Ready", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -677,6 +734,7 @@ public partial class CohortContextForm : Form
 
         btn_LoadContext.Enabled = false;
         btn_LoadContext.Text = "Loading...";
+        SetFormEnabled(false);
         _hasSavedContext = false;
         UpdateProcessingAvailability();
 
@@ -723,6 +781,7 @@ public partial class CohortContextForm : Form
             ConfigurationService.ReloadConfiguration();
             CohortWorkspaceService.EnsureDirectories(ConfigurationService.GetConfiguration(), context.ClientListName);
             _hasSavedContext = true;
+            LoadActiveReview();
             RefreshStandardizedCsvPreview();
             await RefreshClientListSearchAsync(context.ClientListName);
             UpdateProcessingAvailability();
@@ -740,6 +799,7 @@ public partial class CohortContextForm : Form
         finally
         {
             RestoreLoadButton();
+            SetFormEnabled(true);
         }
     }
 

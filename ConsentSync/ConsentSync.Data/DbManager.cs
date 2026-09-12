@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using ConsentSync.Data.Entities;
 using Dapper;
 using Microsoft.Data.Sqlite;
@@ -13,6 +14,7 @@ public sealed class DbManager : IConsentSyncRepository
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private readonly Dictionary<string, PhisClientCacheEntity> _primaryMemoryCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, PhisClientCacheEntity> _emailMemoryCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _memoryCacheLock = new();
     private bool _initialized;
 
     public DbManager(IConfiguration configuration)
@@ -60,8 +62,6 @@ public sealed class DbManager : IConsentSyncRepository
 
             await using SqliteConnection connection = OpenSqliteConnection();
             await CreateSchemaAsync(connection);
-            await LoadMemoryCachesAsync(connection);
-
             _initialized = true;
         }
         finally
@@ -79,19 +79,28 @@ public sealed class DbManager : IConsentSyncRepository
 
         string normalizedKey = NormalizeCacheKey(cacheKey);
         if (!string.IsNullOrWhiteSpace(normalizedKey) &&
-            _primaryMemoryCache.TryGetValue(normalizedKey, out PhisClientCacheEntity? primaryClient))
+            TryGetPrimaryFromMemory(normalizedKey, out PhisClientCacheEntity? primaryClient))
         {
-            return primaryClient.ClientId;
+            return primaryClient!.ClientId;
         }
 
         string normalizedEmail = NormalizeEmail(email);
         if (!string.IsNullOrWhiteSpace(normalizedEmail) &&
-            _emailMemoryCache.TryGetValue(normalizedEmail, out PhisClientCacheEntity? emailClient))
+            TryGetEmailFromMemory(normalizedEmail, out PhisClientCacheEntity? emailClient))
         {
-            return emailClient.ClientId;
+            return emailClient!.ClientId;
         }
 
-        return null;
+        const string sql = """
+            SELECT ClientId FROM PhisClientCache
+            WHERE CacheKey = @CacheKey
+               OR (@Email IS NOT NULL AND upper(Email) = @Email)
+            ORDER BY CASE WHEN CacheKey = @CacheKey THEN 0 ELSE 1 END, UpdatedOn DESC, Id DESC
+            LIMIT 1;
+            """;
+        await using SqliteConnection connection = OpenSqliteConnection();
+        return await connection.QuerySingleOrDefaultAsync<string>(new CommandDefinition(sql,
+            new { CacheKey = normalizedKey, Email = string.IsNullOrWhiteSpace(normalizedEmail) ? null : normalizedEmail }, cancellationToken: cancellationToken));
     }
 
     public async Task<int> SaveClientIdAsync(
@@ -134,6 +143,56 @@ public sealed class DbManager : IConsentSyncRepository
         client.Id = id;
         UpdateMemoryCache(client);
         return id;
+    }
+
+    public async Task PreloadCacheForDatesAsync(IEnumerable<string> datesOfBirth, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(datesOfBirth);
+        await EnsureInitializedAsync(cancellationToken);
+        var dates = datesOfBirth.Select(TryNormalizeDateOfBirth).Where(date => date is not null).Select(date => date!.Value)
+            .Distinct().ToList();
+        var loaded = new List<PhisClientCacheEntity>();
+        foreach (var batch in dates.Chunk(500))
+        {
+            var values = batch.SelectMany(date => new[] { date.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture), date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), date.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) }).Distinct().ToArray();
+            const string sql = "SELECT Id, CacheKey, ClientId, FullName, DateOfBirth, Email, Source, UpdatedOn FROM PhisClientCache WHERE DateOfBirth IN @Values;";
+            await using SqliteConnection connection = OpenSqliteConnection();
+            IEnumerable<PhisClientCacheEntity> clients = await connection.QueryAsync<PhisClientCacheEntity>(new CommandDefinition(sql, new { Values = values }, cancellationToken: cancellationToken));
+            loaded.AddRange(clients.Where(client => TryNormalizeDateOfBirth(client.DateOfBirth) is not null));
+        }
+        lock (_memoryCacheLock)
+        {
+            _primaryMemoryCache.Clear();
+            _emailMemoryCache.Clear();
+            foreach (var client in loaded) UpdateMemoryCacheUnsafe(client);
+        }
+    }
+
+    public async Task BulkSaveClientCacheAsync(IEnumerable<PhisClientCacheEntity> clients, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(clients);
+        await EnsureInitializedAsync(cancellationToken);
+        var items = clients.Where(client => !string.IsNullOrWhiteSpace(client.ClientId) && !string.IsNullOrWhiteSpace(client.CacheKey))
+            .Select(NormalizeClient).ToList();
+        if (items.Count == 0) return;
+        const string sql = """
+            INSERT INTO PhisClientCache (CacheKey, ClientId, FullName, DateOfBirth, Email, Source, UpdatedOn)
+            VALUES (@CacheKey, @ClientId, @FullName, @DateOfBirth, @Email, @Source, @UpdatedOn)
+            ON CONFLICT(CacheKey) DO UPDATE SET ClientId=excluded.ClientId, FullName=excluded.FullName,
+                DateOfBirth=excluded.DateOfBirth, Email=excluded.Email, Source=excluded.Source, UpdatedOn=excluded.UpdatedOn;
+            """;
+        await using SqliteConnection connection = OpenSqliteConnection();
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await connection.ExecuteAsync(new CommandDefinition(sql, items, transaction, cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+        lock (_memoryCacheLock) foreach (var client in items) UpdateMemoryCacheUnsafe(client);
+    }
+
+    public static string BuildCacheKey(string? fullName, string? dateOfBirth)
+    {
+        DateOnly? date = TryNormalizeDateOfBirth(dateOfBirth);
+        string name = new string((fullName ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+        return string.IsNullOrWhiteSpace(name) || date is null ? string.Empty : $"{name}_{date.Value:yyyy/MM/dd}";
     }
 
     public async Task<CohortContextEntity?> GetActiveCohortContextAsync(
@@ -547,6 +606,9 @@ public sealed class DbManager : IConsentSyncRepository
             CREATE INDEX IF NOT EXISTS IX_PhisClientCache_Email
                 ON PhisClientCache (Email);
 
+            CREATE INDEX IF NOT EXISTS IX_PhisClientCache_DateOfBirth
+                ON PhisClientCache (DateOfBirth);
+
             CREATE TABLE IF NOT EXISTS CohortContexts (
                 CohortContextId INTEGER PRIMARY KEY AUTOINCREMENT,
                 PhisCohortId INTEGER NULL,
@@ -612,25 +674,6 @@ public sealed class DbManager : IConsentSyncRepository
         await connection.ExecuteAsync(sql);
     }
 
-    private async Task LoadMemoryCachesAsync(IDbConnection connection)
-    {
-        const string sql = """
-            SELECT Id, CacheKey, ClientId, FullName, DateOfBirth, Email, Source, UpdatedOn
-            FROM PhisClientCache
-            ORDER BY UpdatedOn ASC, Id ASC;
-            """;
-
-        IEnumerable<PhisClientCacheEntity> clients = await connection.QueryAsync<PhisClientCacheEntity>(sql);
-
-        _primaryMemoryCache.Clear();
-        _emailMemoryCache.Clear();
-
-        foreach (PhisClientCacheEntity client in clients)
-        {
-            UpdateMemoryCache(client);
-        }
-    }
-
     private static async Task<int> InsertCohortContextAsync(
         IDbConnection connection,
         IDbTransaction transaction,
@@ -653,6 +696,11 @@ public sealed class DbManager : IConsentSyncRepository
 
     private void UpdateMemoryCache(PhisClientCacheEntity client)
     {
+        lock (_memoryCacheLock) UpdateMemoryCacheUnsafe(client);
+    }
+
+    private void UpdateMemoryCacheUnsafe(PhisClientCacheEntity client)
+    {
         string normalizedKey = NormalizeCacheKey(client.CacheKey);
         if (!string.IsNullOrWhiteSpace(normalizedKey))
         {
@@ -665,6 +713,32 @@ public sealed class DbManager : IConsentSyncRepository
         {
             _emailMemoryCache[normalizedEmail] = client;
         }
+    }
+
+    private bool TryGetPrimaryFromMemory(string key, out PhisClientCacheEntity? client)
+    {
+        lock (_memoryCacheLock) return _primaryMemoryCache.TryGetValue(key, out client);
+    }
+
+    private bool TryGetEmailFromMemory(string email, out PhisClientCacheEntity? client)
+    {
+        lock (_memoryCacheLock) return _emailMemoryCache.TryGetValue(email, out client);
+    }
+
+    private static PhisClientCacheEntity NormalizeClient(PhisClientCacheEntity client)
+    {
+        client.CacheKey = NormalizeCacheKey(client.CacheKey);
+        client.Email = string.IsNullOrWhiteSpace(client.Email) ? null : client.Email.Trim();
+        client.DateOfBirth = TryNormalizeDateOfBirth(client.DateOfBirth)?.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture) ?? client.DateOfBirth.Trim();
+        client.UpdatedOn = client.UpdatedOn == default ? DateTime.UtcNow : client.UpdatedOn;
+        return client;
+    }
+
+    private static DateOnly? TryNormalizeDateOfBirth(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return DateOnly.TryParseExact(value.Trim(), ["yyyy/MM/dd", "yyyy-MM-dd", "dd/MM/yyyy"], CultureInfo.InvariantCulture,
+            DateTimeStyles.AllowWhiteSpaces, out DateOnly date) ? date : null;
     }
 
     private static string NormalizeCacheKey(string? cacheKey) =>

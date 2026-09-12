@@ -12,6 +12,7 @@ namespace ConsentSync.Data.Entities
         AbleAccess = 1,
         ManualConsentForm = 2,
         DigitalConsentForm = 3,
+        ManualReview = 4,
 
 
         Other = 99

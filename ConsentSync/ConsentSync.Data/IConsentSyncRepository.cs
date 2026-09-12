@@ -15,6 +15,10 @@ public interface IConsentSyncRepository
         PhisClientCacheEntity client,
         CancellationToken cancellationToken = default);
 
+    Task PreloadCacheForDatesAsync(IEnumerable<string> datesOfBirth, CancellationToken cancellationToken = default);
+
+    Task BulkSaveClientCacheAsync(IEnumerable<PhisClientCacheEntity> clients, CancellationToken cancellationToken = default);
+
     Task<CohortContextEntity?> GetActiveCohortContextAsync(
         CancellationToken cancellationToken = default);
 
