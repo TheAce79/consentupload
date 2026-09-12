@@ -32,6 +32,8 @@ public partial class CohortContextForm : Form
     private bool _hasSavedContext;
     private bool _isPhase2Running;
     private bool _isLogSubscribed;
+    private IWebDriver? _cohortDriver;
+    private PhisSessionManager? _cohortSessionManager;
 
     public CohortContextForm()
     {
@@ -383,7 +385,24 @@ public partial class CohortContextForm : Form
             e.Cancel = true;
             return;
         }
+        DisposeCohortPhisSession();
         UnsubscribeFromLogs();
+    }
+
+    private void DisposeCohortPhisSession()
+    {
+        if (_cohortDriver is null)
+        {
+            return;
+        }
+
+        try { _cohortDriver.Quit(); _cohortDriver.Dispose(); }
+        catch (Exception ex) { LoggerService.LogWarning($"PHIS cohort session disposal warning: {ex.Message}"); }
+        finally
+        {
+            _cohortDriver = null;
+            _cohortSessionManager = null;
+        }
     }
 
     private void UnsubscribeFromLogs()

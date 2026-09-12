@@ -1,8 +1,11 @@
 using System.ComponentModel;
 using System.Text;
 using ConsentSyncCore.Models;
+using ConsentSyncCore.Services.Browser;
 using ConsentSyncCore.Services.Configuration;
 using ConsentSyncCore.Services.Csv;
+using ConsentSyncCore.Services.Phis;
+using IWebDriver = OpenQA.Selenium.IWebDriver;
 
 namespace CohortUi;
 
@@ -300,6 +303,28 @@ public partial class CohortContextForm
         }
 
         string clientListName = _activeContext.ClientListName.Trim();
+        string cohortId = _phisCohortId.Text.Trim();
+        string phisClientListName = _phisListName.Text.Trim();
+        CohortSearchCriterion criterion;
+        string criterionValue;
+        if (cohortId.Length > 0)
+        {
+            criterion = CohortSearchCriterion.CohortId;
+            criterionValue = cohortId;
+        }
+        else if (phisClientListName.Length > 0)
+        {
+            criterion = CohortSearchCriterion.ClientListName;
+            criterionValue = phisClientListName;
+        }
+        else
+        {
+            MessageBox.Show(this,
+                "Enter a PHIS Cohort ID or provide a Client List Name before searching PHIS.",
+                "Missing Search Criteria", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         var includedRows = _review.Rows.Where(row => !row.Excluded).ToList();
         var resolvedRows = includedRows
             .Where(row => row.SearchStatus == ClientIdStatus.Found && !string.IsNullOrWhiteSpace(row.ClientId))
@@ -324,6 +349,8 @@ public partial class CohortContextForm
             return;
         }
 
+        string? targetPath = null;
+        bool payloadExported = false;
         try
         {
             SetFormEnabled(false);
@@ -337,26 +364,92 @@ public partial class CohortContextForm
             string standardizedCsvPath = CohortWorkspaceService.GetStandardizedOutputCsvPath(config, clientListName);
             string outputDirectory = Path.GetDirectoryName(standardizedCsvPath)
                 ?? throw new InvalidOperationException("The cohort output directory could not be resolved.");
-            string targetPath = Path.Combine(outputDirectory, $"{clientListName}_ClientId_list.txt");
+            targetPath = Path.Combine(outputDirectory, $"{clientListName}_ClientId_list.txt");
 
             await File.WriteAllLinesAsync(targetPath, clientIds, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            payloadExported = true;
 
             LoggerService.LogInformation($"Exported {clientIds.Count} Client ID(s) to plain text file: {targetPath}");
+            btn_CreatePhisCohort.Text = "Opening PHIS...";
+            await EnsureCohortPhisSessionAsync(config);
+
+            var cohortService = new PhisCohortService(_cohortDriver!, config, _cohortSessionManager!);
+            while (!cohortService.IsOnSearchCohortPage())
+            {
+                DialogResult answer = MessageBox.Show(this,
+                    "Please navigate to the 'Search Cohort' page in PHIS, then click OK to continue.",
+                    "Navigate to Search Cohort", MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
+                if (answer != DialogResult.OK)
+                {
+                    LoggerService.LogInformation("PHIS cohort search cancelled before Search Cohort page navigation completed.");
+                    return;
+                }
+                await Task.Delay(250);
+            }
+
+            btn_CreatePhisCohort.Text = "Searching Cohort...";
+            await Task.Run(() => cohortService.SearchAsync(criterion, criterionValue));
+
             MessageBox.Show(this,
-                $"Client ID list file created successfully!\n\nFile Location:\n{targetPath}\n\nTotal Client IDs exported: {clientIds.Count}",
-                "Export Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                $"Client ID list file exported and PHIS cohort search submitted.\n\n" +
+                $"File Location:\n{targetPath}\n\n" +
+                $"Total Client IDs exported: {clientIds.Count}\n" +
+                $"Search criterion: {(criterion == CohortSearchCriterion.CohortId ? "Cohort ID" : "Client List Name")}",
+                "PHIS Search Submitted", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
-            LoggerService.LogError("Failed to export Client ID list file for PHIS cohort creation.", ex);
-            MessageBox.Show(this, $"Failed to export Client ID list file:\n\n{ex.Message}",
-                "Export Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            LoggerService.LogError("PHIS cohort export or search failed.", ex);
+            string payloadMessage = payloadExported && targetPath is not null
+                ? $"\n\nThe Client ID file was created successfully at:\n{targetPath}"
+                : string.Empty;
+            MessageBox.Show(this, $"PHIS cohort export or search failed:\n\n{ex.Message}{payloadMessage}",
+                "PHIS Cohort Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
             btn_CreatePhisCohort.Text = "Create PHIS Cohort";
             SetFormEnabled(true);
         }
+    }
+
+    private async Task EnsureCohortPhisSessionAsync(Microsoft.Extensions.Configuration.IConfiguration config)
+    {
+        if (_cohortDriver is not null && _cohortSessionManager is not null)
+        {
+            var existingService = new PhisCohortService(_cohortDriver, config, _cohortSessionManager);
+            if (existingService.IsOnSearchCohortPage())
+            {
+                LoggerService.LogInformation("Reusing active PHIS cohort session.");
+                return;
+            }
+
+            DisposeCohortPhisSession();
+        }
+
+        var session = await Task.Run(() =>
+        {
+            IWebDriver driver = new ChromeDriverFactory(config).CreateDriver();
+            try
+            {
+                var sessionManager = new PhisSessionManager(driver, config);
+                if (!sessionManager.Login())
+                {
+                    throw new InvalidOperationException("PHIS login was not completed.");
+                }
+                return (driver, sessionManager);
+            }
+            catch
+            {
+                try { driver.Quit(); driver.Dispose(); }
+                catch { }
+                throw;
+            }
+        });
+
+        _cohortDriver = session.driver;
+        _cohortSessionManager = session.sessionManager;
+        LoggerService.LogInformation("PHIS cohort session established.");
     }
 
     private void AcceptSuggestedMatch()
