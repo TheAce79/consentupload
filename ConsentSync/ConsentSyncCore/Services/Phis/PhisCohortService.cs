@@ -38,11 +38,8 @@ public sealed class PhisCohortService
     private const string MaintainCohortFormId = "maintainCohortForm";
     private const string CohortNameFieldId = "maintainCohortForm:CohortName:inputText";
     private const string CohortTypeInputId = "maintainCohortForm:CohortType:selectOneMenu_input";
-    private const string EncounterGroupSourceId = "maintainCohortForm:EncounterGroup:pickList_source";
-    private const string EncounterGroupTargetId = "maintainCohortForm:EncounterGroup:pickList_target";
-    private const string EncounterGroupAddButtonId = "maintainCohortForm:EncounterGroup:pickList_button_add";
     private const string SaveButtonId = "actionMenuSave:commandButtonId";
-    private const string ImmunizationEncounterGroupValue = "019969f8-35c2-49f1-9d5f-ad78d767434f";
+    private const string CreateCohortButtonId = "form:DataTable:CreateCohortButtonId:commandButtonId";
 
     private readonly IWebDriver _driver;
     private readonly WebDriverWait _wait;
@@ -170,12 +167,7 @@ public sealed class PhisCohortService
 
     private void ClickCreateCohort()
     {
-        IReadOnlyList<IWebElement> candidates = _driver.FindElements(By.XPath("//*[self::a or self::button or self::input][normalize-space(.)='Create Cohort' or @value='Create Cohort' or @title='Create Cohort']"))
-            .Where(element => element.Displayed && element.Enabled)
-            .ToList();
-        if (candidates.Count != 1)
-            throw new InvalidOperationException($"Expected exactly one enabled 'Create Cohort' action after an empty search, but found {candidates.Count}.");
-        candidates[0].Click();
+        ClickReliably(WaitForEnabled(CreateCohortButtonId));
     }
 
     private void EnsureMaintainCohortPage()
@@ -232,24 +224,47 @@ public sealed class PhisCohortService
 
     private void SelectImmunizationEncounterGroup()
     {
-        if (ContainsOption(EncounterGroupTargetId, ImmunizationEncounterGroupValue, "Immunization")) return;
+        if (ContainsEncounterGroup(".ui-picklist-target", "Immunization")) return;
 
-        IWebElement source = WaitForVisible(EncounterGroupSourceId);
-        IWebElement? option = source.FindElements(By.TagName("option")).SingleOrDefault(item =>
-            string.Equals(item.GetAttribute("value"), ImmunizationEncounterGroupValue, StringComparison.Ordinal) ||
-            string.Equals(item.Text.Trim(), "Immunization", StringComparison.Ordinal));
-        if (option is null) throw new InvalidOperationException("The Immunization encounter group is not available for selection.");
-        option.Click();
-        WaitForEnabled(EncounterGroupAddButtonId).Click();
+        IWebElement pickList = WaitForVisible("maintainCohortForm:EncounterGroup:pickList");
+        IWebElement? item = pickList.FindElements(By.CssSelector(".ui-picklist-source .ui-picklist-item"))
+            .SingleOrDefault(element => element.Displayed && string.Equals(element.Text.Trim(), "Immunization", StringComparison.Ordinal));
+        if (item is null) throw new InvalidOperationException("The Immunization encounter group is not available for selection.");
+        ClickReliably(item);
+        IWebElement addButton = pickList.FindElements(By.CssSelector(".ui-picklist-button-add"))
+            .SingleOrDefault(element => element.Displayed && element.Enabled)
+            ?? throw new InvalidOperationException("PHIS did not expose the Add control for Encounter Groups.");
+        ClickReliably(addButton);
         WaitForAjaxQueue();
-        if (!ContainsOption(EncounterGroupTargetId, ImmunizationEncounterGroupValue, "Immunization"))
+        if (!ContainsEncounterGroup(".ui-picklist-target", "Immunization"))
             throw new InvalidOperationException("The Immunization encounter group was not moved to Selected Encounter Groups.");
     }
 
-    private bool ContainsOption(string selectId, string value, string text) => _driver.FindElements(By.Id(selectId))
-        .Where(element => element.Displayed)
-        .SelectMany(element => element.FindElements(By.TagName("option")))
-        .Any(option => string.Equals(option.GetAttribute("value"), value, StringComparison.Ordinal) || string.Equals(option.Text.Trim(), text, StringComparison.Ordinal));
+    private bool ContainsEncounterGroup(string listClass, string text) => _driver.FindElements(By.CssSelector($"#maintainCohortForm\\:EncounterGroup\\:pickList {listClass} .ui-picklist-item"))
+        .Any(element => element.Displayed && string.Equals(element.Text.Trim(), text, StringComparison.Ordinal));
+
+    private void ClickReliably(IWebElement element)
+    {
+        WaitForTransientOverlays();
+        if (_driver is IJavaScriptExecutor javascript)
+        {
+            javascript.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", element);
+        }
+
+        try
+        {
+            element.Click();
+        }
+        catch (ElementClickInterceptedException)
+        {
+            if (_driver is not IJavaScriptExecutor fallbackJavascript)
+                throw;
+            fallbackJavascript.ExecuteScript("arguments[0].click();", element);
+        }
+    }
+
+    private void WaitForTransientOverlays() => _wait.Until(_ => !_driver.FindElements(By.CssSelector("#blockUI, .ui-blockui, .ui-growl-item"))
+        .Any(element => element.Displayed));
 
     private IWebElement WaitForEnabled(string id) => _wait.Until(d =>
     {
