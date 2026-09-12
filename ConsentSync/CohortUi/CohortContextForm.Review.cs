@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text;
 using ConsentSyncCore.Models;
 using ConsentSyncCore.Services.Configuration;
 using ConsentSyncCore.Services.Csv;
@@ -27,6 +28,7 @@ public partial class CohortContextForm
     private Button _acceptMatch = null!;
     private Button _toggleExcluded = null!;
     private Button _retryCacheSync = null!;
+    private Button btn_CreatePhisCohort = null!;
     private ToolStripMenuItem _contextAccept = null!;
     private ToolStripMenuItem _contextExclude = null!;
     private ToolStripMenuItem _contextSave = null!;
@@ -122,8 +124,10 @@ public partial class CohortContextForm
         phisFields.Controls.Add(Field("Client List Name", _phisListName));
         phisFields.Controls.Add(Field("PHIS Cohort ID", _phisCohortId));
         phisFields.Controls.Add(Field("PHIS Client List ID", _phisClientListId));
-        phisFields.Controls.Add(new Button { Text = "Create PHIS Cohort", AutoSize = true, Enabled = false });
-        phisFields.Controls.Add(new Label { Text = "PHIS cohort creation integration is pending. IDs will be filled after creation in PHIS.", AutoSize = true });
+        btn_CreatePhisCohort = new Button { Text = "Create PHIS Cohort", AutoSize = true, Enabled = false };
+        btn_CreatePhisCohort.Click += btn_CreatePhisCohort_Click;
+        phisFields.Controls.Add(btn_CreatePhisCohort);
+        phisFields.Controls.Add(new Label { Text = "Exports the resolved Client ID list. PHIS cohort creation integration is pending.", AutoSize = true });
         phisGroup.Controls.Add(phisFields);
         layout.Controls.Add(phisGroup, 0, 4);
         _reviewTab.Controls.Add(layout);
@@ -184,6 +188,7 @@ public partial class CohortContextForm
         if (_saveReview is null) return;
         _saveReview.Enabled = _acceptMatch.Enabled = _toggleExcluded.Enabled = available && _review is not null;
         _retryCacheSync.Enabled = available && _review is not null && _cacheSyncRetryAvailable;
+        btn_CreatePhisCohort.Enabled = available && _review is not null;
         if (_contextSave is not null)
         {
             _contextSave.Enabled = available && _review is not null;
@@ -261,6 +266,97 @@ public partial class CohortContextForm
     {
         _reviewGrid.EndEdit();
         return _reviewGrid.SelectedRows.Cast<DataGridViewRow>().Select(r => r.DataBoundItem).OfType<CohortReviewRow>().ToList();
+    }
+
+    private async void btn_CreatePhisCohort_Click(object? sender, EventArgs e)
+    {
+        if (_formBusy)
+        {
+            return;
+        }
+
+        if (!_reviewGrid.EndEdit())
+        {
+            MessageBox.Show(this,
+                "Finish or correct the active Client ID edit before creating the PHIS Cohort payload.",
+                "Review Edit Incomplete", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (_review is null || _review.Rows.Count == 0)
+        {
+            MessageBox.Show(this,
+                "No active cohort review is loaded. Run PHIS search or load a saved review first.",
+                "No Review Loaded", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!_hasSavedContext || _activeContext is null || string.IsNullOrWhiteSpace(_activeContext.ClientListName))
+        {
+            MessageBox.Show(this,
+                "Client List Name is missing from the saved cohort context.",
+                "Missing Context", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        string clientListName = _activeContext.ClientListName.Trim();
+        var includedRows = _review.Rows.Where(row => !row.Excluded).ToList();
+        var resolvedRows = includedRows
+            .Where(row => row.SearchStatus == ClientIdStatus.Found && !string.IsNullOrWhiteSpace(row.ClientId))
+            .ToList();
+        int unresolvedCount = includedRows.Count - resolvedRows.Count;
+
+        if (unresolvedCount > 0)
+        {
+            var choice = MessageBox.Show(this,
+                $"There are {unresolvedCount} record(s) in the roster without a resolved Client ID or requiring manual review.\n\n" +
+                "These records will not be included in the PHIS Cohort payload.\n\n" +
+                $"Do you want to proceed using the remaining {resolvedRows.Count} resolved record(s)?",
+                "Unresolved Records Detected", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (choice != DialogResult.Yes) return;
+        }
+
+        if (resolvedRows.Count == 0)
+        {
+            MessageBox.Show(this,
+                "There are no resolved Client IDs available to create a PHIS Cohort.",
+                "No Valid Client IDs", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        try
+        {
+            SetFormEnabled(false);
+            btn_CreatePhisCohort.Text = "Exporting Payload...";
+
+            var clientIds = resolvedRows
+                .Select(row => row.ClientId.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var config = ConfigurationService.GetConfiguration();
+            string standardizedCsvPath = CohortWorkspaceService.GetStandardizedOutputCsvPath(config, clientListName);
+            string outputDirectory = Path.GetDirectoryName(standardizedCsvPath)
+                ?? throw new InvalidOperationException("The cohort output directory could not be resolved.");
+            string targetPath = Path.Combine(outputDirectory, $"{clientListName}_ClientId_list.txt");
+
+            await File.WriteAllLinesAsync(targetPath, clientIds, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+            LoggerService.LogInformation($"Exported {clientIds.Count} Client ID(s) to plain text file: {targetPath}");
+            MessageBox.Show(this,
+                $"Client ID list file created successfully!\n\nFile Location:\n{targetPath}\n\nTotal Client IDs exported: {clientIds.Count}",
+                "Export Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            LoggerService.LogError("Failed to export Client ID list file for PHIS cohort creation.", ex);
+            MessageBox.Show(this, $"Failed to export Client ID list file:\n\n{ex.Message}",
+                "Export Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            btn_CreatePhisCohort.Text = "Create PHIS Cohort";
+            SetFormEnabled(true);
+        }
     }
 
     private void AcceptSuggestedMatch()
