@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json;
+using ConsentSync.Data.Entities;
 using ConsentSyncCore.Models;
 using ConsentSyncCore.Services.Browser;
 using ConsentSyncCore.Services.Configuration;
@@ -370,6 +372,29 @@ public partial class CohortContextForm
             return;
         }
 
+        var currentClients = resolvedRows
+            .GroupBy(row => row.ClientId.Trim(), StringComparer.Ordinal)
+            .Select(group => new PhisUploadClient(group.Key,
+                group.Select(row => row.FullName?.Trim()).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty))
+            .ToList();
+        PhisUploadSnapshotEntity? previousSnapshot = null;
+        if (_activeContext.PhisCohortId is int savedCohortId)
+        {
+            previousSnapshot = await _dbManager!.GetLatestPhisUploadSnapshotAsync(
+                _activeContext.CohortContextId, savedCohortId, _activeContext.PhisClientListId, clientListName);
+        }
+        IReadOnlyList<PhisUploadClient>? previousClients = previousSnapshot is null
+            ? null
+            : JsonSerializer.Deserialize<List<PhisUploadClient>>(previousSnapshot.ClientSnapshotJson);
+        PhisUploadComparison comparison = PhisUploadComparer.Compare(currentClients, previousClients);
+        if (!comparison.IsInitialUpload && !comparison.HasMembershipChanges)
+        {
+            DialogResult continueUnchanged = MessageBox.Show(this,
+                "No Client IDs have changed since the last successful PHIS upload. Do you still want to continue?",
+                "No Client ID Changes", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            if (continueUnchanged != DialogResult.Yes) return;
+        }
+
         string? targetPath = null;
         bool payloadExported = false;
         try
@@ -377,10 +402,7 @@ public partial class CohortContextForm
             SetFormEnabled(false);
             btn_CreatePhisCohort.Text = "Exporting Payload...";
 
-            var clientIds = resolvedRows
-                .Select(row => row.ClientId.Trim())
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
+            var clientIds = currentClients.Select(client => client.ClientId).ToList();
             var config = ConfigurationService.GetConfiguration();
             string standardizedCsvPath = CohortWorkspaceService.GetStandardizedOutputCsvPath(config, clientListName);
             string outputDirectory = Path.GetDirectoryName(standardizedCsvPath)
@@ -425,15 +447,35 @@ public partial class CohortContextForm
                 var updated = System.Text.Json.JsonSerializer.Deserialize<ConsentSync.Data.Entities.CohortContextEntity>(
                     System.Text.Json.JsonSerializer.Serialize(_activeContext))!;
                 updated.PhisClientListId = upload.ClientListId;
-                await _dbManager!.SaveCohortContextAsync(updated);
-                _activeContext = updated;
-                _phisFieldsDirty = false;
-                UpdateReviewAvailability();
                 string reportPath = Path.Combine(Path.GetDirectoryName(targetPath)!, $"{clientListName}_PHIS_Admin_Summary_{DateTime.Now:yyyyMMdd_HHmmss_fff}.txt");
-                string report = PhisAdminSummary.Format(verifiedId, clientListName, upload, clientIds.Count);
-                await File.WriteAllTextAsync(reportPath, report, new UTF8Encoding(false));
-                LoggerService.LogInformation($"PHIS client list {upload.ClientListId} persisted; clients={upload.ClientCount}; summary={reportPath}");
-                MessageBox.Show(this, report + $"\nSummary file:\n{reportPath}", "PHIS Client List Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                string report = PhisAdminSummary.Format(verifiedId, clientListName, upload, clientIds.Count, comparison);
+                string? localSaveFailure = null;
+                try
+                {
+                    await _dbManager!.SaveSuccessfulPhisUploadAsync(updated, JsonSerializer.Serialize(currentClients));
+                    _activeContext = updated;
+                    _phisFieldsDirty = false;
+                    UpdateReviewAvailability();
+                }
+                catch (Exception ex)
+                {
+                    LoggerService.LogError("PHIS upload succeeded but its local snapshot could not be saved.", ex);
+                    localSaveFailure = $"The PHIS upload succeeded, but the local upload snapshot was not saved: {ex.Message}";
+                }
+                try
+                {
+                    await File.WriteAllTextAsync(reportPath, report, new UTF8Encoding(false));
+                    LoggerService.LogInformation($"PHIS client list {upload.ClientListId} persisted; clients={upload.ClientCount}; summary={reportPath}");
+                }
+                catch (Exception ex)
+                {
+                    LoggerService.LogError("PHIS upload succeeded but the admin summary file could not be written.", ex);
+                    localSaveFailure = string.IsNullOrEmpty(localSaveFailure)
+                        ? $"The PHIS upload succeeded, but the summary file could not be written: {ex.Message}"
+                        : localSaveFailure + $"\n\nThe summary file could not be written: {ex.Message}";
+                }
+                string summaryLocation = localSaveFailure is null ? $"\nSummary file:\n{reportPath}" : $"\n\n{localSaveFailure}";
+                MessageBox.Show(this, report + summaryLocation, localSaveFailure is null ? "PHIS Client List Complete" : "PHIS Client List Uploaded", MessageBoxButtons.OK, localSaveFailure is null ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
                 return;
             }
 

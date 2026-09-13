@@ -517,6 +517,41 @@ public sealed class DbManager : IConsentSyncRepository
         return history.ToList();
     }
 
+    public async Task<PhisUploadSnapshotEntity?> GetLatestPhisUploadSnapshotAsync(
+        int cohortContextId, int phisCohortId, int? phisClientListId, string clientListName,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        const string sql = """
+            SELECT Id, CohortContextId, PhisCohortId, PhisClientListId, ClientListName, ClientSnapshotJson, UploadedOn
+            FROM PhisUploadSnapshots
+            WHERE CohortContextId = @CohortContextId AND PhisCohortId = @PhisCohortId
+              AND PhisClientListId = @PhisClientListId AND ClientListName = @ClientListName
+            ORDER BY UploadedOn DESC, Id DESC LIMIT 1;
+            """;
+        await using SqliteConnection connection = OpenSqliteConnection();
+        return await connection.QuerySingleOrDefaultAsync<PhisUploadSnapshotEntity>(new CommandDefinition(sql,
+            new { CohortContextId = cohortContextId, PhisCohortId = phisCohortId, PhisClientListId = phisClientListId, ClientListName = NormalizeRequiredText(clientListName, nameof(clientListName)) }, cancellationToken: cancellationToken));
+    }
+
+    public async Task SaveSuccessfulPhisUploadAsync(CohortContextEntity context, string clientSnapshotJson, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (context.CohortContextId <= 0 || context.PhisCohortId is not int cohortId || context.PhisClientListId is not int listId)
+            throw new ArgumentException("A saved context and verified PHIS cohort and client-list IDs are required.", nameof(context));
+        if (string.IsNullOrWhiteSpace(clientSnapshotJson)) throw new ArgumentException("Client snapshot is required.", nameof(clientSnapshotJson));
+        await EnsureInitializedAsync(cancellationToken);
+        await using SqliteConnection connection = OpenSqliteConnection();
+        using SqliteTransaction transaction = connection.BeginTransaction();
+        try
+        {
+            await connection.ExecuteAsync(new CommandDefinition("UPDATE CohortContexts SET PhisCohortId = @cohortId, PhisClientListId = @listId WHERE CohortContextId = @contextId;", new { cohortId, listId, contextId = context.CohortContextId }, transaction, cancellationToken: cancellationToken));
+            await connection.ExecuteAsync(new CommandDefinition("INSERT INTO PhisUploadSnapshots (CohortContextId, PhisCohortId, PhisClientListId, ClientListName, ClientSnapshotJson, UploadedOn) VALUES (@CohortContextId, @PhisCohortId, @PhisClientListId, @ClientListName, @ClientSnapshotJson, @UploadedOn);", new { context.CohortContextId, PhisCohortId = cohortId, PhisClientListId = listId, ClientListName = NormalizeRequiredText(context.ClientListName, "ClientListName"), ClientSnapshotJson = clientSnapshotJson, UploadedOn = DateTime.UtcNow }, transaction, cancellationToken: cancellationToken));
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch { TryRollback(transaction); throw; }
+    }
+
     private static string BuildConnectionString(IConfiguration configuration)
     {
         string baseDirectory = configuration["BaseDirectory"] ?? "C:\\PHIS";
@@ -669,6 +704,19 @@ public sealed class DbManager : IConsentSyncRepository
 
             CREATE INDEX IF NOT EXISTS IX_ClientListHistory_CohortContextId
                 ON ClientListHistory (CohortContextId);
+
+            CREATE TABLE IF NOT EXISTS PhisUploadSnapshots (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CohortContextId INTEGER NOT NULL,
+                PhisCohortId INTEGER NOT NULL,
+                PhisClientListId INTEGER NOT NULL,
+                ClientListName TEXT NOT NULL,
+                ClientSnapshotJson TEXT NOT NULL,
+                UploadedOn TEXT NOT NULL,
+                FOREIGN KEY (CohortContextId) REFERENCES CohortContexts (CohortContextId) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS IX_PhisUploadSnapshots_Destination
+                ON PhisUploadSnapshots (CohortContextId, PhisCohortId, PhisClientListId, ClientListName, UploadedOn DESC);
             """;
 
         await connection.ExecuteAsync(sql);

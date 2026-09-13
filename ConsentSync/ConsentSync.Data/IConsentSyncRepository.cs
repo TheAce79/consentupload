@@ -63,4 +63,12 @@ public interface IConsentSyncRepository
     Task<IReadOnlyList<ClientListHistoryEntity>> GetClientListHistoryAsync(
         int cohortContextId,
         CancellationToken cancellationToken = default);
+
+    Task<PhisUploadSnapshotEntity?> GetLatestPhisUploadSnapshotAsync(
+        int cohortContextId, int phisCohortId, int? phisClientListId, string clientListName,
+        CancellationToken cancellationToken = default);
+
+    Task SaveSuccessfulPhisUploadAsync(
+        CohortContextEntity context, string clientSnapshotJson,
+        CancellationToken cancellationToken = default);
 }

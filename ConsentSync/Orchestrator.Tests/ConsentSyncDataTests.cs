@@ -262,6 +262,22 @@ public sealed class ConsentSyncDataTests : IDisposable
     }
 
     [Fact]
+    public async Task PhisUploadSnapshot_RoundTripsOnlyForMatchingDestination()
+    {
+        var manager = CreateManager();
+        var context = new CohortContextEntity { Prefix = "CIP", Location = "MONCTON", Type = "SP", Jurisdiction = "Jurisdiction", EncounterGroup = "Immunization", ClientListName = "LIST", CohortDate = new DateTime(2026, 9, 17), PhisCohortId = 10, PhisClientListId = 20 };
+        await manager.SaveCohortContextAsync(context);
+
+        await manager.SaveSuccessfulPhisUploadAsync(context, "[{\"ClientId\":\"100\",\"FullName\":\"One\"}]");
+
+        PhisUploadSnapshotEntity? found = await manager.GetLatestPhisUploadSnapshotAsync(context.CohortContextId, 10, 20, "LIST");
+        PhisUploadSnapshotEntity? otherList = await manager.GetLatestPhisUploadSnapshotAsync(context.CohortContextId, 10, 21, "LIST");
+        Assert.NotNull(found);
+        Assert.Contains("100", found!.ClientSnapshotJson);
+        Assert.Null(otherList);
+    }
+
+    [Fact]
     public async Task SaveCohortContextAsync_DerivesClientListNameWhenBlank()
     {
         var manager = CreateManager();

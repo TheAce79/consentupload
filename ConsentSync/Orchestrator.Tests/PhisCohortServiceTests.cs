@@ -211,14 +211,43 @@ public sealed class PhisCohortServiceTests
     }
 
     [Fact]
-    public void AdminSummary_DistinguishesExportedExistingAndAddedCounts()
+    public void AdminSummary_ListsAddedAndRemovedClients()
     {
-        string existing = PhisAdminSummary.Format(24260, "LIST", new(24189, 22), 25);
+        var comparison = new PhisUploadComparison(false, [new("101", "Ada Lovelace")], [new("102", "Grace Hopper")]);
+        string existing = PhisAdminSummary.Format(24260, "LIST", new(24189, 22), 25, comparison);
         Assert.Contains("LIST / 24189", existing);
-        Assert.Contains("Clients newly added by this run: Not reported by PHIS", existing);
+        Assert.Contains("Added since previous successful upload: 1", existing);
+        Assert.Contains("101 | Ada Lovelace", existing);
+        Assert.Contains("No longer in current payload: 1", existing);
+        Assert.Contains("102 | Grace Hopper", existing);
         Assert.Contains("Client IDs exported: 25", existing);
         Assert.Contains("Clients in PHIS list (verified): 22", existing);
         Assert.Contains("Full exported list uploaded", existing);
+    }
+
+    [Fact]
+    public void UploadComparison_IgnoresOrderDuplicatesWhitespaceAndNameOnlyChanges()
+    {
+        var prior = new[] { new PhisUploadClient(" 1 ", "Old name"), new PhisUploadClient("2", "Two") };
+        var current = new[] { new PhisUploadClient("2", "Renamed"), new PhisUploadClient("1", "One"), new PhisUploadClient("1", "") };
+
+        PhisUploadComparison comparison = PhisUploadComparer.Compare(current, prior);
+
+        Assert.False(comparison.IsInitialUpload);
+        Assert.False(comparison.HasMembershipChanges);
+    }
+
+    [Fact]
+    public void UploadComparison_ReportsInitialAndMembershipChanges()
+    {
+        var initial = PhisUploadComparer.Compare([new PhisUploadClient("1", "One")], null);
+        var changed = PhisUploadComparer.Compare([new PhisUploadClient("2", "Two"), new PhisUploadClient("3", "")], [new PhisUploadClient("1", "One"), new PhisUploadClient("2", "Old two")]);
+
+        Assert.True(initial.IsInitialUpload);
+        Assert.Equal("1", initial.Added.Single().ClientId);
+        Assert.Equal(["3"], changed.Added.Select(x => x.ClientId));
+        Assert.Equal(["1"], changed.Removed.Select(x => x.ClientId));
+        Assert.Equal("One", changed.Removed.Single().FullName);
     }
 
     [Fact]
