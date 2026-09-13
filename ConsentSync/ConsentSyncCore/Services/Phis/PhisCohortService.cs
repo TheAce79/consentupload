@@ -244,17 +244,12 @@ public sealed class PhisCohortService
         _wait.Until(_ => _driver.FindElements(By.CssSelector("#maintainCohortForm\\:fileUpload .ui-datagrid td"))
             .Any(e => e.Displayed && e.Text.Trim() == file.Name));
         await WaitForAjaxAndBlockUiAsync();
-        string radioId = $"maintainCohortForm:clientListRadio:selectOneRadio:{(existingList is null ? 0 : 1)}";
-        if (!WaitForPresent(radioId).Selected)
-        {
-            string optionId = $"maintainCohortForm:clientListRadio:option{(existingList is null ? 1 : 2)}";
-            ClickReliably(WaitForPresent(optionId).FindElement(By.CssSelector(".ui-radiobutton-box")));
-            await WaitForAjaxAndBlockUiAsync();
-        }
-        _wait.Until(_ => WaitForPresent(radioId).Selected);
+        bool useExistingList = existingList is not null;
+        await EnsureUploadDestinationModeAsync(useExistingList, traceId);
         if (existingList is not null)
         {
             SelectExistingUploadList(existingList.ClientListId, name);
+            VerifyExistingUploadListSelection(existingList.ClientListId, name);
             Trace(traceId, "upload-destination", $"Existing Client List selected; id={existingList.ClientListId}");
         }
         else
@@ -263,6 +258,8 @@ public sealed class PhisCohortService
             Clear(nameField);
             nameField.SendKeys(name);
             if (nameField.GetAttribute("value") != name) throw new InvalidOperationException("Upload client-list name could not be verified.");
+            if (!IsUploadDestinationModeReady(existing: false))
+                throw new InvalidOperationException("PHIS upload destination verification failed: New Client List controls are contradictory.");
             Trace(traceId, "upload-destination", "New Client List selected; name verified.");
         }
         Trace(traceId, "upload-save", "Attachment verified; clicking upload-panel Save once.");
@@ -298,17 +295,102 @@ public sealed class PhisCohortService
         string expectedLabel = $"{listId}, {name}";
         var options = WaitForPresent(menuId + "_input").FindElements(By.TagName("option"))
             .Where(e => e.GetAttribute("value") == listId.ToString() &&
-                string.Equals(e.Text.Trim(), expectedLabel, StringComparison.OrdinalIgnoreCase)).ToList();
+                string.Equals(NormalizeLabel(e.GetDomProperty("textContent")), NormalizeLabel(expectedLabel), StringComparison.OrdinalIgnoreCase)).ToList();
         if (options.Count != 1) throw new InvalidOperationException("The expected existing client list is not uniquely available in the upload dropdown.");
+        TraceUploadDestination("dropdown-open", $"existing list id={listId}");
         ClickReliably(WaitForVisible(menuId).FindElement(By.CssSelector(".ui-selectonemenu-trigger")));
-        var option = _wait.Until(_ => _driver.FindElements(By.Id(menuId + "_items"))
-            .SelectMany(e => e.FindElements(By.CssSelector(".ui-selectonemenu-item")))
-            .SingleOrDefault(e => e.Displayed && string.Equals(e.Text.Trim(), expectedLabel, StringComparison.OrdinalIgnoreCase)));
+        IWebElement panel;
+        try { panel = WaitForVisible(menuId + "_panel"); }
+        catch (WebDriverTimeoutException ex) { throw new InvalidOperationException("PHIS upload dropdown did not open.", ex); }
+        var filter = panel.FindElements(By.CssSelector(".ui-selectonemenu-filter")).FirstOrDefault();
+        if (filter is not null && filter.Enabled) Clear(filter);
+        var matches = panel.FindElements(By.CssSelector(".ui-selectonemenu-item"))
+            .Where(e => e.Displayed && string.Equals(NormalizeLabel(e.Text), NormalizeLabel(expectedLabel), StringComparison.OrdinalIgnoreCase)).ToList();
+        TraceUploadDestination("dropdown-option-match", $"existing list id={listId}; visibleMatches={matches.Count}");
+        if (matches.Count != 1) throw new InvalidOperationException("The expected existing client list is not uniquely visible in the upload dropdown.");
+        IWebElement option = matches[0];
         ClickReliably(option);
         WaitForAjaxQueue();
-        _wait.Until(_ => WaitForPresent(menuId + "_input").GetAttribute("value") == listId.ToString() &&
-            string.Equals(WaitForVisible(menuId + "_label").Text.Trim(), expectedLabel, StringComparison.OrdinalIgnoreCase));
+        try { _wait.Until(_ => IsExistingUploadListSelectionVerified(listId, expectedLabel)); }
+        catch (WebDriverTimeoutException ex) { throw new InvalidOperationException("PHIS upload dropdown selected value could not be verified.", ex); }
     }
+
+    private async Task EnsureUploadDestinationModeAsync(bool existing, string traceId)
+    {
+        if (IsUploadDestinationModeReady(existing))
+        {
+            Trace(traceId, "upload-destination-ready", existing ? "Existing Client List already selected." : "New Client List already selected.");
+            return;
+        }
+        string optionId = $"maintainCohortForm:clientListRadio:option{(existing ? 2 : 1)}";
+        Trace(traceId, "upload-destination-click", existing ? "Selecting Existing Client List." : "Selecting New Client List.");
+        ClickReliably(WaitForPresent(optionId).FindElement(By.CssSelector(".ui-radiobutton-box")));
+        await WaitForAjaxAndBlockUiAsync();
+        try { _wait.Until(_ => IsUploadDestinationModeReady(existing)); }
+        catch (WebDriverTimeoutException ex)
+        {
+            throw new InvalidOperationException($"PHIS upload destination did not become ready for {(existing ? "Existing Client List" : "New Client List")}. {DescribeUploadDestinationState()}", ex);
+        }
+    }
+
+    private void VerifyExistingUploadListSelection(int listId, string name)
+    {
+        if (!IsUploadDestinationModeReady(existing: true) || !IsExistingUploadListSelectionVerified(listId, $"{listId}, {name}"))
+            throw new InvalidOperationException($"PHIS upload destination verification failed for Existing Client List. {DescribeUploadDestinationState()}");
+    }
+
+    private bool IsUploadDestinationModeReady(bool existing)
+    {
+        try
+        {
+            string radioBaseId = "maintainCohortForm:clientListRadio:selectOneRadio:" + (existing ? "1" : "0");
+            bool radioChecked = _driver.FindElements(By.Id(radioBaseId)).Concat(_driver.FindElements(By.Id(radioBaseId + "_clone")))
+                .Any(element => element.Selected);
+            IWebElement? newName = _driver.FindElements(By.Id("maintainCohortForm:clientListRadio:newListName:inputText")).FirstOrDefault();
+            IWebElement? existingMenu = _driver.FindElements(By.Id("maintainCohortForm:clientListRadio:existingLists:selectOneMenu")).FirstOrDefault();
+            if (newName is null || existingMenu is null) return false;
+            return radioChecked && (existing ? !IsDisabled(existingMenu) && IsDisabled(newName) : !IsDisabled(newName) && IsDisabled(existingMenu));
+        }
+        catch (WebDriverException) { return false; }
+    }
+
+    private bool IsExistingUploadListSelectionVerified(int listId, string expectedLabel)
+    {
+        const string menuId = "maintainCohortForm:clientListRadio:existingLists:selectOneMenu";
+        try
+        {
+            string value = _driver.FindElements(By.Id(menuId + "_input")).FirstOrDefault()?.GetAttribute("value") ?? string.Empty;
+            string label = _driver.FindElements(By.Id(menuId + "_label")).FirstOrDefault(e => e.Displayed)?.Text ?? string.Empty;
+            return value == listId.ToString() && string.Equals(NormalizeLabel(label), NormalizeLabel(expectedLabel), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (WebDriverException) { return false; }
+    }
+
+    private string DescribeUploadDestinationState()
+    {
+        try
+        {
+            bool originalNew = IsRadioChecked("0");
+            bool cloneNew = IsRadioChecked("0_clone");
+            bool originalExisting = IsRadioChecked("1");
+            bool cloneExisting = IsRadioChecked("1_clone");
+            bool newDisabled = IsElementDisabled("maintainCohortForm:clientListRadio:newListName:inputText");
+            bool existingDisabled = IsElementDisabled("maintainCohortForm:clientListRadio:existingLists:selectOneMenu");
+            return $"radio checked (new original={originalNew}, new clone={cloneNew}, existing original={originalExisting}, existing clone={cloneExisting}); controls disabled (new name={newDisabled}, existing list={existingDisabled}).";
+        }
+        catch (WebDriverException) { return "radio and destination control state could not be read after PHIS updated the upload panel."; }
+    }
+    private bool IsRadioChecked(string suffix) => _driver.FindElements(By.Id("maintainCohortForm:clientListRadio:selectOneRadio:" + suffix)).Any(element => element.Selected);
+    private bool IsElementDisabled(string id)
+    {
+        IWebElement? element = _driver.FindElements(By.Id(id)).FirstOrDefault();
+        return element is null || IsDisabled(element);
+    }
+    private static bool IsDisabled(IWebElement element) => !element.Enabled || element.GetAttribute("disabled") is not null ||
+        string.Equals(element.GetAttribute("aria-disabled"), "true", StringComparison.OrdinalIgnoreCase) ||
+        (element.GetAttribute("class")?.Contains("ui-state-disabled", StringComparison.OrdinalIgnoreCase) ?? false);
+    private static string NormalizeLabel(string? value) => string.Join(" ", (value ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+    private static void TraceUploadDestination(string stage, string detail) => LoggerService.LogInformation($"PHIS upload destination {stage}: {detail}");
 
     private PhisClientListResult? ReadAttachedClientList(int cohortId, string name)
     {

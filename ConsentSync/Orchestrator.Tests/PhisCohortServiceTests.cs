@@ -176,6 +176,57 @@ public sealed class PhisCohortServiceTests
     }
 
     [Fact]
+    public async Task Upload_UsesCheckedCloneWhenAjaxReplacementLeavesOriginalRadioUnchecked()
+    {
+        var page = new FakeSearchCohortPage
+        {
+            Url = "https://phis.example/phsdsm/ClientWeb/pages/cohort/maintainCohort.xhtml",
+            CohortNameValue = "LIST", HeaderId = "24260", AttachedListId = "24189", UseRadioCloneForExisting = true
+        };
+        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt");
+        await File.WriteAllTextAsync(path, "123\n");
+        try
+        {
+            await page.CreateService().UploadClientListAsync(24260, "LIST", path);
+            Assert.Equal(new[] { "panel", "main" }, page.SaveOrder);
+            Assert.Equal("24189", page.SelectedUploadList);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData("MISSING")]
+    [InlineData("DUPLICATE")]
+    public async Task Upload_InvalidExistingDropdownMatch_DoesNotSave(string dropdownState)
+    {
+        var page = new FakeSearchCohortPage
+        {
+            Url = "https://phis.example/phsdsm/ClientWeb/pages/cohort/maintainCohort.xhtml",
+            CohortNameValue = "LIST", HeaderId = "24260", AttachedListId = "24189", ExistingDropdownState = dropdownState
+        };
+        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt");
+        await File.WriteAllTextAsync(path, "123\n");
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => page.CreateService().UploadClientListAsync(24260, "LIST", path));
+            Assert.Empty(page.SaveOrder);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void ExistingDestination_ContradictoryControlsAreRejectedBeforeSave()
+    {
+        var page = new FakeSearchCohortPage { ExistingSelected = true, DestinationControlsContradictory = true };
+        var error = Assert.Throws<TargetInvocationException>(() => typeof(PhisCohortService)
+            .GetMethod("VerifyExistingUploadListSelection", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(page.CreateService(), [24189, "LIST"]));
+
+        Assert.IsType<InvalidOperationException>(error.InnerException);
+        Assert.Empty(page.SaveOrder);
+    }
+
+    [Fact]
     public void AttachedList_RejectsHeaderLinkForAnotherCohort()
     {
         var page = new FakeSearchCohortPage
@@ -305,6 +356,10 @@ public sealed class PhisCohortServiceTests
         public int UploadSaveClicks { get; set; }
         public List<string> SaveOrder { get; } = [];
         public bool ExistingSelected { get; set; }
+        public bool UseRadioCloneForExisting { get; set; }
+        public bool DestinationControlsContradictory { get; set; }
+        public bool DropdownOpen { get; set; }
+        public string? ExistingDropdownState { get; set; }
         public string SelectedUploadList { get; set; } = "";
         public string? FailSaveStage { get; set; }
         public List<(int CohortId, string CohortName)> SearchResultRows { get; set; } = [];
@@ -357,25 +412,35 @@ public sealed class PhisCohortServiceTests
             "maintainCohortForm:clientListDataTable:UploadClientIDListButtonId:commandButtonId" => CreateElement(onClick: () => UploadClicks++),
             "maintainCohortForm:saveButtonId:commandButtonId" => CreateElement(onClick: () => { UploadSaveClicks++; SaveOrder.Add("panel"); }),
             "actionMenuSave:commandButtonId" => CreateElement(onClick: () => { SaveOrder.Add("main"); AttachedListId ??= "24189"; }),
-            "maintainCohortForm:clientListRadio:newListName:inputText" => CreateElement(value: () => UploadName, setValue: v => UploadName = v),
-            "maintainCohortForm:clientListRadio:selectOneRadio:0" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "get_Selected" ? !ExistingSelected : throw new NotSupportedException(m.Name)),
-            "maintainCohortForm:clientListRadio:selectOneRadio:1" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "get_Selected" ? ExistingSelected : throw new NotSupportedException(m.Name)),
+            "maintainCohortForm:clientListRadio:newListName:inputText" => CreateElement(enabled: DestinationControlsContradictory || !ExistingSelected, value: () => UploadName, setValue: v => UploadName = v),
+            "maintainCohortForm:clientListRadio:selectOneRadio:0" => CreateRadio(() => !ExistingSelected),
+            "maintainCohortForm:clientListRadio:selectOneRadio:0_clone" => CreateRadio(() => !ExistingSelected),
+            "maintainCohortForm:clientListRadio:selectOneRadio:1" => CreateRadio(() => ExistingSelected && !UseRadioCloneForExisting),
+            "maintainCohortForm:clientListRadio:selectOneRadio:1_clone" => CreateRadio(() => ExistingSelected),
+            "maintainCohortForm:clientListRadio:option1" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "FindElement"
+                ? CreateElement(onClick: () => ExistingSelected = false) : throw new NotSupportedException(m.Name)),
             "maintainCohortForm:clientListRadio:option2" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "FindElement"
                 ? CreateElement(onClick: () => ExistingSelected = true) : throw new NotSupportedException(m.Name)),
             "maintainCohortForm:clientListRadio:existingLists:selectOneMenu_input" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name switch
             {
                 "GetAttribute" => SelectedUploadList,
-                "FindElements" => new ReadOnlyCollection<IWebElement>([CreateElement(value: () => "24189", text: () => "24189, LIST")]),
+                "FindElements" => new ReadOnlyCollection<IWebElement>(GetDropdownOptions().Select(label => CreateElement(value: () => label.StartsWith("24189", StringComparison.Ordinal) ? "24189" : "123", text: () => string.Empty, domText: () => label)).ToList()),
                 _ => throw new NotSupportedException(m.Name)
             }),
             "maintainCohortForm:clientListRadio:existingLists:selectOneMenu" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name switch
             {
                 "get_Displayed" => true,
-                "FindElement" => CreateElement(),
+                "get_Enabled" => ExistingSelected && !DestinationControlsContradictory,
+                "FindElement" => CreateElement(onClick: () => DropdownOpen = true),
+                "GetAttribute" => null,
                 _ => throw new NotSupportedException(m.Name)
             }),
-            "maintainCohortForm:clientListRadio:existingLists:selectOneMenu_items" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "FindElements"
-                ? new ReadOnlyCollection<IWebElement>([CreateElement(text: () => "24189, LIST", onClick: () => SelectedUploadList = "24189")]) : throw new NotSupportedException(m.Name)),
+            "maintainCohortForm:clientListRadio:existingLists:selectOneMenu_panel" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name switch
+            {
+                "get_Displayed" => DropdownOpen,
+                "FindElements" => new ReadOnlyCollection<IWebElement>(CreatePanelElements(a![0]!.ToString()!).ToList()),
+                _ => throw new NotSupportedException(m.Name)
+            }),
             "maintainCohortForm:clientListRadio:existingLists:selectOneMenu_label" => CreateElement(text: () => SelectedUploadList == "24189" ? "24189, LIST" : ""),
             _ when id.Contains(".ui-messages-error") && FailSaveStage is not null && SaveOrder.LastOrDefault() == FailSaveStage => CreateElement(text: () => "Save rejected"),
             "maintainCohortForm:fileUpload" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "FindElement"
@@ -413,14 +478,17 @@ public sealed class PhisCohortServiceTests
 
         private static IWebElement CreateElement(
             bool displayed = true,
+            bool enabled = true,
             Func<string>? value = null,
             Func<string>? text = null,
+            Func<string>? domText = null,
             Action<string>? setValue = null,
             Action? onClick = null) => SeleniumDispatchProxy.Create<IWebElement>((method, arguments) => method.Name switch
         {
             "get_Displayed" => displayed,
-            "get_Enabled" => true,
+            "get_Enabled" => enabled,
             "get_Text" => text?.Invoke() ?? string.Empty,
+            "GetDomProperty" => arguments![0] as string == "textContent" ? domText?.Invoke() ?? string.Empty : null,
             "GetAttribute" => arguments![0] as string == "value" ? value?.Invoke() ?? string.Empty : null,
             "Clear" => ClearValue(setValue),
             "SendKeys" => SetValue(setValue, arguments![0] as string ?? string.Empty),
@@ -431,6 +499,20 @@ public sealed class PhisCohortServiceTests
         private static object? ClearValue(Action<string>? setValue) { setValue?.Invoke(string.Empty); return null; }
         private static object? SetValue(Action<string>? setValue, string value) { setValue?.Invoke(value); return null; }
         private static object? Click(Action? onClick) { onClick?.Invoke(); return null; }
+
+        private IWebElement CreateRadio(Func<bool> selected) => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "get_Selected" ? selected() : throw new NotSupportedException(m.Name));
+        private IEnumerable<string> GetDropdownOptions() => ExistingDropdownState switch
+        {
+            "MISSING" => ["123, OTHER"],
+            "DUPLICATE" => ["24189, LIST", "24189, LIST"],
+            _ => ["", "123, OTHER", "24189, LIST"]
+        };
+        private IReadOnlyList<IWebElement> CreatePanelElements(string selector) => selector.Contains("filter", StringComparison.Ordinal)
+            ? [CreateElement()]
+            : GetDropdownOptions().Select(label => CreateElement(text: () => label, onClick: () =>
+            {
+                if (label == "24189, LIST") SelectedUploadList = "24189";
+            })).ToList();
 
         private static IWebElement CreateResultRow(int cohortId, string cohortName) => SeleniumDispatchProxy.Create<IWebElement>((method, arguments) =>
         {
