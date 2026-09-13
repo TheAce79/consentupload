@@ -20,6 +20,7 @@ dotnet publish $projectPath `
   --runtime win-x64 `
   --self-contained true `
   -p:PublishSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true `
   --output $oneDrivePath --nologo
 
 if ($LASTEXITCODE -ne 0) {
