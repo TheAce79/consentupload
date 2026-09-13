@@ -112,9 +112,23 @@ public sealed class PhisCohortServiceTests
         Assert.Contains("To date must be empty", exception.InnerException!.Message);
     }
 
+    [Fact]
+    public void StaticCohortType_RequiresBothUnderlyingValueAndVisibleLabel()
+    {
+        var page = new FakeSearchCohortPage { CohortTypeValue = "STATIC", CohortTypeLabel = "" };
+        Assert.False(InvokeIsStaticCohortTypeSelected(page.CreateService()));
+
+        page.CohortTypeLabel = "Static";
+        Assert.True(InvokeIsStaticCohortTypeSelected(page.CreateService()));
+    }
+
     private static void InvokeVerifyRequiredDefaults(PhisCohortService service) =>
         typeof(PhisCohortService).GetMethod("VerifyRequiredDefaults", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(service, null);
+
+    private static bool InvokeIsStaticCohortTypeSelected(PhisCohortService service) =>
+        (bool)typeof(PhisCohortService).GetMethod("IsStaticCohortTypeSelected", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(service, null)!;
 
     private sealed class FakeSearchCohortPage
     {
@@ -127,6 +141,8 @@ public sealed class PhisCohortServiceTests
         private const string EffectiveFromInputId = "maintainCohortForm:EffectiveDateRange:fromDateTime:dateInput_input";
         private const string EffectiveToInputId = "maintainCohortForm:EffectiveDateRange:toDateTime:dateInput_input";
         private const string OrganizationInputId = "maintainCohortForm:orgFinder:orgNameAutoComplete:autoComplete_input";
+        private const string CohortTypeInputId = "maintainCohortForm:CohortType:selectOneMenu_input";
+        private const string CohortTypeLabelId = "maintainCohortForm:CohortType:selectOneMenu_label";
 
         public string Url { get; set; } = SearchUrl;
         public string CohortIdValue { get; set; } = string.Empty;
@@ -137,6 +153,8 @@ public sealed class PhisCohortServiceTests
         public string EffectiveFromDateValue { get; set; } = "2026/09/13";
         public string EffectiveToDateValue { get; set; } = string.Empty;
         public string OrganizationValue { get; set; } = "Moncton Public Health, Moncton, New Brunswick";
+        public string CohortTypeValue { get; set; } = string.Empty;
+        public string CohortTypeLabel { get; set; } = string.Empty;
         public List<(int CohortId, string CohortName)> SearchResultRows { get; set; } = [];
         public int SearchClicks { get; private set; }
 
@@ -181,6 +199,8 @@ public sealed class PhisCohortServiceTests
             EffectiveFromInputId => CreateElement(value: () => EffectiveFromDateValue),
             EffectiveToInputId => CreateElement(value: () => EffectiveToDateValue),
             OrganizationInputId => CreateElement(value: () => OrganizationValue),
+            CohortTypeInputId => CreateElement(displayed: false, value: () => CohortTypeValue),
+            CohortTypeLabelId => CreateElement(text: () => CohortTypeLabel),
             _ => null
         };
 

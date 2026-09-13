@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Support.UI;
 using System.Globalization;
+using System.Diagnostics;
 
 namespace ConsentSyncCore.Services.Phis;
 
@@ -41,6 +42,7 @@ public sealed class PhisCohortService
     private const string CohortTypeInputId = "maintainCohortForm:CohortType:selectOneMenu_input";
     private const string CohortTypeMenuId = "maintainCohortForm:CohortType:selectOneMenu";
     private const string CohortTypeItemsId = "maintainCohortForm:CohortType:selectOneMenu_items";
+    private const string CohortTypeLabelId = "maintainCohortForm:CohortType:selectOneMenu_label";
     private const string EffectiveFromInputId = "maintainCohortForm:EffectiveDateRange:fromDateTime:dateInput_input";
     private const string EffectiveToInputId = "maintainCohortForm:EffectiveDateRange:toDateTime:dateInput_input";
     private const string OrganizationInputId = "maintainCohortForm:orgFinder:orgNameAutoComplete:autoComplete_input";
@@ -127,7 +129,10 @@ public sealed class PhisCohortService
 
     public async Task<CohortCreationResult> CreateIfSearchReturnedNoResultsAsync(string cohortName)
     {
+        string traceId = Guid.NewGuid().ToString("N")[..8];
+        Stopwatch stopwatch = Stopwatch.StartNew();
         string name = cohortName?.Trim() ?? string.Empty;
+        Trace(traceId, "start", $"cohort creation requested; nameLength={name.Length}");
         if (name.Length == 0) throw new ArgumentException("A non-empty cohort name is required.", nameof(cohortName));
         if (!IsOnSearchCohortPage()) throw new InvalidOperationException("PHIS is not on the Search Cohort page.");
 
@@ -142,28 +147,46 @@ public sealed class PhisCohortService
         if (searchState != SearchResultState.Empty)
             return new(CohortCreationStatus.SearchResultUnavailable, "PHIS search results could not be confirmed as exactly 'No search results.'; no cohort was created.");
 
-        ClickCreateCohort();
-        await WaitForAjaxAndBlockUiAsync();
-        EnsureMaintainCohortPage();
+        try
+        {
+            ClickCreateCohort();
+            Trace(traceId, "create-form", "Create Cohort clicked; waiting for PHIS AJAX and overlays.");
+            await WaitForAjaxAndBlockUiAsync();
+            EnsureMaintainCohortPage();
 
-        PopulateCohort(name);
-        string previousLog = GetTransactionText();
-        WaitForAjaxQueue();
-        WaitForEnabled(SaveButtonId).Click();
-        await WaitForAjaxAndBlockUiAsync();
-        _sessionManager.UpdateActivity();
+            PopulateCohort(name, traceId);
+            VerifyPreSaveState(traceId);
+            string previousLog = GetTransactionText();
+            string previousInfo = GetVisibleMessages("#infoMessage, .ui-messages-info, .ui-growl-info");
+            WaitForAjaxQueue();
+            Trace(traceId, "save", "all pre-save checks passed; clicking Save once.");
+            WaitForEnabled(SaveButtonId).Click();
+            await WaitForAjaxAndBlockUiAsync();
+            _sessionManager.UpdateActivity();
 
-        string currentLog = GetTransactionText();
-        string errors = GetVisibleMessages(".ui-messages-error, .ui-messages-error-detail, .ui-growl-error, #seriousMessage");
-        if (!string.IsNullOrWhiteSpace(errors))
-            throw new InvalidOperationException($"PHIS rejected the cohort save: {errors}");
+            string currentLog = GetTransactionText();
+            string errors = GetVisibleMessages(".ui-messages-error, .ui-messages-error-detail, .ui-growl-error, #seriousMessage");
+            if (!string.IsNullOrWhiteSpace(errors))
+                throw new InvalidOperationException($"PHIS rejected the cohort save: {errors}");
 
-        string newMessages = currentLog.Length > previousLog.Length ? currentLog[previousLog.Length..] : currentLog;
-        if (ContainsSaveConfirmation(newMessages) || ContainsSaveConfirmation(GetVisibleMessages("#infoMessage, .ui-messages-info, .ui-growl-info")))
-            return new(CohortCreationStatus.Created, $"PHIS confirmed that static cohort '{name}' was saved.");
+            string newMessages = currentLog.Length > previousLog.Length ? currentLog[previousLog.Length..] : string.Empty;
+            string currentInfo = GetVisibleMessages("#infoMessage, .ui-messages-info, .ui-growl-info");
+            string newInfo = currentInfo.Length > previousInfo.Length ? currentInfo[previousInfo.Length..] : string.Empty;
+            if (ContainsSaveConfirmation(newMessages) || ContainsSaveConfirmation(newInfo))
+            {
+                Trace(traceId, "complete", $"PHIS confirmed save; elapsedMs={stopwatch.ElapsedMilliseconds}");
+                return new(CohortCreationStatus.Created, $"PHIS confirmed that static cohort '{name}' was saved.");
+            }
 
-        return new(CohortCreationStatus.SaveUnverified,
-            $"PHIS accepted one save request for static cohort '{name}', but did not provide an explicit success confirmation. The browser remains on the PHIS page for review.");
+            Trace(traceId, "complete", $"Save confirmation missing after one Save click; elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return new(CohortCreationStatus.SaveUnverified,
+                $"PHIS accepted one save request for static cohort '{name}', but did not provide an explicit success confirmation. The browser remains on the PHIS page for review.");
+        }
+        catch (Exception ex)
+        {
+            Trace(traceId, "failed", $"elapsedMs={stopwatch.ElapsedMilliseconds}; {ex.GetType().Name}: {ex.Message}", warning: true);
+            throw;
+        }
     }
 
     private SearchResultState GetSearchResultState()
@@ -203,7 +226,7 @@ public sealed class PhisCohortService
             throw new InvalidOperationException("PHIS did not navigate to the Create Cohort form.");
     }
 
-    private void PopulateCohort(string cohortName)
+    private void PopulateCohort(string cohortName, string traceId)
     {
         IWebElement name = WaitForVisible(CohortNameFieldId);
         Clear(name);
@@ -211,16 +234,20 @@ public sealed class PhisCohortService
         if (!string.Equals(name.GetAttribute("value")?.Trim(), cohortName, StringComparison.Ordinal))
             throw new InvalidOperationException("PHIS cohort name could not be verified.");
 
-        SelectStaticCohortType();
+        SelectStaticCohortType(traceId);
         VerifyRequiredDefaults();
-        SelectImmunizationEncounterGroup();
+        SelectImmunizationEncounterGroup(traceId);
     }
 
-    private void SelectStaticCohortType()
+    private void SelectStaticCohortType(string traceId)
     {
         // PrimeFaces keeps the real select inside ui-helper-hidden-accessible; it is present but never displayed.
         IWebElement input = WaitForPresent(CohortTypeInputId);
-        if (string.Equals(input.GetAttribute("value"), "STATIC", StringComparison.OrdinalIgnoreCase)) return;
+        if (IsStaticCohortTypeSelected())
+        {
+            Trace(traceId, "cohort-type", "Static was already selected.");
+            return;
+        }
 
         ClickReliably(WaitForVisible(CohortTypeMenuId));
         IWebElement staticOption = _wait.Until(d => d.FindElements(By.Id(CohortTypeItemsId))
@@ -233,8 +260,9 @@ public sealed class PhisCohortService
         _wait.Until(d => d.FindElements(By.Id(CohortTypeMenuId))
             .All(menu => !string.Equals(menu.GetAttribute("aria-expanded"), "true", StringComparison.OrdinalIgnoreCase)));
         input = WaitForPresent(CohortTypeInputId);
-        if (!string.Equals(input.GetAttribute("value"), "STATIC", StringComparison.OrdinalIgnoreCase))
+        if (!IsStaticCohortTypeSelected())
             throw new InvalidOperationException("PHIS cohort type could not be set to Static.");
+        Trace(traceId, "cohort-type", "Static selected and visible label verified.");
     }
 
     private void VerifyRequiredDefaults()
@@ -275,9 +303,13 @@ public sealed class PhisCohortService
         return (field.GetAttribute("value") ?? field.Text).Trim();
     }
 
-    private void SelectImmunizationEncounterGroup()
+    private void SelectImmunizationEncounterGroup(string traceId)
     {
-        if (ContainsEncounterGroup(".ui-picklist-target", "Immunization")) return;
+        if (ContainsEncounterGroup(".ui-picklist-target", "Immunization"))
+        {
+            Trace(traceId, "encounter-group", "Immunization was already selected.");
+            return;
+        }
 
         IWebElement pickList = WaitForVisible(EncounterGroupPickListId);
         IReadOnlyList<IWebElement> items = pickList.FindElements(By.CssSelector(".ui-picklist-source .ui-picklist-item"))
@@ -298,12 +330,54 @@ public sealed class PhisCohortService
         IWebElement addButton = addButtons[0];
         ClickReliably(addButton);
         WaitForAjaxQueue();
-        if (!ContainsEncounterGroup(".ui-picklist-target", "Immunization"))
-            throw new InvalidOperationException("The Immunization encounter group was not moved to Selected Encounter Groups.");
+        try
+        {
+            _wait.Until(_ => ContainsEncounterGroup(".ui-picklist-target", "Immunization"));
+        }
+        catch (WebDriverTimeoutException ex)
+        {
+            throw new InvalidOperationException("The Immunization encounter group was not moved to Selected Encounter Groups.", ex);
+        }
+        Trace(traceId, "encounter-group", "Immunization transfer verified in Selected Encounter Groups.");
     }
 
-    private bool ContainsEncounterGroup(string listClass, string text) => _driver.FindElements(By.CssSelector($"#maintainCohortForm\\:EncounterGroup\\:pickList {listClass} .ui-picklist-item"))
-        .Any(element => element.Displayed && string.Equals(element.Text.Trim(), text, StringComparison.Ordinal));
+    private void VerifyPreSaveState(string traceId)
+    {
+        VerifyRequiredDefaults();
+        if (!IsStaticCohortTypeSelected())
+            throw new InvalidOperationException("PHIS cohort type is not visibly set to Static before saving.");
+        if (!ContainsEncounterGroup(".ui-picklist-target", "Immunization"))
+            throw new InvalidOperationException("PHIS Immunization encounter group is not selected before saving.");
+        Trace(traceId, "pre-save", "Static label/value, required defaults, and Immunization selection verified.");
+    }
+
+    private bool IsStaticCohortTypeSelected()
+    {
+        string value = WaitForPresent(CohortTypeInputId).GetAttribute("value")?.Trim() ?? string.Empty;
+        string label = _driver.FindElements(By.Id(CohortTypeLabelId)).Where(element => element.Displayed)
+            .Select(element => element.Text.Trim()).SingleOrDefault() ?? string.Empty;
+        return string.Equals(value, "STATIC", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(label, "Static", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void Trace(string traceId, string stage, string detail, bool warning = false)
+    {
+        string message = $"PHIS cohort [{traceId}] {stage}: {detail}";
+        if (warning) LoggerService.LogWarning(message); else LoggerService.LogInformation(message);
+    }
+
+    private bool ContainsEncounterGroup(string listClass, string text)
+    {
+        try
+        {
+            return _driver.FindElements(By.CssSelector($"#maintainCohortForm\\:EncounterGroup\\:pickList {listClass} .ui-picklist-item"))
+                .Any(element => element.Displayed && string.Equals(element.Text.Trim(), text, StringComparison.Ordinal));
+        }
+        catch (StaleElementReferenceException)
+        {
+            return false;
+        }
+    }
 
     private void ClickReliably(IWebElement element)
     {
