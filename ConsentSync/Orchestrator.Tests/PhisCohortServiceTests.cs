@@ -93,6 +93,29 @@ public sealed class PhisCohortServiceTests
         Assert.Equal(24250, result.PhisCohortId);
     }
 
+    [Fact]
+    public void VerifyRequiredDefaults_UsesExactControlsAndAllowsAnEmptyToDate()
+    {
+        var page = new FakeSearchCohortPage();
+
+        InvokeVerifyRequiredDefaults(page.CreateService());
+    }
+
+    [Fact]
+    public void VerifyRequiredDefaults_RejectsAPopulatedToDate()
+    {
+        var page = new FakeSearchCohortPage { EffectiveToDateValue = "2026/09/14" };
+
+        TargetInvocationException exception = Assert.Throws<TargetInvocationException>(() => InvokeVerifyRequiredDefaults(page.CreateService()));
+
+        Assert.IsType<InvalidOperationException>(exception.InnerException);
+        Assert.Contains("To date must be empty", exception.InnerException!.Message);
+    }
+
+    private static void InvokeVerifyRequiredDefaults(PhisCohortService service) =>
+        typeof(PhisCohortService).GetMethod("VerifyRequiredDefaults", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(service, null);
+
     private sealed class FakeSearchCohortPage
     {
         public const string SearchUrl = "https://phis.example/phsdsm/ClientWeb/pages/cohort/searchCohort.xhtml?tab=review";
@@ -101,6 +124,9 @@ public sealed class PhisCohortServiceTests
         private const string CohortNameInputId = "form:CohortName:inputText";
         private const string SearchButtonId = "actionMenuSearch:commandButtonId";
         private const string EmptyResultsId = "form:DataTable:emptyMessageId";
+        private const string EffectiveFromInputId = "maintainCohortForm:EffectiveDateRange:fromDateTime:dateInput_input";
+        private const string EffectiveToInputId = "maintainCohortForm:EffectiveDateRange:toDateTime:dateInput_input";
+        private const string OrganizationInputId = "maintainCohortForm:orgFinder:orgNameAutoComplete:autoComplete_input";
 
         public string Url { get; set; } = SearchUrl;
         public string CohortIdValue { get; set; } = string.Empty;
@@ -108,6 +134,9 @@ public sealed class PhisCohortServiceTests
         public bool CohortNameDisplayed { get; set; } = true;
         public bool ThrowOnUrlRead { get; set; }
         public string? EmptyResultText { get; set; }
+        public string EffectiveFromDateValue { get; set; } = "2026/09/13";
+        public string EffectiveToDateValue { get; set; } = string.Empty;
+        public string OrganizationValue { get; set; } = "Moncton Public Health, Moncton, New Brunswick";
         public List<(int CohortId, string CohortName)> SearchResultRows { get; set; } = [];
         public int SearchClicks { get; private set; }
 
@@ -149,6 +178,9 @@ public sealed class PhisCohortServiceTests
             CohortNameInputId => CreateElement(displayed: CohortNameDisplayed, value: () => CohortNameValue, setValue: value => CohortNameValue = value),
             SearchButtonId => CreateElement(onClick: () => SearchClicks++),
             EmptyResultsId when EmptyResultText is not null => CreateElement(text: () => EmptyResultText),
+            EffectiveFromInputId => CreateElement(value: () => EffectiveFromDateValue),
+            EffectiveToInputId => CreateElement(value: () => EffectiveToDateValue),
+            OrganizationInputId => CreateElement(value: () => OrganizationValue),
             _ => null
         };
 

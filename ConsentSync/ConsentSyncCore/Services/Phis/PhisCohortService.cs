@@ -3,6 +3,7 @@ using ConsentSyncCore.Services.ConfigurationPoco;
 using Microsoft.Extensions.Configuration;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Support.UI;
+using System.Globalization;
 
 namespace ConsentSyncCore.Services.Phis;
 
@@ -38,6 +39,12 @@ public sealed class PhisCohortService
     private const string MaintainCohortFormId = "maintainCohortForm";
     private const string CohortNameFieldId = "maintainCohortForm:CohortName:inputText";
     private const string CohortTypeInputId = "maintainCohortForm:CohortType:selectOneMenu_input";
+    private const string CohortTypeMenuId = "maintainCohortForm:CohortType:selectOneMenu";
+    private const string CohortTypeItemsId = "maintainCohortForm:CohortType:selectOneMenu_items";
+    private const string EffectiveFromInputId = "maintainCohortForm:EffectiveDateRange:fromDateTime:dateInput_input";
+    private const string EffectiveToInputId = "maintainCohortForm:EffectiveDateRange:toDateTime:dateInput_input";
+    private const string OrganizationInputId = "maintainCohortForm:orgFinder:orgNameAutoComplete:autoComplete_input";
+    private const string EncounterGroupPickListId = "maintainCohortForm:EncounterGroup:pickList";
     private const string SaveButtonId = "actionMenuSave:commandButtonId";
     private const string CreateCohortButtonId = "form:DataTable:CreateCohortButtonId:commandButtonId";
 
@@ -215,16 +222,16 @@ public sealed class PhisCohortService
         IWebElement input = WaitForPresent(CohortTypeInputId);
         if (string.Equals(input.GetAttribute("value"), "STATIC", StringComparison.OrdinalIgnoreCase)) return;
 
-        string menuId = "maintainCohortForm:CohortType:selectOneMenu";
-        ClickReliably(WaitForVisible(menuId));
-        const string cohortTypeItemsId = "maintainCohortForm:CohortType:selectOneMenu_items";
-        IWebElement staticOption = _wait.Until(d => d.FindElements(By.Id(cohortTypeItemsId))
+        ClickReliably(WaitForVisible(CohortTypeMenuId));
+        IWebElement staticOption = _wait.Until(d => d.FindElements(By.Id(CohortTypeItemsId))
             .SelectMany(items => items.FindElements(By.CssSelector(".ui-selectonemenu-item")))
             .FirstOrDefault(element => element.Displayed &&
                 (string.Equals(element.Text.Trim(), "Static", StringComparison.Ordinal) ||
                  string.Equals(element.GetAttribute("data-label"), "Static", StringComparison.Ordinal))));
         ClickReliably(staticOption);
         WaitForAjaxQueue();
+        _wait.Until(d => d.FindElements(By.Id(CohortTypeMenuId))
+            .All(menu => !string.Equals(menu.GetAttribute("aria-expanded"), "true", StringComparison.OrdinalIgnoreCase)));
         input = WaitForPresent(CohortTypeInputId);
         if (!string.Equals(input.GetAttribute("value"), "STATIC", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("PHIS cohort type could not be set to Static.");
@@ -232,18 +239,39 @@ public sealed class PhisCohortService
 
     private void VerifyRequiredDefaults()
     {
-        string effectiveDate = FindFieldValueAfterLabel("Effective From:");
-        if (!DateTime.TryParse(effectiveDate, out _))
+        string effectiveDate = ReadVisibleFieldValue(EffectiveFromInputId, "Effective From");
+        if (!DateTime.TryParseExact(effectiveDate, "yyyy/MM/dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
             throw new InvalidOperationException("PHIS Effective From must contain a valid default date before saving.");
 
-        string organization = FindFieldValueAfterLabel("Jurisdictional Organization:");
+        string effectiveTo = ReadVisibleFieldValue(EffectiveToInputId, "To date");
+        if (!string.IsNullOrWhiteSpace(effectiveTo))
+            throw new InvalidOperationException("PHIS To date must be empty before creating a static cohort.");
+
+        string organization = ReadVisibleFieldValue(OrganizationInputId, "Jurisdictional Organization");
         if (!organization.Contains("Moncton Public Health", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("PHIS Jurisdictional Organization must default to Moncton Public Health before saving.");
     }
 
-    private string FindFieldValueAfterLabel(string label)
+    private string ReadVisibleFieldValue(string id, string fieldName)
     {
-        IWebElement field = _wait.Until(d => d.FindElements(By.XPath($"//*[normalize-space(text())='{label}']/following::input[not(@type='hidden')][1] | //*[normalize-space(text())='{label}']/following::textarea[1]")).SingleOrDefault(element => element.Displayed));
+        IReadOnlyList<IWebElement> fields;
+        try
+        {
+            fields = _wait.Until(d =>
+            {
+                IReadOnlyList<IWebElement> matches = d.FindElements(By.Id(id)).Where(element => element.Displayed).ToList();
+                return matches.Count > 0 ? matches : null;
+            });
+        }
+        catch (WebDriverTimeoutException ex)
+        {
+            throw new InvalidOperationException($"PHIS {fieldName} control was not available on the Create Cohort form.", ex);
+        }
+
+        if (fields.Count != 1)
+            throw new InvalidOperationException($"PHIS {fieldName} control was ambiguous on the Create Cohort form.");
+
+        IWebElement field = fields[0];
         return (field.GetAttribute("value") ?? field.Text).Trim();
     }
 
@@ -251,14 +279,23 @@ public sealed class PhisCohortService
     {
         if (ContainsEncounterGroup(".ui-picklist-target", "Immunization")) return;
 
-        IWebElement pickList = WaitForVisible("maintainCohortForm:EncounterGroup:pickList");
-        IWebElement? item = pickList.FindElements(By.CssSelector(".ui-picklist-source .ui-picklist-item"))
-            .SingleOrDefault(element => element.Displayed && string.Equals(element.Text.Trim(), "Immunization", StringComparison.Ordinal));
-        if (item is null) throw new InvalidOperationException("The Immunization encounter group is not available for selection.");
+        IWebElement pickList = WaitForVisible(EncounterGroupPickListId);
+        IReadOnlyList<IWebElement> items = pickList.FindElements(By.CssSelector(".ui-picklist-source .ui-picklist-item"))
+            .Where(element => element.Displayed && string.Equals(element.Text.Trim(), "Immunization", StringComparison.Ordinal))
+            .ToList();
+        if (items.Count != 1)
+            throw new InvalidOperationException($"PHIS {(items.Count == 0 ? "did not provide" : "provided more than one")} Immunization encounter group for selection.");
+
+        IWebElement item = items[0];
         ClickReliably(item);
-        IWebElement addButton = pickList.FindElements(By.CssSelector(".ui-picklist-button-add"))
-            .SingleOrDefault(element => element.Displayed && element.Enabled)
-            ?? throw new InvalidOperationException("PHIS did not expose the Add control for Encounter Groups.");
+        IReadOnlyList<IWebElement> addButtons = WaitForVisible(EncounterGroupPickListId)
+            .FindElements(By.CssSelector(".ui-picklist-button-add"))
+            .Where(element => element.Displayed && element.Enabled)
+            .ToList();
+        if (addButtons.Count != 1)
+            throw new InvalidOperationException($"PHIS {(addButtons.Count == 0 ? "did not expose" : "exposed more than one")} Add control for Encounter Groups.");
+
+        IWebElement addButton = addButtons[0];
         ClickReliably(addButton);
         WaitForAjaxQueue();
         if (!ContainsEncounterGroup(".ui-picklist-target", "Immunization"))

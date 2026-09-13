@@ -389,7 +389,7 @@ public partial class CohortContextForm
 
             btn_CreatePhisCohort.Text = "Searching Cohort...";
             await Task.Run(() => cohortService.SearchAsync(criterion, criterionValue));
-            btn_CreatePhisCohort.Text = "Checking Search Results...";
+            btn_CreatePhisCohort.Text = "Creating Static Cohort...";
             CohortCreationResult creationResult = await Task.Run(() => cohortService.CreateIfSearchReturnedNoResultsAsync(clientListName));
 
             string fileDetails = $"\n\nClient ID file:\n{targetPath}\n\nTotal Client IDs exported: {clientIds.Count}";
@@ -423,11 +423,11 @@ public partial class CohortContextForm
         }
         catch (Exception ex)
         {
-            LoggerService.LogError("PHIS cohort export or search failed.", ex);
+            LoggerService.LogError("PHIS cohort export, search, or static cohort creation failed.", ex);
             string payloadMessage = payloadExported && targetPath is not null
                 ? $"\n\nThe Client ID file was created successfully at:\n{targetPath}"
                 : string.Empty;
-            MessageBox.Show(this, $"PHIS cohort export or search failed:\n\n{ex.Message}{payloadMessage}",
+            MessageBox.Show(this, $"PHIS cohort export, search, or static cohort creation failed:\n\n{ex.Message}{payloadMessage}",
                 "PHIS Cohort Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
