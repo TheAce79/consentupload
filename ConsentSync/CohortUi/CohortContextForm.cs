@@ -468,6 +468,7 @@ public partial class CohortContextForm : Form
 
     private void BindContext(CohortContextEntity context)
     {
+        _phisFieldsDirty = false;
         _isBindingContext = true;
         try
         {

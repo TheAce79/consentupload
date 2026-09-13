@@ -27,6 +27,8 @@ public sealed record CohortCreationResult(CohortCreationStatus Status, string Me
     public bool CohortWasSaved => Status is CohortCreationStatus.Created or CohortCreationStatus.SaveUnverified;
 }
 
+public sealed record PhisClientListResult(int ClientListId, int ClientCount);
+
 /// <summary>Automates the PHIS Search Cohort page and creates a new static cohort only after an empty search.</summary>
 public sealed class PhisCohortService
 {
@@ -65,6 +67,7 @@ public sealed class PhisCohortService
         _sessionManager = sessionManager;
         _phisConfig = ConfigurationService.GetPhisConfig();
         _wait = new WebDriverWait(driver, TimeSpan.FromSeconds(_phisConfig.WebDriverWaitSeconds));
+        _wait.IgnoreExceptionTypes(typeof(StaleElementReferenceException));
     }
 
     public bool IsOnSearchCohortPage()
@@ -146,6 +149,8 @@ public sealed class PhisCohortService
         }
         if (searchState != SearchResultState.Empty)
             return new(CohortCreationStatus.SearchResultUnavailable, "PHIS search results could not be confirmed as exactly 'No search results.'; no cohort was created.");
+        if (!string.IsNullOrWhiteSpace(WaitForVisible(CohortIdInputId).GetAttribute("value")))
+            return new(CohortCreationStatus.SearchResultUnavailable, "The stored PHIS Cohort ID was not found; no replacement cohort was created.");
 
         try
         {
@@ -169,13 +174,17 @@ public sealed class PhisCohortService
             if (!string.IsNullOrWhiteSpace(errors))
                 throw new InvalidOperationException($"PHIS rejected the cohort save: {errors}");
 
+            int? savedId = ReadCohortHeaderId(name);
+            if (savedId.HasValue)
+                return new(CohortCreationStatus.Created, "PHIS saved cohort identity verified.", savedId);
+
             string newMessages = currentLog.Length > previousLog.Length ? currentLog[previousLog.Length..] : string.Empty;
             string currentInfo = GetVisibleMessages("#infoMessage, .ui-messages-info, .ui-growl-info");
             string newInfo = currentInfo.Length > previousInfo.Length ? currentInfo[previousInfo.Length..] : string.Empty;
             if (ContainsSaveConfirmation(newMessages) || ContainsSaveConfirmation(newInfo))
             {
                 Trace(traceId, "complete", $"PHIS confirmed save; elapsedMs={stopwatch.ElapsedMilliseconds}");
-                return new(CohortCreationStatus.Created, $"PHIS confirmed that static cohort '{name}' was saved.");
+                return new(CohortCreationStatus.SaveUnverified, $"PHIS confirmed that static cohort '{name}' was saved, but its ID could not be read. Upload was not started; enter the ID using Save Db and retry.");
             }
 
             Trace(traceId, "complete", $"Save confirmation missing after one Save click; elapsedMs={stopwatch.ElapsedMilliseconds}");
@@ -187,6 +196,142 @@ public sealed class PhisCohortService
             Trace(traceId, "failed", $"elapsedMs={stopwatch.ElapsedMilliseconds}; {ex.GetType().Name}: {ex.Message}", warning: true);
             throw;
         }
+    }
+
+    public int? ReadCohortHeaderId(string expectedName)
+    {
+        if (!_driver.Url.Contains(MaintainCohortPath, StringComparison.OrdinalIgnoreCase)) return null;
+        string name = _driver.FindElements(By.Id(CohortNameFieldId)).FirstOrDefault()?.GetAttribute("value") ?? "";
+        if (!string.Equals(name.Trim(), expectedName.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The opened PHIS cohort name does not match the active list.");
+        var values = _driver.FindElements(By.XPath("//*[@id='uiContextHeaderCCId:uiContextHeaderList_content']//*[contains(@class,'phsdsm-ui-labeledgroup')][div/span[normalize-space(.)='Cohort ID:']]/div[contains(@class,'phsdsm-ui-labeledgroup-contentarea')]"))
+            .Where(e => e.Displayed).Select(e => e.Text.Trim()).ToList();
+        return values.Count == 1 && int.TryParse(values[0], out int id) && id > 0 ? id : null;
+    }
+
+    public async Task OpenExistingCohortAsync(int id, string name)
+    {
+        var rows = _driver.FindElements(By.CssSelector("#form\\:DataTable\\:dataTable_data tr[role='row']"))
+            .Where(row => row.Displayed).Where(row =>
+            {
+                var cells = row.FindElements(By.CssSelector("td[role='gridcell']"));
+                return cells.Count >= 4 && cells[2].Text.Trim() == id.ToString() &&
+                    string.Equals(cells[3].Text.Trim(), name, StringComparison.OrdinalIgnoreCase);
+            }).ToList();
+        if (rows.Count != 1) throw new InvalidOperationException("No unique matching cohort row is available for Update.");
+        ClickReliably(rows[0].FindElement(By.CssSelector(".ui-radiobutton-box")));
+        await WaitForAjaxAndBlockUiAsync();
+        WaitForEnabled("form:DataTable:UpdateCohortButtonId:actionButtonId:commandButtonId").Click();
+        await WaitForAjaxAndBlockUiAsync();
+        EnsureMaintainCohortPage();
+        if (ReadCohortHeaderId(name) != id) throw new InvalidOperationException("PHIS opened a different cohort than requested.");
+    }
+
+    public async Task<PhisClientListResult> UploadClientListAsync(int cohortId, string name, string filePath)
+    {
+        string traceId = Guid.NewGuid().ToString("N")[..8];
+        if (ReadCohortHeaderId(name) != cohortId) throw new InvalidOperationException("Cohort identity could not be verified before upload.");
+        var file = new FileInfo(filePath);
+        if (!file.Exists || file.Length == 0 || file.Length > 1000000 || !file.Extension.Equals(".txt", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The client-ID text file must exist, be nonempty, and be no larger than 1,000,000 bytes.");
+        // Inspect list identity only to choose the upload destination; always send the entire file.
+        var existingList = ReadAttachedClientList(cohortId, name);
+        Trace(traceId, "upload", $"cohortId={cohortId}; file={file.Name}; bytes={file.Length}");
+        WaitForEnabled("maintainCohortForm:clientListDataTable:UploadClientIDListButtonId:commandButtonId").Click();
+        await WaitForAjaxAndBlockUiAsync();
+        var input = WaitForPresent("maintainCohortForm:fileUpload").FindElement(By.CssSelector("input[type='file']"));
+        input.SendKeys(file.FullName);
+        _wait.Until(_ => _driver.FindElements(By.CssSelector("#maintainCohortForm\\:fileUpload .ui-datagrid td"))
+            .Any(e => e.Displayed && e.Text.Trim() == file.Name));
+        await WaitForAjaxAndBlockUiAsync();
+        string radioId = $"maintainCohortForm:clientListRadio:selectOneRadio:{(existingList is null ? 0 : 1)}";
+        if (!WaitForPresent(radioId).Selected)
+        {
+            string optionId = $"maintainCohortForm:clientListRadio:option{(existingList is null ? 1 : 2)}";
+            ClickReliably(WaitForPresent(optionId).FindElement(By.CssSelector(".ui-radiobutton-box")));
+            await WaitForAjaxAndBlockUiAsync();
+        }
+        _wait.Until(_ => WaitForPresent(radioId).Selected);
+        if (existingList is not null)
+        {
+            SelectExistingUploadList(existingList.ClientListId, name);
+            Trace(traceId, "upload-destination", $"Existing Client List selected; id={existingList.ClientListId}");
+        }
+        else
+        {
+            var nameField = WaitForVisible("maintainCohortForm:clientListRadio:newListName:inputText");
+            Clear(nameField);
+            nameField.SendKeys(name);
+            if (nameField.GetAttribute("value") != name) throw new InvalidOperationException("Upload client-list name could not be verified.");
+            Trace(traceId, "upload-destination", "New Client List selected; name verified.");
+        }
+        Trace(traceId, "upload-save", "Attachment verified; clicking upload-panel Save once.");
+        WaitForEnabled("maintainCohortForm:saveButtonId:commandButtonId").Click();
+        await WaitForAjaxAndBlockUiAsync();
+        string errors = GetVisibleMessages(".ui-messages-error, .ui-growl-error, #seriousMessage");
+        if (!string.IsNullOrWhiteSpace(errors)) throw new InvalidOperationException($"PHIS rejected the client list: {errors}");
+        _wait.Until(_ => !_driver.FindElements(By.Id("maintainCohortForm:uploadClientListPanel")).Any(e => e.Displayed));
+        WaitForTransientOverlays();
+        Trace(traceId, "upload-main-save", "Upload panel saved; clicking main page Save once to persist the client list.");
+        WaitForEnabled(SaveButtonId).Click();
+        await WaitForAjaxAndBlockUiAsync();
+        errors = GetVisibleMessages(".ui-messages-error, .ui-growl-error, #seriousMessage");
+        if (!string.IsNullOrWhiteSpace(errors)) throw new InvalidOperationException($"PHIS rejected the main page save: {errors}");
+        if (ReadCohortHeaderId(name) != cohortId) throw new InvalidOperationException("Cohort identity changed after the main page save.");
+        try
+        {
+            var result = _wait.Until(_ => ReadAttachedClientList(cohortId, name));
+            if (existingList is not null && result.ClientListId != existingList.ClientListId)
+                throw new InvalidOperationException("The saved client-list ID differs from the selected upload destination.");
+            Trace(traceId, "upload-complete", $"clientListId={result.ClientListId}; clients={result.ClientCount}");
+            return result;
+        }
+        catch (WebDriverTimeoutException ex)
+        {
+            throw new InvalidOperationException("Upload-panel Save and main page Save were each attempted once, but the attached list could not be verified. Review PHIS before retrying.", ex);
+        }
+    }
+
+    private void SelectExistingUploadList(int listId, string name)
+    {
+        const string menuId = "maintainCohortForm:clientListRadio:existingLists:selectOneMenu";
+        string expectedLabel = $"{listId}, {name}";
+        var options = WaitForPresent(menuId + "_input").FindElements(By.TagName("option"))
+            .Where(e => e.GetAttribute("value") == listId.ToString() &&
+                string.Equals(e.Text.Trim(), expectedLabel, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (options.Count != 1) throw new InvalidOperationException("The expected existing client list is not uniquely available in the upload dropdown.");
+        ClickReliably(WaitForVisible(menuId).FindElement(By.CssSelector(".ui-selectonemenu-trigger")));
+        var option = _wait.Until(_ => _driver.FindElements(By.Id(menuId + "_items"))
+            .SelectMany(e => e.FindElements(By.CssSelector(".ui-selectonemenu-item")))
+            .SingleOrDefault(e => e.Displayed && string.Equals(e.Text.Trim(), expectedLabel, StringComparison.OrdinalIgnoreCase)));
+        ClickReliably(option);
+        WaitForAjaxQueue();
+        _wait.Until(_ => WaitForPresent(menuId + "_input").GetAttribute("value") == listId.ToString() &&
+            string.Equals(WaitForVisible(menuId + "_label").Text.Trim(), expectedLabel, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private PhisClientListResult? ReadAttachedClientList(int cohortId, string name)
+    {
+        var table = WaitForPresent("maintainCohortForm:clientListDataTable");
+        var matches = table.FindElements(By.CssSelector("tbody.ui-datatable-data tr[role='row']"))
+            .Select(row => row.FindElements(By.CssSelector("td[role='gridcell']")))
+            .Where(cells => cells.Count >= 4 && string.Equals(cells[2].Text.Trim(), name, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (matches.Count > 1) throw new InvalidOperationException("Multiple attached client lists match the requested name.");
+        if (matches.Count == 0) return null;
+        if (!int.TryParse(matches[0][1].Text.Trim(), out int listId) || listId <= 0 ||
+            !int.TryParse(matches[0][3].Text.Trim(), out int count) || count < 0)
+            throw new InvalidOperationException("Attached client-list ID or client count is invalid.");
+        foreach (var link in _driver.FindElements(By.CssSelector("#uiContextHeaderCCId\\:uiContextHeaderList_content a[href*='type=resultSet']")))
+        {
+            if (!link.Text.Trim().StartsWith(name + " /", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!Uri.TryCreate(link.GetAttribute("href"), UriKind.Absolute, out var uri))
+                throw new InvalidOperationException("Client-list header link is invalid.");
+            var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+            if (query["contextId"] != cohortId.ToString() || query["id"] != listId.ToString())
+                throw new InvalidOperationException("Client-list header link and attached list disagree.");
+            listId = int.Parse(query["id"]!);
+        }
+        return new(listId, count);
     }
 
     private SearchResultState GetSearchResultState()

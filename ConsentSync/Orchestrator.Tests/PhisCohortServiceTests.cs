@@ -122,6 +122,118 @@ public sealed class PhisCohortServiceTests
         Assert.True(InvokeIsStaticCohortTypeSelected(page.CreateService()));
     }
 
+    [Fact]
+    public async Task StoredIdNotFound_DoesNotCreateReplacement()
+    {
+        var page = new FakeSearchCohortPage { CohortIdValue = "24260", EmptyResultText = "No search results." };
+        Assert.Equal(CohortCreationStatus.SearchResultUnavailable,
+            (await page.CreateService().CreateIfSearchReturnedNoResultsAsync("LIST")).Status);
+    }
+
+    [Theory]
+    [InlineData("24260", 24260)]
+    [InlineData("", null)]
+    [InlineData("-1", null)]
+    [InlineData("n/a", null)]
+    public void HeaderId_RequiresPositiveIdOnMatchingCohort(string headerId, int? expected)
+    {
+        var page = new FakeSearchCohortPage
+        {
+            Url = "https://phis.example/phsdsm/ClientWeb/pages/cohort/maintainCohort.xhtml",
+            CohortNameValue = "LIST", HeaderId = headerId
+        };
+        Assert.Equal(expected, page.CreateService().ReadCohortHeaderId("LIST"));
+        Assert.Throws<InvalidOperationException>(() => page.CreateService().ReadCohortHeaderId("OTHER"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Upload_ChoosesDestinationAndSavesPanelThenMain(bool existing)
+    {
+        var page = new FakeSearchCohortPage
+        {
+            Url = "https://phis.example/phsdsm/ClientWeb/pages/cohort/maintainCohort.xhtml",
+            CohortNameValue = "LIST", HeaderId = "24260", AttachedListId = existing ? "24189" : null
+        };
+        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt");
+        await File.WriteAllTextAsync(path, "123\n456\n123\n");
+        try
+        {
+            var result = await page.CreateService().UploadClientListAsync(24260, "LIST", path);
+            Assert.Equal(24189, result.ClientListId);
+            Assert.Equal(22, result.ClientCount);
+            Assert.Equal(path, page.UploadedPath);
+            Assert.Equal("123\n456\n123\n", await File.ReadAllTextAsync(path));
+            Assert.Equal(1, page.UploadClicks);
+            Assert.Equal(1, page.UploadSaveClicks);
+            Assert.Equal(new[] { "panel", "main" }, page.SaveOrder);
+            Assert.Equal(existing, page.ExistingSelected);
+            Assert.Equal(existing ? "24189" : "", page.SelectedUploadList);
+            Assert.Equal(existing ? "" : "LIST", page.UploadName);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void AttachedList_RejectsHeaderLinkForAnotherCohort()
+    {
+        var page = new FakeSearchCohortPage
+        {
+            Url = "https://phis.example/phsdsm/ClientWeb/pages/cohort/maintainCohort.xhtml",
+            CohortNameValue = "LIST", HeaderId = "24260", AttachedListId = "24189", LinkCohortId = "999"
+        };
+        var error = Assert.Throws<TargetInvocationException>(() => typeof(PhisCohortService)
+            .GetMethod("ReadAttachedClientList", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(page.CreateService(), [24260, "LIST"]));
+        Assert.IsType<InvalidOperationException>(error.InnerException);
+    }
+
+    [Theory]
+    [InlineData("panel")]
+    [InlineData("main")]
+    public async Task Upload_SaveRejectionStopsWithoutRetry(string failingStage)
+    {
+        var page = new FakeSearchCohortPage
+        {
+            Url = "https://phis.example/phsdsm/ClientWeb/pages/cohort/maintainCohort.xhtml",
+            CohortNameValue = "LIST", HeaderId = "24260", FailSaveStage = failingStage
+        };
+        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt");
+        await File.WriteAllTextAsync(path, "123\n");
+        try
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => page.CreateService().UploadClientListAsync(24260, "LIST", path));
+            Assert.Contains("rejected", error.Message);
+            Assert.Equal(failingStage == "panel" ? new[] { "panel" } : new[] { "panel", "main" }, page.SaveOrder);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void AdminSummary_DistinguishesExportedExistingAndAddedCounts()
+    {
+        string existing = PhisAdminSummary.Format(24260, "LIST", new(24189, 22), 25);
+        Assert.Contains("LIST / 24189", existing);
+        Assert.Contains("Clients newly added by this run: Not reported by PHIS", existing);
+        Assert.Contains("Client IDs exported: 25", existing);
+        Assert.Contains("Clients in PHIS list (verified): 22", existing);
+        Assert.Contains("Full exported list uploaded", existing);
+    }
+
+    [Fact]
+    public async Task MissingUploadFile_StopsBeforeOpeningUploadPanel()
+    {
+        var page = new FakeSearchCohortPage
+        {
+            Url = "https://phis.example/phsdsm/ClientWeb/pages/cohort/maintainCohort.xhtml",
+            CohortNameValue = "LIST", HeaderId = "24260"
+        };
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            page.CreateService().UploadClientListAsync(24260, "LIST", Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt")));
+        Assert.Contains("must exist", error.Message);
+    }
+
     private static void InvokeVerifyRequiredDefaults(PhisCohortService service) =>
         typeof(PhisCohortService).GetMethod("VerifyRequiredDefaults", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(service, null);
@@ -155,6 +267,17 @@ public sealed class PhisCohortServiceTests
         public string OrganizationValue { get; set; } = "Moncton Public Health, Moncton, New Brunswick";
         public string CohortTypeValue { get; set; } = string.Empty;
         public string CohortTypeLabel { get; set; } = string.Empty;
+        public string HeaderId { get; set; } = "";
+        public string? AttachedListId { get; set; }
+        public string LinkCohortId { get; set; } = "24260";
+        public string UploadedPath { get; set; } = "";
+        public string UploadName { get; set; } = "";
+        public int UploadClicks { get; set; }
+        public int UploadSaveClicks { get; set; }
+        public List<string> SaveOrder { get; } = [];
+        public bool ExistingSelected { get; set; }
+        public string SelectedUploadList { get; set; } = "";
+        public string? FailSaveStage { get; set; }
         public List<(int CohortId, string CohortName)> SearchResultRows { get; set; } = [];
         public int SearchClicks { get; private set; }
 
@@ -201,6 +324,54 @@ public sealed class PhisCohortServiceTests
             OrganizationInputId => CreateElement(value: () => OrganizationValue),
             CohortTypeInputId => CreateElement(displayed: false, value: () => CohortTypeValue),
             CohortTypeLabelId => CreateElement(text: () => CohortTypeLabel),
+            "maintainCohortForm:CohortName:inputText" => CreateElement(value: () => CohortNameValue),
+            "maintainCohortForm:clientListDataTable:UploadClientIDListButtonId:commandButtonId" => CreateElement(onClick: () => UploadClicks++),
+            "maintainCohortForm:saveButtonId:commandButtonId" => CreateElement(onClick: () => { UploadSaveClicks++; SaveOrder.Add("panel"); }),
+            "actionMenuSave:commandButtonId" => CreateElement(onClick: () => { SaveOrder.Add("main"); AttachedListId ??= "24189"; }),
+            "maintainCohortForm:clientListRadio:newListName:inputText" => CreateElement(value: () => UploadName, setValue: v => UploadName = v),
+            "maintainCohortForm:clientListRadio:selectOneRadio:0" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "get_Selected" ? !ExistingSelected : throw new NotSupportedException(m.Name)),
+            "maintainCohortForm:clientListRadio:selectOneRadio:1" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "get_Selected" ? ExistingSelected : throw new NotSupportedException(m.Name)),
+            "maintainCohortForm:clientListRadio:option2" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "FindElement"
+                ? CreateElement(onClick: () => ExistingSelected = true) : throw new NotSupportedException(m.Name)),
+            "maintainCohortForm:clientListRadio:existingLists:selectOneMenu_input" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name switch
+            {
+                "GetAttribute" => SelectedUploadList,
+                "FindElements" => new ReadOnlyCollection<IWebElement>([CreateElement(value: () => "24189", text: () => "24189, LIST")]),
+                _ => throw new NotSupportedException(m.Name)
+            }),
+            "maintainCohortForm:clientListRadio:existingLists:selectOneMenu" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name switch
+            {
+                "get_Displayed" => true,
+                "FindElement" => CreateElement(),
+                _ => throw new NotSupportedException(m.Name)
+            }),
+            "maintainCohortForm:clientListRadio:existingLists:selectOneMenu_items" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "FindElements"
+                ? new ReadOnlyCollection<IWebElement>([CreateElement(text: () => "24189, LIST", onClick: () => SelectedUploadList = "24189")]) : throw new NotSupportedException(m.Name)),
+            "maintainCohortForm:clientListRadio:existingLists:selectOneMenu_label" => CreateElement(text: () => SelectedUploadList == "24189" ? "24189, LIST" : ""),
+            _ when id.Contains(".ui-messages-error") && FailSaveStage is not null && SaveOrder.LastOrDefault() == FailSaveStage => CreateElement(text: () => "Save rejected"),
+            "maintainCohortForm:fileUpload" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "FindElement"
+                ? CreateElement(setValue: v => UploadedPath = v) : throw new NotSupportedException(m.Name)),
+            _ when id.Contains(".ui-datagrid td") && UploadedPath.Length > 0 => CreateElement(text: () => Path.GetFileName(UploadedPath)),
+            "maintainCohortForm:clientListDataTable" => SeleniumDispatchProxy.Create<IWebElement>((method, args) =>
+            {
+                if (method.Name == "get_Text") return "No records found.";
+                if (method.Name == "FindElements")
+                {
+                    string selector = args![0]!.ToString()!;
+                    if (AttachedListId is null || !selector.Contains("tbody")) return new ReadOnlyCollection<IWebElement>([]);
+                    var row = SeleniumDispatchProxy.Create<IWebElement>((m, a) => new ReadOnlyCollection<IWebElement>(
+                        new[] { "", AttachedListId, CohortNameValue, "22" }.Select(s => CreateElement(text: () => s)).ToList()));
+                    return new ReadOnlyCollection<IWebElement>([row]);
+                }
+                throw new NotSupportedException(method.Name);
+            }),
+            _ when id.StartsWith("By.XPath:") && id.Contains("Cohort ID:") => CreateElement(text: () => HeaderId),
+            _ when id.Contains("a[href*='type=resultSet']") && AttachedListId is not null => SeleniumDispatchProxy.Create<IWebElement>((method, args) => method.Name switch
+            {
+                "get_Text" => $"{CohortNameValue} / {AttachedListId}",
+                "GetAttribute" => $"https://phis.example/phsdsm/UIContextHeaderServlet?contextId={LinkCohortId}&id={AttachedListId}&type=resultSet",
+                _ => throw new NotSupportedException(method.Name)
+            }),
             _ => null
         };
 

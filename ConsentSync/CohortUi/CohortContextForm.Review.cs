@@ -23,9 +23,13 @@ public partial class CohortContextForm
     private readonly ComboBox _reviewFilter = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
     private readonly Label _reviewSummary = new() { AutoSize = true, Padding = new Padding(4) };
     private readonly Label _reviewMessage = new() { AutoSize = true, Padding = new Padding(4), MaximumSize = new Size(950, 0) };
-    private readonly TextBox _phisListName = new() { ReadOnly = true, Width = 300 };
-    private readonly TextBox _phisCohortId = new() { ReadOnly = true, Width = 140 };
-    private readonly TextBox _phisClientListId = new() { ReadOnly = true, Width = 140 };
+    private readonly TextBox _phisListName = new() { Width = 300 };
+    private readonly TextBox _phisCohortId = new() { Width = 140 };
+    private readonly TextBox _phisClientListId = new() { Width = 140 };
+    private readonly Button _savePhisDb = new() { Text = "Save Db", AutoSize = true };
+    private bool _phisFieldsDirty;
+    private bool _bindingPhisFields;
+    private int? _phisFieldsContextId;
     private readonly ContextMenuStrip _reviewContextMenu = new();
     private Button _saveReview = null!;
     private Button _acceptMatch = null!;
@@ -130,7 +134,11 @@ public partial class CohortContextForm
         btn_CreatePhisCohort = new Button { Text = "Create PHIS Cohort", AutoSize = true, Enabled = false };
         btn_CreatePhisCohort.Click += btn_CreatePhisCohort_Click;
         phisFields.Controls.Add(btn_CreatePhisCohort);
-        phisFields.Controls.Add(new Label { Text = "Exports the resolved Client ID list. PHIS cohort creation integration is pending.", AutoSize = true });
+        phisFields.Controls.Add(_savePhisDb);
+        _savePhisDb.Click += async (_, _) => await SavePhisFieldsAsync();
+        foreach (var field in new[] { _phisListName, _phisCohortId, _phisClientListId })
+            field.TextChanged += (_, _) => { if (!_bindingPhisFields) _phisFieldsDirty = true; };
+        phisFields.Controls.Add(new Label { Text = "Creates or opens the cohort, uploads the full exported client list, and writes an admin summary. Save Db stores manual field edits.", AutoSize = true });
         phisGroup.Controls.Add(phisFields);
         layout.Controls.Add(phisGroup, 0, 4);
         _reviewTab.Controls.Add(layout);
@@ -185,9 +193,17 @@ public partial class CohortContextForm
         bool available = _hasSavedContext && !_formBusy && _activeContext is not null;
         _reviewTab.Enabled = available;
         _eligibilityTab.Enabled = available;
-        _phisListName.Text = _activeContext?.ClientListName ?? string.Empty;
-        _phisCohortId.Text = _activeContext?.PhisCohortId?.ToString() ?? string.Empty;
-        _phisClientListId.Text = _activeContext?.PhisClientListId?.ToString() ?? string.Empty;
+        if (!_phisFieldsDirty || _phisFieldsContextId != _activeContext?.CohortContextId)
+        {
+            _bindingPhisFields = true;
+            _phisListName.Text = _activeContext?.ClientListName ?? string.Empty;
+            _phisCohortId.Text = _activeContext?.PhisCohortId?.ToString() ?? string.Empty;
+            _phisClientListId.Text = _activeContext?.PhisClientListId?.ToString() ?? string.Empty;
+            _phisFieldsContextId = _activeContext?.CohortContextId;
+            _phisFieldsDirty = false;
+            _bindingPhisFields = false;
+        }
+        _savePhisDb.Enabled = available;
         if (_saveReview is null) return;
         _saveReview.Enabled = _acceptMatch.Enabled = _toggleExcluded.Enabled = available && _review is not null;
         _retryCacheSync.Enabled = available && _review is not null && _cacheSyncRetryAvailable;
@@ -273,6 +289,11 @@ public partial class CohortContextForm
 
     private async void btn_CreatePhisCohort_Click(object? sender, EventArgs e)
     {
+        if (_phisFieldsDirty)
+        {
+            MessageBox.Show(this, "Use Save Db to save the edited PHIS fields before continuing.", "Unsaved PHIS Fields");
+            return;
+        }
         if (_formBusy)
         {
             return;
@@ -392,6 +413,30 @@ public partial class CohortContextForm
             btn_CreatePhisCohort.Text = "Creating Static Cohort...";
             CohortCreationResult creationResult = await Task.Run(() => cohortService.CreateIfSearchReturnedNoResultsAsync(clientListName));
 
+            if (creationResult.PhisCohortId is int verifiedId)
+            {
+                if (_activeContext.PhisCohortId is int storedId && storedId != verifiedId)
+                    throw new InvalidOperationException("The found cohort ID differs from the saved cohort ID.");
+                if (creationResult.Status == CohortCreationStatus.ExistingResults)
+                    await Task.Run(() => cohortService.OpenExistingCohortAsync(verifiedId, clientListName));
+                await PersistPhisCohortIdAsync(verifiedId);
+                btn_CreatePhisCohort.Text = "Uploading Client List...";
+                var upload = await Task.Run(() => cohortService.UploadClientListAsync(verifiedId, clientListName, targetPath));
+                var updated = System.Text.Json.JsonSerializer.Deserialize<ConsentSync.Data.Entities.CohortContextEntity>(
+                    System.Text.Json.JsonSerializer.Serialize(_activeContext))!;
+                updated.PhisClientListId = upload.ClientListId;
+                await _dbManager!.SaveCohortContextAsync(updated);
+                _activeContext = updated;
+                _phisFieldsDirty = false;
+                UpdateReviewAvailability();
+                string reportPath = Path.Combine(Path.GetDirectoryName(targetPath)!, $"{clientListName}_PHIS_Admin_Summary_{DateTime.Now:yyyyMMdd_HHmmss_fff}.txt");
+                string report = PhisAdminSummary.Format(verifiedId, clientListName, upload, clientIds.Count);
+                await File.WriteAllTextAsync(reportPath, report, new UTF8Encoding(false));
+                LoggerService.LogInformation($"PHIS client list {upload.ClientListId} persisted; clients={upload.ClientCount}; summary={reportPath}");
+                MessageBox.Show(this, report + $"\nSummary file:\n{reportPath}", "PHIS Client List Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             string fileDetails = $"\n\nClient ID file:\n{targetPath}\n\nTotal Client IDs exported: {clientIds.Count}";
             switch (creationResult.Status)
             {
@@ -437,6 +482,51 @@ public partial class CohortContextForm
         }
     }
 
+    private async Task SavePhisFieldsAsync()
+    {
+        if (_formBusy || !_hasSavedContext || _activeContext is null || _dbManager is null) return;
+        try
+        {
+            string name = _phisListName.Text.Trim().ToUpperInvariant();
+            if (name.Length == 0 || name.Length > 240 || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.EndsWith('.') || name is "." or "..")
+                throw new InvalidOperationException("Enter a nonempty filename-safe Client List Name of at most 240 characters.");
+            static int? ParseId(string text)
+            {
+                if (string.IsNullOrWhiteSpace(text)) return null;
+                if (int.TryParse(text.Trim(), out int id) && id > 0) return id;
+                throw new InvalidOperationException("PHIS IDs must be blank or positive whole numbers.");
+            }
+            var updated = System.Text.Json.JsonSerializer.Deserialize<ConsentSync.Data.Entities.CohortContextEntity>(
+                System.Text.Json.JsonSerializer.Serialize(_activeContext))!;
+            updated.ClientListName = name;
+            updated.PhisCohortId = ParseId(_phisCohortId.Text);
+            updated.PhisClientListId = ParseId(_phisClientListId.Text);
+            bool renamed = name != _activeContext.ClientListName;
+            if (renamed && _reviewDirty)
+                throw new InvalidOperationException("Save the current review before changing Client List Name.");
+            SetFormEnabled(false);
+            await _dbManager.SaveCohortContextAsync(updated);
+            _activeContext = updated;
+            _phisFieldsDirty = false;
+            BindContext(updated);
+            if (renamed)
+            {
+                _review = null;
+                _reviewDirty = false;
+                RefreshReviewGrid();
+            }
+            await RefreshClientListSearchAsync(name);
+            LoggerService.LogInformation($"Saved manual PHIS fields for cohort context {updated.CohortContextId}.");
+            MessageBox.Show(this, renamed ? "Database updated. Existing files were not renamed. Load the review for the new list name before uploading." : "PHIS fields saved to the database.", "Save Db");
+        }
+        catch (Exception ex)
+        {
+            LoggerService.LogError("Saving manual PHIS fields failed.", ex);
+            MessageBox.Show(this, ex.Message, "Save Db Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally { SetFormEnabled(true); }
+    }
+
     private async Task PersistPhisCohortIdAsync(int phisCohortId)
     {
         if (_activeContext is null || _dbManager is null)
@@ -444,9 +534,12 @@ public partial class CohortContextForm
             throw new InvalidOperationException("The active cohort context is unavailable, so the PHIS Cohort ID cannot be saved.");
         }
 
-        _activeContext.PhisCohortId = phisCohortId;
-        await _dbManager.SaveCohortContextAsync(_activeContext);
-        _phisCohortId.Text = phisCohortId.ToString();
+        var updated = System.Text.Json.JsonSerializer.Deserialize<ConsentSync.Data.Entities.CohortContextEntity>(
+            System.Text.Json.JsonSerializer.Serialize(_activeContext))!;
+        updated.PhisCohortId = phisCohortId;
+        await _dbManager.SaveCohortContextAsync(updated);
+        _activeContext = updated;
+        _phisFieldsDirty = false;
         UpdateReviewAvailability();
         LoggerService.LogInformation($"Saved PHIS Cohort ID {phisCohortId} to cohort context {_activeContext.CohortContextId} ({_activeContext.ClientListName}).");
     }

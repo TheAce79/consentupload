@@ -521,6 +521,29 @@ public sealed class ConsentSyncDataTests : IDisposable
     }
 
     [Fact]
+    public async Task PhisIdentifiersAndManualName_RoundTripOnSameContext()
+    {
+        var manager = CreateManager();
+        var context = new CohortContextEntity
+        {
+            ClientListName = "ORIGINAL_LIST", Prefix = "CIP", Location = "MONCTON", Type = "SP",
+            Jurisdiction = "Jurisdiction", EncounterGroup = "Immunization", CohortDate = DateTime.Today
+        };
+        int id = await manager.SaveCohortContextAsync(context);
+        context.PhisCohortId = 24260;
+        await manager.SaveCohortContextAsync(context);
+        context.PhisClientListId = 24189;
+        context.ClientListName = "UPDATED_LIST";
+        await manager.SaveCohortContextAsync(context);
+        var loaded = await manager.GetCohortContextByListNameAsync("UPDATED_LIST");
+        Assert.NotNull(loaded);
+        Assert.Equal(id, loaded.CohortContextId);
+        Assert.Equal(24260, loaded.PhisCohortId);
+        Assert.Equal(24189, loaded.PhisClientListId);
+        Assert.Null(await manager.GetCohortContextByListNameAsync("ORIGINAL_LIST"));
+    }
+
+    [Fact]
     public async Task GetRecentSavedListsAsync_ReturnsInactiveContextInsideDateWindow()
     {
         var manager = CreateManager();
