@@ -234,9 +234,11 @@ public sealed class PhisCohortService
         if (!string.Equals(name.GetAttribute("value")?.Trim(), cohortName, StringComparison.Ordinal))
             throw new InvalidOperationException("PHIS cohort name could not be verified.");
 
-        SelectStaticCohortType(traceId);
         VerifyRequiredDefaults();
         SelectImmunizationEncounterGroup(traceId);
+        // The Encounter Group picklist refreshes the form and clears Cohort Type in PHIS.
+        // Select Static only after that AJAX update has finished so the value survives until Save.
+        SelectStaticCohortType(traceId);
     }
 
     private void SelectStaticCohortType(string traceId)
