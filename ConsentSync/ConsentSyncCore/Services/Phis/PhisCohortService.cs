@@ -217,8 +217,12 @@ public sealed class PhisCohortService
 
         string menuId = "maintainCohortForm:CohortType:selectOneMenu";
         ClickReliably(WaitForVisible(menuId));
-        IWebElement staticOption = _wait.Until(d => d.FindElements(By.XPath("//*[contains(@class, 'ui-selectonemenu-item') and (normalize-space(.)='Static' or @data-label='Static' or @data-value='STATIC')]") )
-            .SingleOrDefault(element => element.Displayed));
+        const string cohortTypeItemsId = "maintainCohortForm:CohortType:selectOneMenu_items";
+        IWebElement staticOption = _wait.Until(d => d.FindElements(By.Id(cohortTypeItemsId))
+            .SelectMany(items => items.FindElements(By.CssSelector(".ui-selectonemenu-item")))
+            .FirstOrDefault(element => element.Displayed &&
+                (string.Equals(element.Text.Trim(), "Static", StringComparison.Ordinal) ||
+                 string.Equals(element.GetAttribute("data-label"), "Static", StringComparison.Ordinal))));
         ClickReliably(staticOption);
         WaitForAjaxQueue();
         input = WaitForPresent(CohortTypeInputId);
