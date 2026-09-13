@@ -1,3 +1,5 @@
+using ConsentSync.Ui;
+
 namespace CohortUi;
 
 partial class CohortContextForm
@@ -17,7 +19,7 @@ partial class CohortContextForm
 
     private void InitializeComponent()
     {
-        grp_CohortContext = new GroupBox();
+        grp_CohortContext = new LavenderGroupBox();
         btn_LoadContext = new Button();
         cb_SearchClientListName = new ComboBox();
         lbl_SearchClientListName = new Label();
@@ -38,14 +40,14 @@ partial class CohortContextForm
         lbl_Location = new Label();
         cb_Prefix = new ComboBox();
         lbl_Prefix = new Label();
-        grp_PdfRosterExtraction = new GroupBox();
+        grp_PdfRosterExtraction = new LavenderGroupBox();
         btn_ExtractCsv = new Button();
-        grp_PhisSearch = new GroupBox();
+        grp_PhisSearch = new LavenderGroupBox();
         lbl_Phase2Status = new Label();
         lbl_Phase2Progress = new Label();
         pb_Phase2 = new ProgressBar();
         btn_SearchPhis = new Button();
-        grp_DebugLog = new GroupBox();
+        grp_DebugLog = new LavenderGroupBox();
         rtxt_Log = new RichTextBox();
         grp_CohortContext.SuspendLayout();
         grp_PdfRosterExtraction.SuspendLayout();
@@ -115,9 +117,9 @@ partial class CohortContextForm
         // 
         // btn_SaveCohortContext
         // 
-        btn_SaveCohortContext.BackColor = Color.SeaGreen;
+        btn_SaveCohortContext.BackColor = LavenderSlatePalette.Header;
         btn_SaveCohortContext.FlatStyle = FlatStyle.Flat;
-        btn_SaveCohortContext.ForeColor = Color.White;
+        btn_SaveCohortContext.ForeColor = LavenderSlatePalette.Slate;
         btn_SaveCohortContext.Location = new Point(160, 396);
         btn_SaveCohortContext.Name = "btn_SaveCohortContext";
         btn_SaveCohortContext.Size = new Size(180, 34);
@@ -350,11 +352,11 @@ partial class CohortContextForm
         // 
         // rtxt_Log
         // 
-        rtxt_Log.BackColor = Color.Black;
+        rtxt_Log.BackColor = LavenderSlatePalette.Card;
         rtxt_Log.BorderStyle = BorderStyle.FixedSingle;
         rtxt_Log.Dock = DockStyle.Fill;
         rtxt_Log.Font = new Font("Consolas", 9F);
-        rtxt_Log.ForeColor = Color.LimeGreen;
+        rtxt_Log.ForeColor = LavenderSlatePalette.Slate;
         rtxt_Log.Location = new Point(3, 23);
         rtxt_Log.Name = "rtxt_Log";
         rtxt_Log.ReadOnly = true;
@@ -388,8 +390,8 @@ partial class CohortContextForm
         ResumeLayout(false);
     }
 
-    private GroupBox grp_CohortContext;
-    private GroupBox grp_PdfRosterExtraction;
+    private LavenderGroupBox grp_CohortContext;
+    private LavenderGroupBox grp_PdfRosterExtraction;
     private Button btn_ExtractCsv;
     private ComboBox cb_SearchClientListName;
     private Label lbl_SearchClientListName;
@@ -411,11 +413,11 @@ partial class CohortContextForm
     private TextBox txt_StandardizedCsvName;
     private Label lbl_StandardizedCsvName;
     private Button btn_SaveCohortContext;
-    private GroupBox grp_PhisSearch;
+    private LavenderGroupBox grp_PhisSearch;
     private Button btn_SearchPhis;
     private ProgressBar pb_Phase2;
     private Label lbl_Phase2Progress;
     private Label lbl_Phase2Status;
-    private GroupBox grp_DebugLog;
+    private LavenderGroupBox grp_DebugLog;
     private RichTextBox rtxt_Log;
 }

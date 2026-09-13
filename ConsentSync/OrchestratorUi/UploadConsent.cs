@@ -24,6 +24,7 @@ using static Orchestrator.Phase3.Phase3Orchestrator;
 using Keys = System.Windows.Forms.Keys;
 // ✅ Resolve ambiguous references explicitly
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
+using ConsentSync.Ui;
 
 namespace OrchestratorUi
 {
@@ -48,6 +49,7 @@ namespace OrchestratorUi
         public UploadConsent()
         {
             InitializeComponent();
+            LavenderSlateTheme.Apply(this);
             LoggerService.LogMessage += OnLogMessage;
             LoadConfiguration();
         }
@@ -59,10 +61,10 @@ namespace OrchestratorUi
             {
                 Color color = e.Level switch
                 {
-                    LogLevel.Error or LogLevel.Critical => Color.Red,
-                    LogLevel.Warning => Color.Yellow,
-                    LogLevel.Debug => Color.Gray,
-                    _ => Color.LimeGreen
+                    LogLevel.Error or LogLevel.Critical => LavenderSlatePalette.Error,
+                    LogLevel.Warning => LavenderSlatePalette.Warning,
+                    LogLevel.Debug => LavenderSlatePalette.MutedText,
+                    _ => LavenderSlatePalette.Slate
                 };
 
                 rtxt_Log.SelectionStart = rtxt_Log.TextLength;
@@ -124,7 +126,7 @@ namespace OrchestratorUi
             pb_Phase1.Maximum = phisConfig.BatchSize > 0 ? phisConfig.BatchSize : 100;
             pb_Phase1.Value = 0;
             lbl_Phase1Progress.Text = "Initialising…";
-            lbl_Phase1Progress.ForeColor = Color.FromArgb(0, 90, 160);
+            lbl_Phase1Progress.ForeColor = LavenderSlatePalette.Slate;
 
             try
             {
@@ -141,7 +143,7 @@ namespace OrchestratorUi
                 if (!PreFlightChecks())
                 {
                     lbl_Phase1Progress.Text = "";   // ✅ clear on early exit
-                    lbl_Phase1Progress.ForeColor = Color.FromArgb(0, 90, 160);
+                    lbl_Phase1Progress.ForeColor = LavenderSlatePalette.Slate;
                     return;
                 }
 
@@ -161,8 +163,8 @@ namespace OrchestratorUi
 
                         lbl_Phase1Progress.Text = $"{p.Current} / {p.Total}  —  {p.StudentName}";
                         lbl_Phase1Progress.ForeColor = p.IsFound
-                            ? Color.DarkGreen
-                            : Color.DarkOrange;
+                            ? LavenderSlatePalette.Success
+                            : LavenderSlatePalette.Warning;
                     });
                 });
 
@@ -313,12 +315,12 @@ namespace OrchestratorUi
                     if (pb_Phase1.Value > 0 && pb_Phase1.Value == pb_Phase1.Maximum)
                     {
                         lbl_Phase1Progress.Text = $"✅ Batch complete — {pb_Phase1.Maximum} / {pb_Phase1.Maximum}";
-                        lbl_Phase1Progress.ForeColor = Color.DarkGreen;
+                        lbl_Phase1Progress.ForeColor = LavenderSlatePalette.Success;
                     }
                     else if (pb_Phase1.Value == 0)
                     {
                         lbl_Phase1Progress.Text = "";
-                        lbl_Phase1Progress.ForeColor = Color.FromArgb(0, 90, 160);
+                        lbl_Phase1Progress.ForeColor = LavenderSlatePalette.Slate;
                     }
                     // else: keep last student name shown (mid-batch stop)
                 });
@@ -814,7 +816,7 @@ namespace OrchestratorUi
                 var check = new ChromeDriverFactory().VerifyVersionMatch();
                 bool matched = check.IsReady;
                 btn_PortableChrome.Text = matched ? "✅ Driver Up-to-Date" : "🔄 Update ChromeDriver";
-                btn_PortableChrome.BackColor = matched ? Color.DarkGreen : Color.DarkOrange;
+                btn_PortableChrome.BackColor = matched ? LavenderSlatePalette.Success : LavenderSlatePalette.Warning;
                 btn_PortableChrome.Enabled = true;
             }
             else
@@ -822,7 +824,7 @@ namespace OrchestratorUi
                 // Portable Chrome mode — button downloads CfT
                 bool exists = File.Exists(chromeConfig.PortableChromePath);
                 btn_PortableChrome.Text = exists ? "✅ Chrome Ready" : "🌐 Download Portable Chrome";
-                btn_PortableChrome.BackColor = exists ? Color.DarkGreen : Color.SteelBlue;
+                btn_PortableChrome.BackColor = exists ? LavenderSlatePalette.Success : LavenderSlatePalette.Header;
                 btn_PortableChrome.Enabled = true;
             }
         }
@@ -1740,7 +1742,7 @@ namespace OrchestratorUi
             pb_Phase3.Maximum = phisConfig.BatchSize > 0 ? phisConfig.BatchSize : 100;
             pb_Phase3.Value = 0;
             lbl_Phase3Progress.Text = "Initialising…";
-            lbl_Phase3Progress.ForeColor = Color.FromArgb(140, 30, 30);
+            lbl_Phase3Progress.ForeColor = LavenderSlatePalette.Error;
 
             try
             {
@@ -1798,7 +1800,7 @@ namespace OrchestratorUi
                         pb_Phase3.Value = Math.Min(p.Current, p.Total);
                         string icon = p.IsFeuilleRose ? "🌹" : "📋";
                         lbl_Phase3Progress.Text = $"{p.Current} / {p.Total}  {icon}  {p.StudentName}";
-                        lbl_Phase3Progress.ForeColor = p.IsSuccess ? Color.DarkGreen : Color.DarkOrange;
+                        lbl_Phase3Progress.ForeColor = p.IsSuccess ? LavenderSlatePalette.Success : LavenderSlatePalette.Warning;
                     });
                 });
 
@@ -1895,7 +1897,7 @@ namespace OrchestratorUi
                     if (pb_Phase3.Value > 0 && pb_Phase3.Value == pb_Phase3.Maximum)
                     {
                         lbl_Phase3Progress.Text = $"✅ Batch complete — {pb_Phase3.Maximum} / {pb_Phase3.Maximum}";
-                        lbl_Phase3Progress.ForeColor = Color.DarkGreen;
+                        lbl_Phase3Progress.ForeColor = LavenderSlatePalette.Success;
                     }
                     else if (pb_Phase3.Value == 0)
                     {

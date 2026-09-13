@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 
 namespace ConsentSync.Ui;
@@ -20,6 +21,7 @@ public static class LavenderSlatePalette
     public static readonly Color Gridline = Color.FromArgb(0xF0, 0xEC, 0xF7);
     public static readonly Color Warning = Color.FromArgb(0x8A, 0x5A, 0x00);
     public static readonly Color Error = Color.FromArgb(0x9B, 0x24, 0x2D);
+    public static readonly Color Success = Color.FromArgb(0x2E, 0x6B, 0x4C);
 }
 
 public enum LavenderButtonKind { Secondary, Primary }
@@ -28,6 +30,8 @@ public sealed class LavenderCardPanel : Panel
 {
     public LavenderCardPanel()
     {
+        DoubleBuffered = true;
+        ResizeRedraw = true;
         BackColor = LavenderSlatePalette.Card;
         Padding = new Padding(12);
         Margin = new Padding(0);
@@ -42,7 +46,7 @@ public sealed class LavenderCardPanel : Panel
         e.Graphics.DrawPath(pen, path);
     }
 
-    private static GraphicsPath RoundedRectangle(Rectangle bounds, int radius)
+    internal static GraphicsPath RoundedRectangle(Rectangle bounds, int radius)
     {
         int diameter = radius * 2;
         var path = new GraphicsPath();
@@ -52,6 +56,109 @@ public sealed class LavenderCardPanel : Panel
         path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
         path.CloseFigure();
         return path;
+    }
+}
+
+public sealed class LavenderGroupBox : GroupBox
+{
+    private const int ContentGap = 8;
+    private int _headerTop = 3;
+
+    public LavenderGroupBox()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                 ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        BackColor = LavenderSlatePalette.Card;
+        ForeColor = LavenderSlatePalette.Slate;
+        UpdateHeaderPadding();
+    }
+
+    [DefaultValue(3)]
+    public int HeaderTop
+    {
+        get => _headerTop;
+        set
+        {
+            _headerTop = Math.Max(0, value);
+            UpdateHeaderPadding();
+            Invalidate();
+        }
+    }
+
+    public void ApplyExpandedHeaderLayout()
+    {
+        int contentTop = Padding.Top;
+        int firstChildTop = Controls.Cast<Control>()
+            .Where(control => control.Dock == DockStyle.None)
+            .Select(control => control.Top)
+            .DefaultIfEmpty(contentTop)
+            .Min();
+        int offset = Math.Max(0, contentTop - firstChildTop);
+        if (offset == 0) return;
+
+        foreach (Control control in Controls)
+            if (control.Dock == DockStyle.None)
+                control.Top += offset;
+        Height += offset;
+    }
+
+    protected override void OnFontChanged(EventArgs e)
+    {
+        base.OnFontChanged(e);
+        UpdateHeaderPadding();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        e.Graphics.Clear(BackColor);
+
+        int titleHeight = Font.Height;
+        int borderTop = HeaderTop + titleHeight / 2;
+        var borderBounds = new Rectangle(0, borderTop, Math.Max(0, Width - 1), Math.Max(0, Height - borderTop - 1));
+        if (borderBounds.Width > 1 && borderBounds.Height > 1)
+        {
+            using var path = LavenderCardPanel.RoundedRectangle(borderBounds, 4);
+            using var pen = new Pen(LavenderSlatePalette.Border);
+            e.Graphics.DrawPath(pen, path);
+        }
+
+        if (!string.IsNullOrWhiteSpace(Text))
+        {
+            var titleBounds = new Rectangle(12, HeaderTop, Math.Max(0, Width - 24), titleHeight);
+            TextRenderer.DrawText(e.Graphics, Text, Font, titleBounds, ForeColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    private void UpdateHeaderPadding() =>
+        Padding = new Padding(12, HeaderTop + Font.Height + ContentGap, 12, 12);
+}
+
+public sealed class LavenderTableLayoutPanel : TableLayoutPanel
+{
+    public LavenderTableLayoutPanel()
+    {
+        DoubleBuffered = true;
+        ResizeRedraw = true;
+    }
+}
+
+public sealed class LavenderFlowLayoutPanel : FlowLayoutPanel
+{
+    public LavenderFlowLayoutPanel()
+    {
+        DoubleBuffered = true;
+        ResizeRedraw = true;
+    }
+}
+
+public sealed class LavenderDataGridView : DataGridView
+{
+    public LavenderDataGridView()
+    {
+        DoubleBuffered = true;
+        ResizeRedraw = true;
     }
 }
 
@@ -139,7 +246,9 @@ public static class LavenderSlateTheme
                     page.ForeColor = LavenderSlatePalette.Slate;
                     break;
                 case Panel panel when panel is not LavenderCardPanel:
-                    panel.BackColor = LavenderSlatePalette.Window;
+                    panel.BackColor = panel.Parent is LavenderCardPanel or LavenderGroupBox
+                        ? LavenderSlatePalette.Card
+                        : LavenderSlatePalette.Window;
                     break;
             }
             ApplyControls(control.Controls);
@@ -177,7 +286,7 @@ public static class LavenderSlateTheme
         grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
         {
             BackColor = LavenderSlatePalette.Header, ForeColor = LavenderSlatePalette.Slate,
-            Font = new Font("Segoe UI", 9F, FontStyle.Bold), SelectionBackColor = LavenderSlatePalette.Header,
+            Font = new Font("Segoe UI Semibold", 9F, FontStyle.Regular), SelectionBackColor = LavenderSlatePalette.Header,
             SelectionForeColor = LavenderSlatePalette.Slate, Alignment = DataGridViewContentAlignment.MiddleLeft
         };
         grid.RowsDefaultCellStyle.BackColor = LavenderSlatePalette.Card;
@@ -185,6 +294,8 @@ public static class LavenderSlateTheme
         grid.AlternatingRowsDefaultCellStyle.BackColor = LavenderSlatePalette.AlternateRow;
         grid.DefaultCellStyle.SelectionBackColor = LavenderSlatePalette.Selection;
         grid.DefaultCellStyle.SelectionForeColor = Color.White;
+        grid.RowsDefaultCellStyle.SelectionBackColor = LavenderSlatePalette.Selection;
+        grid.RowsDefaultCellStyle.SelectionForeColor = Color.White;
         grid.AlternatingRowsDefaultCellStyle.SelectionBackColor = LavenderSlatePalette.Selection;
         grid.AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
         grid.RowTemplate.Height = Math.Max(grid.RowTemplate.Height, 30);
@@ -194,17 +305,6 @@ public static class LavenderSlateTheme
     {
         group.BackColor = LavenderSlatePalette.Card;
         group.ForeColor = LavenderSlatePalette.Slate;
-        group.Padding = new Padding(12, 26, 12, 12);
-        group.Paint -= GroupPaint;
-        group.Paint += GroupPaint;
-    }
-
-    private static void GroupPaint(object? sender, PaintEventArgs e)
-    {
-        if (sender is not GroupBox group) return;
-        var bounds = new Rectangle(0, group.Font.Height / 2, group.Width - 1, group.Height - group.Font.Height / 2 - 1);
-        using var pen = new Pen(LavenderSlatePalette.Border);
-        e.Graphics.DrawRectangle(pen, bounds);
     }
 
     private static void ButtonMouseEnter(object? sender, EventArgs e)

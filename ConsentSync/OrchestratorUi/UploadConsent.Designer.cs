@@ -1,4 +1,6 @@
 ﻿
+using ConsentSync.Ui;
+
 namespace OrchestratorUi
 {
     partial class UploadConsent
@@ -32,7 +34,7 @@ namespace OrchestratorUi
             lbl_OriginalDigitalConsentCount = new Label();
             lbl_ExpectedManualConsentCount = new Label();
             lbl_ExpectedFileRoseCount = new Label();
-            grpConfig = new GroupBox();
+            grpConfig = new LavenderGroupBox();
             cb_Grade = new ComboBox();
             lb_Grade = new Label();
             txt_SchoolName = new TextBox();
@@ -44,20 +46,20 @@ namespace OrchestratorUi
             bt_ScanPdf = new Button();
             rtxt_Log = new RichTextBox();
             folderBrowserDialog1 = new FolderBrowserDialog();
-            gb_Normalise = new GroupBox();
+            gb_Normalise = new LavenderGroupBox();
             btn_ExtractBulk = new Button();
             btn_ProcessCsv = new Button();
-            gb_Phase1 = new GroupBox();
+            gb_Phase1 = new LavenderGroupBox();
             btn_ExportMassImms = new Button();
             bt_SearchClientId = new Button();
             pb_Phase1 = new ProgressBar();
             lbl_Phase1Progress = new Label();
-            gb_PreUpload = new GroupBox();
-            gb_UploadPhis = new GroupBox();
+            gb_PreUpload = new LavenderGroupBox();
+            gb_UploadPhis = new LavenderGroupBox();
             pb_Phase3 = new ProgressBar();
             lbl_Phase3Progress = new Label();
-            grp_Phase4Auditing = new GroupBox();
-            groupBox1 = new GroupBox();
+            grp_Phase4Auditing = new LavenderGroupBox();
+            groupBox1 = new LavenderGroupBox();
             btn_PortableChrome = new Button();
             lb_Dir = new Label();
             txt_BaseDir = new TextBox();
@@ -77,11 +79,11 @@ namespace OrchestratorUi
             // 
             // bt_ValidatePdf
             // 
-            bt_ValidatePdf.BackColor = Color.FromArgb(30, 110, 180);
-            bt_ValidatePdf.FlatAppearance.BorderColor = Color.FromArgb(20, 80, 140);
+            bt_ValidatePdf.BackColor = LavenderSlatePalette.Header;
+            bt_ValidatePdf.FlatAppearance.BorderColor = LavenderSlatePalette.Border;
             bt_ValidatePdf.FlatStyle = FlatStyle.Flat;
             bt_ValidatePdf.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            bt_ValidatePdf.ForeColor = Color.White;
+            bt_ValidatePdf.ForeColor = LavenderSlatePalette.Slate;
             bt_ValidatePdf.Location = new Point(12, 60);
             bt_ValidatePdf.Name = "bt_ValidatePdf";
             bt_ValidatePdf.Size = new Size(270, 38);
@@ -93,11 +95,11 @@ namespace OrchestratorUi
             // 
             // bt_GenerateCsv
             // 
-            bt_GenerateCsv.BackColor = Color.FromArgb(0, 130, 100);
-            bt_GenerateCsv.FlatAppearance.BorderColor = Color.FromArgb(0, 100, 75);
+            bt_GenerateCsv.BackColor = LavenderSlatePalette.Header;
+            bt_GenerateCsv.FlatAppearance.BorderColor = LavenderSlatePalette.Border;
             bt_GenerateCsv.FlatStyle = FlatStyle.Flat;
             bt_GenerateCsv.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            bt_GenerateCsv.ForeColor = Color.White;
+            bt_GenerateCsv.ForeColor = LavenderSlatePalette.Slate;
             bt_GenerateCsv.Location = new Point(12, 175);
             bt_GenerateCsv.Name = "bt_GenerateCsv";
             bt_GenerateCsv.Size = new Size(270, 38);
@@ -109,11 +111,11 @@ namespace OrchestratorUi
             // 
             // bt_Upload
             // 
-            bt_Upload.BackColor = Color.FromArgb(140, 30, 30);
-            bt_Upload.FlatAppearance.BorderColor = Color.FromArgb(100, 20, 20);
+            bt_Upload.BackColor = LavenderSlatePalette.Header;
+            bt_Upload.FlatAppearance.BorderColor = LavenderSlatePalette.Border;
             bt_Upload.FlatStyle = FlatStyle.Flat;
             bt_Upload.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            bt_Upload.ForeColor = Color.White;
+            bt_Upload.ForeColor = LavenderSlatePalette.Slate;
             bt_Upload.Location = new Point(12, 60);
             bt_Upload.Name = "bt_Upload";
             bt_Upload.Size = new Size(275, 41);
@@ -125,11 +127,11 @@ namespace OrchestratorUi
             // 
             // bt_AppendFileRose
             // 
-            bt_AppendFileRose.BackColor = Color.FromArgb(130, 60, 160);
-            bt_AppendFileRose.FlatAppearance.BorderColor = Color.FromArgb(100, 40, 130);
+            bt_AppendFileRose.BackColor = LavenderSlatePalette.Header;
+            bt_AppendFileRose.FlatAppearance.BorderColor = LavenderSlatePalette.Border;
             bt_AppendFileRose.FlatStyle = FlatStyle.Flat;
             bt_AppendFileRose.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            bt_AppendFileRose.ForeColor = Color.White;
+            bt_AppendFileRose.ForeColor = LavenderSlatePalette.Slate;
             bt_AppendFileRose.Location = new Point(12, 231);
             bt_AppendFileRose.Name = "bt_AppendFileRose";
             bt_AppendFileRose.Size = new Size(270, 38);
@@ -141,11 +143,11 @@ namespace OrchestratorUi
             // 
             // btn_ClientIdentityPreAudit
             // 
-            btn_ClientIdentityPreAudit.BackColor = Color.FromArgb(50, 110, 85);
-            btn_ClientIdentityPreAudit.FlatAppearance.BorderColor = Color.FromArgb(35, 80, 60);
+            btn_ClientIdentityPreAudit.BackColor = LavenderSlatePalette.Header;
+            btn_ClientIdentityPreAudit.FlatAppearance.BorderColor = LavenderSlatePalette.Border;
             btn_ClientIdentityPreAudit.FlatStyle = FlatStyle.Flat;
             btn_ClientIdentityPreAudit.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            btn_ClientIdentityPreAudit.ForeColor = Color.White;
+            btn_ClientIdentityPreAudit.ForeColor = LavenderSlatePalette.Slate;
             btn_ClientIdentityPreAudit.Location = new Point(12, 45);
             btn_ClientIdentityPreAudit.Name = "btn_ClientIdentityPreAudit";
             btn_ClientIdentityPreAudit.Size = new Size(292, 43);
@@ -157,11 +159,11 @@ namespace OrchestratorUi
             // 
             // btn_DocumentReconciliationAudit
             // 
-            btn_DocumentReconciliationAudit.BackColor = Color.FromArgb(50, 110, 85);
-            btn_DocumentReconciliationAudit.FlatAppearance.BorderColor = Color.FromArgb(35, 80, 60);
+            btn_DocumentReconciliationAudit.BackColor = LavenderSlatePalette.Header;
+            btn_DocumentReconciliationAudit.FlatAppearance.BorderColor = LavenderSlatePalette.Border;
             btn_DocumentReconciliationAudit.FlatStyle = FlatStyle.Flat;
             btn_DocumentReconciliationAudit.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            btn_DocumentReconciliationAudit.ForeColor = Color.White;
+            btn_DocumentReconciliationAudit.ForeColor = LavenderSlatePalette.Slate;
             btn_DocumentReconciliationAudit.Location = new Point(6, 176);
             btn_DocumentReconciliationAudit.Name = "btn_DocumentReconciliationAudit";
             btn_DocumentReconciliationAudit.Size = new Size(310, 43);
@@ -173,11 +175,11 @@ namespace OrchestratorUi
             //
             // btn_VerifyDocumentsOnPhis
             //
-            btn_VerifyDocumentsOnPhis.BackColor = Color.FromArgb(50, 110, 85);
-            btn_VerifyDocumentsOnPhis.FlatAppearance.BorderColor = Color.FromArgb(35, 80, 60);
+            btn_VerifyDocumentsOnPhis.BackColor = LavenderSlatePalette.Header;
+            btn_VerifyDocumentsOnPhis.FlatAppearance.BorderColor = LavenderSlatePalette.Border;
             btn_VerifyDocumentsOnPhis.FlatStyle = FlatStyle.Flat;
             btn_VerifyDocumentsOnPhis.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            btn_VerifyDocumentsOnPhis.ForeColor = Color.White;
+            btn_VerifyDocumentsOnPhis.ForeColor = LavenderSlatePalette.Slate;
             btn_VerifyDocumentsOnPhis.Location = new Point(6, 225);
             btn_VerifyDocumentsOnPhis.Name = "btn_VerifyDocumentsOnPhis";
             btn_VerifyDocumentsOnPhis.Size = new Size(310, 34);
@@ -307,9 +309,9 @@ namespace OrchestratorUi
             // 
             // bt_Save
             // 
-            bt_Save.BackColor = Color.SeaGreen;
+            bt_Save.BackColor = LavenderSlatePalette.Header;
             bt_Save.FlatStyle = FlatStyle.Flat;
-            bt_Save.ForeColor = Color.White;
+            bt_Save.ForeColor = LavenderSlatePalette.Slate;
             bt_Save.Location = new Point(56, 360);
             bt_Save.Name = "bt_Save";
             bt_Save.Size = new Size(126, 32);
@@ -320,9 +322,9 @@ namespace OrchestratorUi
             // 
             // bt_ScanPdfOcr
             // 
-            bt_ScanPdfOcr.BackColor = Color.SeaGreen;
+            bt_ScanPdfOcr.BackColor = LavenderSlatePalette.Header;
             bt_ScanPdfOcr.FlatStyle = FlatStyle.Flat;
-            bt_ScanPdfOcr.ForeColor = Color.White;
+            bt_ScanPdfOcr.ForeColor = LavenderSlatePalette.Slate;
             bt_ScanPdfOcr.Location = new Point(203, 357);
             bt_ScanPdfOcr.Name = "bt_ScanPdfOcr";
             bt_ScanPdfOcr.Size = new Size(202, 35);
@@ -333,9 +335,9 @@ namespace OrchestratorUi
             // 
             // bt_ScanPdf
             // 
-            bt_ScanPdf.BackColor = Color.SeaGreen;
+            bt_ScanPdf.BackColor = LavenderSlatePalette.Header;
             bt_ScanPdf.FlatStyle = FlatStyle.Flat;
-            bt_ScanPdf.ForeColor = Color.White;
+            bt_ScanPdf.ForeColor = LavenderSlatePalette.Slate;
             bt_ScanPdf.Location = new Point(12, 117);
             bt_ScanPdf.Name = "bt_ScanPdf";
             bt_ScanPdf.Size = new Size(270, 35);
@@ -346,9 +348,9 @@ namespace OrchestratorUi
             // 
             // rtxt_Log
             // 
-            rtxt_Log.BackColor = Color.Black;
+            rtxt_Log.BackColor = LavenderSlatePalette.Card;
             rtxt_Log.Font = new Font("Consolas", 9F);
-            rtxt_Log.ForeColor = Color.LimeGreen;
+            rtxt_Log.ForeColor = LavenderSlatePalette.Slate;
             rtxt_Log.Location = new Point(12, 584);
             rtxt_Log.Name = "rtxt_Log";
             rtxt_Log.ReadOnly = true;
@@ -370,9 +372,9 @@ namespace OrchestratorUi
             // 
             // btn_ExtractBulk
             // 
-            btn_ExtractBulk.BackColor = Color.DarkOrange;
+            btn_ExtractBulk.BackColor = LavenderSlatePalette.Header;
             btn_ExtractBulk.FlatStyle = FlatStyle.Flat;
-            btn_ExtractBulk.ForeColor = Color.White;
+            btn_ExtractBulk.ForeColor = LavenderSlatePalette.Slate;
             btn_ExtractBulk.Location = new Point(12, 28);
             btn_ExtractBulk.Name = "btn_ExtractBulk";
             btn_ExtractBulk.Size = new Size(254, 34);
@@ -383,9 +385,9 @@ namespace OrchestratorUi
             // 
             // btn_ProcessCsv
             // 
-            btn_ProcessCsv.BackColor = Color.Teal;
+            btn_ProcessCsv.BackColor = LavenderSlatePalette.Header;
             btn_ProcessCsv.FlatStyle = FlatStyle.Flat;
-            btn_ProcessCsv.ForeColor = Color.White;
+            btn_ProcessCsv.ForeColor = LavenderSlatePalette.Slate;
             btn_ProcessCsv.Location = new Point(12, 70);
             btn_ProcessCsv.Name = "btn_ProcessCsv";
             btn_ProcessCsv.Size = new Size(254, 34);
@@ -409,11 +411,11 @@ namespace OrchestratorUi
             // 
             // btn_ExportMassImms
             // 
-            btn_ExportMassImms.BackColor = Color.DarkSlateBlue;
-            btn_ExportMassImms.FlatAppearance.BorderColor = Color.FromArgb(48, 60, 120);
+            btn_ExportMassImms.BackColor = LavenderSlatePalette.Header;
+            btn_ExportMassImms.FlatAppearance.BorderColor = LavenderSlatePalette.Border;
             btn_ExportMassImms.FlatStyle = FlatStyle.Flat;
             btn_ExportMassImms.Font = new Font("Segoe UI", 8.25F, FontStyle.Bold);
-            btn_ExportMassImms.ForeColor = Color.White;
+            btn_ExportMassImms.ForeColor = LavenderSlatePalette.Slate;
             btn_ExportMassImms.Location = new Point(12, 28);
             btn_ExportMassImms.Name = "btn_ExportMassImms";
             btn_ExportMassImms.Size = new Size(146, 38);
@@ -424,11 +426,11 @@ namespace OrchestratorUi
             // 
             // bt_SearchClientId
             // 
-            bt_SearchClientId.BackColor = Color.FromArgb(0, 90, 160);
-            bt_SearchClientId.FlatAppearance.BorderColor = Color.FromArgb(0, 60, 120);
+            bt_SearchClientId.BackColor = LavenderSlatePalette.Header;
+            bt_SearchClientId.FlatAppearance.BorderColor = LavenderSlatePalette.Border;
             bt_SearchClientId.FlatStyle = FlatStyle.Flat;
             bt_SearchClientId.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            bt_SearchClientId.ForeColor = Color.White;
+            bt_SearchClientId.ForeColor = LavenderSlatePalette.Slate;
             bt_SearchClientId.Location = new Point(164, 28);
             bt_SearchClientId.Name = "bt_SearchClientId";
             bt_SearchClientId.Size = new Size(140, 38);
@@ -448,7 +450,7 @@ namespace OrchestratorUi
             // lbl_Phase1Progress
             // 
             lbl_Phase1Progress.Font = new Font("Segoe UI", 8F);
-            lbl_Phase1Progress.ForeColor = Color.FromArgb(0, 90, 160);
+            lbl_Phase1Progress.ForeColor = LavenderSlatePalette.Slate;
             lbl_Phase1Progress.Location = new Point(12, 94);
             lbl_Phase1Progress.Name = "lbl_Phase1Progress";
             lbl_Phase1Progress.Size = new Size(292, 18);
@@ -491,7 +493,7 @@ namespace OrchestratorUi
             // lbl_Phase3Progress
             // 
             lbl_Phase3Progress.Font = new Font("Segoe UI", 8F);
-            lbl_Phase3Progress.ForeColor = Color.FromArgb(140, 30, 30);
+            lbl_Phase3Progress.ForeColor = LavenderSlatePalette.Error;
             lbl_Phase3Progress.Location = new Point(12, 136);
             lbl_Phase3Progress.Name = "lbl_Phase3Progress";
             lbl_Phase3Progress.Size = new Size(228, 24);
@@ -531,9 +533,9 @@ namespace OrchestratorUi
             // 
             // btn_PortableChrome
             // 
-            btn_PortableChrome.BackColor = Color.SteelBlue;
+            btn_PortableChrome.BackColor = LavenderSlatePalette.Header;
             btn_PortableChrome.FlatStyle = FlatStyle.Flat;
-            btn_PortableChrome.ForeColor = Color.White;
+            btn_PortableChrome.ForeColor = LavenderSlatePalette.Slate;
             btn_PortableChrome.Location = new Point(87, 80);
             btn_PortableChrome.Name = "btn_PortableChrome";
             btn_PortableChrome.Size = new Size(126, 32);
@@ -571,11 +573,11 @@ namespace OrchestratorUi
             // 
             // bt_PdfMerge
             // 
-            bt_PdfMerge.BackColor = Color.FromArgb(70, 100, 140);
-            bt_PdfMerge.FlatAppearance.BorderColor = Color.FromArgb(50, 75, 110);
+            bt_PdfMerge.BackColor = LavenderSlatePalette.Header;
+            bt_PdfMerge.FlatAppearance.BorderColor = LavenderSlatePalette.Border;
             bt_PdfMerge.FlatStyle = FlatStyle.Flat;
             bt_PdfMerge.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            bt_PdfMerge.ForeColor = Color.White;
+            bt_PdfMerge.ForeColor = LavenderSlatePalette.Slate;
             bt_PdfMerge.Location = new Point(203, 403);
             bt_PdfMerge.Name = "bt_PdfMerge";
             bt_PdfMerge.Size = new Size(141, 32);
@@ -594,11 +596,11 @@ namespace OrchestratorUi
             // 
             // bt_PdfSplit
             // 
-            bt_PdfSplit.BackColor = Color.FromArgb(70, 100, 140);
-            bt_PdfSplit.FlatAppearance.BorderColor = Color.FromArgb(50, 75, 110);
+            bt_PdfSplit.BackColor = LavenderSlatePalette.Header;
+            bt_PdfSplit.FlatAppearance.BorderColor = LavenderSlatePalette.Border;
             bt_PdfSplit.FlatStyle = FlatStyle.Flat;
             bt_PdfSplit.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            bt_PdfSplit.ForeColor = Color.White;
+            bt_PdfSplit.ForeColor = LavenderSlatePalette.Slate;
             bt_PdfSplit.Location = new Point(203, 441);
             bt_PdfSplit.Name = "bt_PdfSplit";
             bt_PdfSplit.Size = new Size(141, 32);
@@ -652,7 +654,7 @@ namespace OrchestratorUi
 
         #endregion
 
-        private GroupBox grpConfig;
+        private LavenderGroupBox grpConfig;
         private Label label1;
         private TextBox txtBox_BatchSize;
         private TextBox txt_SchoolName;
@@ -661,20 +663,20 @@ namespace OrchestratorUi
         private ComboBox cb_Grade;
         private RichTextBox rtxt_Log;
         private FolderBrowserDialog folderBrowserDialog1;
-        private GroupBox gb_Normalise;
+        private LavenderGroupBox gb_Normalise;
         private Button btn_ExtractBulk;
         private Button btn_ProcessCsv;
-        private GroupBox gb_Phase1;
+        private LavenderGroupBox gb_Phase1;
         private Button btn_ExportMassImms;
         private Button bt_SearchClientId;
         private ProgressBar pb_Phase1;
         private Label lbl_Phase1Progress;
-        private GroupBox gb_PreUpload;
+        private LavenderGroupBox gb_PreUpload;
         private Button bt_ValidatePdf;
         private Button bt_GenerateCsv;
         private ToolTip toolTip1;
-        private GroupBox gb_UploadPhis;
-        private GroupBox grp_Phase4Auditing;
+        private LavenderGroupBox gb_UploadPhis;
+        private LavenderGroupBox grp_Phase4Auditing;
         private Button btn_ClientIdentityPreAudit;
         private Button btn_DocumentReconciliationAudit;
         private Button btn_VerifyDocumentsOnPhis;
@@ -690,7 +692,7 @@ namespace OrchestratorUi
         private Label lbl_Phase3Progress;
         private Button bt_ScanPdf;
         private Button bt_ScanPdfOcr;
-        private GroupBox groupBox1;
+        private LavenderGroupBox groupBox1;
         private Button bt_Save;
         private Button btn_PortableChrome;
         private Label lb_Dir;

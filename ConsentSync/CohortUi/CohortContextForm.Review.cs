@@ -17,7 +17,7 @@ public partial class CohortContextForm
     private readonly LavenderTabControl _workflowTabs = new() { Dock = DockStyle.Fill };
     private readonly TabPage _reviewTab = new("Data Review & Manual Fixes");
     private readonly TabPage _eligibilityTab = new("Final Output & Eligibility");
-    private readonly DataGridView _reviewGrid = new()
+    private readonly LavenderDataGridView _reviewGrid = new()
     {
         Dock = DockStyle.Fill, AutoGenerateColumns = false, AllowUserToAddRows = false,
         AllowUserToDeleteRows = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect,
@@ -52,8 +52,37 @@ public partial class CohortContextForm
     private void InitializeWorkflowTabs()
     {
         var setup = new TabPage("Setup & PHIS Search") { AutoScroll = true };
-        setup.Controls.AddRange([grp_CohortContext, grp_PdfRosterExtraction, grp_PhisSearch, grp_DebugLog]);
-        grp_DebugLog.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+        var setupStack = new LavenderTableLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            RowCount = 4,
+            Dock = DockStyle.Top,
+            Padding = new Padding(12),
+            BackColor = LavenderSlatePalette.Window
+        };
+        setupStack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        for (int row = 0; row < 4; row++)
+            setupStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        foreach (var card in new[] { grp_CohortContext, grp_PdfRosterExtraction, grp_PhisSearch, grp_DebugLog })
+        {
+            card.HeaderTop = 16;
+            card.ApplyExpandedHeaderLayout();
+            card.Dock = DockStyle.Fill;
+            card.Margin = new Padding(0, 0, 0, 8);
+        }
+        grp_DebugLog.Margin = Padding.Empty;
+        grp_DebugLog.MinimumSize = new Size(0, 294);
+        grp_DebugLog.Height = 294;
+        setupStack.Controls.Add(grp_CohortContext, 0, 0);
+        setupStack.Controls.Add(grp_PdfRosterExtraction, 0, 1);
+        setupStack.Controls.Add(grp_PhisSearch, 0, 2);
+        setupStack.Controls.Add(grp_DebugLog, 0, 3);
+        setup.Controls.Add(setupStack);
+        setup.Resize += (_, _) => ResizeSetupDebugLog(setup, setupStack);
+        ResizeSetupDebugLog(setup, setupStack);
         _workflowTabs.TabPages.AddRange([setup, _reviewTab, _eligibilityTab]);
         Controls.Add(_workflowTabs);
         _nextCohortButton.Click += btn_NextCohort_Click;
@@ -66,14 +95,14 @@ public partial class CohortContextForm
         Size = new Size(1180, 880);
         Text = "ConsentSync Cohort Workspace";
 
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(12), BackColor = LavenderSlatePalette.Window };
+        var layout = new LavenderTableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(12), BackColor = LavenderSlatePalette.Window };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var toolbar = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true, Padding = new Padding(0), Margin = new Padding(0) };
+        var toolbar = new LavenderFlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true, Padding = new Padding(0), Margin = new Padding(0) };
         toolbar.Controls.Add(MakeButton("Reload Review", () => { if (ConfirmReviewTransition()) LoadActiveReview(); }));
         toolbar.Controls.Add(MakeButton("Start Fresh Review", StartFreshReview));
         _acceptMatch = MakeButton("Accept Suggested Match", AcceptSuggestedMatch);
@@ -136,8 +165,8 @@ public partial class CohortContextForm
         layout.Controls.Add(gridCard, 0, 2);
         layout.Controls.Add(summaryCard, 0, 3);
 
-        var phisGroup = new GroupBox { Text = "PHIS Cohort", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(12, 26, 12, 12) };
-        var phisFields = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        var phisGroup = new LavenderGroupBox { Text = "PHIS Cohort", AutoSize = true, Dock = DockStyle.Fill, HeaderTop = 16 };
+        var phisFields = new LavenderFlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         phisFields.Controls.Add(Field("Client List Name", _phisListName));
         phisFields.Controls.Add(Field("PHIS Cohort ID", _phisCohortId));
         phisFields.Controls.Add(Field("PHIS Client List ID", _phisClientListId));
@@ -153,7 +182,7 @@ public partial class CohortContextForm
         layout.Controls.Add(phisGroup, 0, 4);
         _reviewTab.Controls.Add(layout);
 
-        var eligibility = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), FlowDirection = FlowDirection.TopDown };
+        var eligibility = new LavenderFlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), FlowDirection = FlowDirection.TopDown };
         eligibility.Controls.Add(new Label { AutoSize = true, Text = "Dose-history sourcing and eligibility rules are pending. Eligibility evaluation and final export are not yet available." });
         eligibility.Controls.Add(new Button { Text = "Evaluate Eligibility", AutoSize = true, Enabled = false });
         eligibility.Controls.Add(new Button { Text = "Export Final Cohort CSV", AutoSize = true, Enabled = false });
@@ -162,6 +191,17 @@ public partial class CohortContextForm
         LavenderSlateTheme.ApplyButton(btn_CreatePhisCohort, LavenderButtonKind.Primary);
         LavenderSlateTheme.ApplyButton(_savePhisDb, LavenderButtonKind.Primary);
         UpdateReviewAvailability();
+    }
+
+    private void ResizeSetupDebugLog(TabPage setup, TableLayoutPanel setupStack)
+    {
+        int cardsHeight = setupStack.Padding.Vertical +
+                          grp_CohortContext.Height +
+                          grp_PdfRosterExtraction.Height +
+                          grp_PhisSearch.Height +
+                          24;
+        grp_DebugLog.Height = Math.Max(294, setup.ClientSize.Height - cardsHeight);
+        setupStack.PerformLayout();
     }
 
     private void ResetReviewForNextCohort()
@@ -227,7 +267,7 @@ public partial class CohortContextForm
 
     private static Control Field(string caption, Control input)
     {
-        var panel = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+        var panel = new LavenderFlowLayoutPanel { AutoSize = true, WrapContents = false };
         panel.Controls.Add(new Label { Text = caption, Width = 155, Padding = new Padding(0, 5, 0, 0) });
         panel.Controls.Add(input);
         return panel;
@@ -318,6 +358,8 @@ public partial class CohortContextForm
                 if (gridRow.DataBoundItem is not CohortReviewRow row) continue;
                 gridRow.DefaultCellStyle.ForeColor = row.Excluded ? LavenderSlatePalette.MutedText : row.RequiresAttention ? LavenderSlatePalette.Error : LavenderSlatePalette.Slate;
                 gridRow.DefaultCellStyle.BackColor = Color.Empty;
+                gridRow.DefaultCellStyle.SelectionBackColor = LavenderSlatePalette.Selection;
+                gridRow.DefaultCellStyle.SelectionForeColor = LavenderSlatePalette.Card;
                 if (row.RowNumber == selectedRow) _reviewGrid.CurrentCell = gridRow.Cells["ClientId"];
             }
             var all = _review?.Rows ?? [];
