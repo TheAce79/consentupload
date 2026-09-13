@@ -9,6 +9,7 @@ using ConsentSyncCore.Services.Browser;
 using ConsentSyncCore.Services.Phis;
 using IWebDriver = OpenQA.Selenium.IWebDriver;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
+using ConsentSync.Ui;
 
 namespace CohortUi;
 
@@ -31,6 +32,8 @@ public partial class CohortContextForm : Form
     private bool _isSynchronizingClientListName;
     private bool _hasSavedContext;
     private bool _isPhase2Running;
+    private bool _isStartingNextCohort;
+    private bool _contextFieldsDirty;
     private bool _isLogSubscribed;
     private IWebDriver? _cohortDriver;
     private PhisSessionManager? _cohortSessionManager;
@@ -42,6 +45,15 @@ public partial class CohortContextForm : Form
         LoggerService.LogMessage += OnLogMessage;
         _isLogSubscribed = true;
     }
+
+    private readonly FlowLayoutPanel _workspaceToolbar = new()
+    {
+        Dock = DockStyle.Fill,
+        AutoSize = true,
+        Padding = new Padding(0)
+    };
+    private readonly LavenderCardPanel _workspaceToolbarCard = new() { Dock = DockStyle.Top, Height = 54, Padding = new Padding(12, 8, 12, 8) };
+    private readonly Button _nextCohortButton = new() { Text = "Next Cohort", AutoSize = true };
 
     private void OnLogMessage(object? sender, LogEventArgs e)
     {
@@ -71,10 +83,10 @@ public partial class CohortContextForm : Form
         rtxt_Log.SelectionLength = 0;
         rtxt_Log.SelectionColor = e.Level switch
         {
-            LogLevel.Error or LogLevel.Critical => Color.Red,
-            LogLevel.Warning => Color.Yellow,
-            LogLevel.Debug => Color.Gray,
-            _ => Color.LimeGreen
+            LogLevel.Error or LogLevel.Critical => LavenderSlatePalette.Error,
+            LogLevel.Warning => LavenderSlatePalette.Warning,
+            LogLevel.Debug => LavenderSlatePalette.MutedText,
+            _ => LavenderSlatePalette.Slate
         };
         rtxt_Log.AppendText(e.FormattedMessage + Environment.NewLine);
         rtxt_Log.SelectionColor = rtxt_Log.ForeColor;
@@ -154,6 +166,7 @@ public partial class CohortContextForm : Form
             int contextId = await _dbManager.SaveCohortContextAsync(context);
             context.CohortContextId = contextId;
             _activeContext = context;
+            _contextFieldsDirty = false;
             SetClientListNameText(context.ClientListName);
             _isUserCustomOverride = !string.Equals(
                 context.ClientListName,
@@ -425,6 +438,7 @@ public partial class CohortContextForm : Form
 
         if (!_isBindingContext)
         {
+            _contextFieldsDirty = true;
             _hasSavedContext = false;
             UpdateProcessingAvailability();
         }
@@ -435,6 +449,96 @@ public partial class CohortContextForm : Form
 
     private async void btn_LoadContext_Click(object? sender, EventArgs e) =>
         await LoadSelectedCohortContextAsync();
+
+    private void btn_NextCohort_Click(object? sender, EventArgs e)
+    {
+        if (_formBusy || _isPhase2Running || _isStartingNextCohort)
+        {
+            return;
+        }
+
+        if (!ConfirmNextCohortTransition())
+        {
+            return;
+        }
+
+        CohortContextEntity defaults = CreateNextCohortDefaults();
+        _isStartingNextCohort = true;
+        SetFormEnabled(false);
+        try
+        {
+            DisposeCohortPhisSession();
+            ResetReviewForNextCohort();
+            BindNewContext(defaults);
+            cb_SearchClientListName.SelectedIndex = -1;
+            cb_SearchClientListName.Text = string.Empty;
+            pb_Phase2.Minimum = 0;
+            pb_Phase2.Maximum = 1;
+            pb_Phase2.Value = 0;
+            lbl_Phase2Progress.Text = "0 / 0";
+            lbl_Phase2Status.Text = "Ready";
+            _workflowTabs.SelectedIndex = 0;
+            LoggerService.LogInformation("✅ Ready for next cohort. Select a cohort date and save, or load a saved list.");
+        }
+        finally
+        {
+            _isStartingNextCohort = false;
+            SetFormEnabled(true);
+            BeginInvoke(() =>
+            {
+                if (!IsDisposed && !Disposing)
+                {
+                    dtp_CohortDate.Focus();
+                }
+            });
+        }
+    }
+
+    private bool ConfirmNextCohortTransition()
+    {
+        if (!ConfirmReviewTransition())
+        {
+            return false;
+        }
+
+        if (!_contextFieldsDirty && !_phisFieldsDirty)
+        {
+            return true;
+        }
+
+        DialogResult choice = MessageBox.Show(
+            this,
+            "Discard unsaved setup or PHIS field changes and start the next cohort?\n\nYes: Discard and Continue\nNo: Cancel",
+            "Unsaved Cohort Changes",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+        return choice == DialogResult.Yes;
+    }
+
+    private CohortContextEntity CreateNextCohortDefaults()
+    {
+        if (_activeContext is not null)
+        {
+            return new CohortContextEntity
+            {
+                Prefix = _activeContext.Prefix,
+                Location = _activeContext.Location,
+                Type = _activeContext.Type,
+                Jurisdiction = _activeContext.Jurisdiction,
+                EncounterGroup = _activeContext.EncounterGroup
+            };
+        }
+
+        return new CohortContextEntity
+        {
+            Prefix = cb_Prefix.Text,
+            Location = cb_Location.Text,
+            Type = txt_Type.Text,
+            Jurisdiction = txt_Jurisdiction.Text,
+            EncounterGroup = txt_EncounterGroup.Text
+        };
+    }
 
     private async void cb_SearchClientListName_SelectionChangeCommitted(object? sender, EventArgs e) =>
         await LoadSelectedCohortContextAsync();
@@ -460,6 +564,7 @@ public partial class CohortContextForm : Form
                 BuildDerivedClientListName(),
                 StringComparison.OrdinalIgnoreCase);
             _hasSavedContext = false;
+            _contextFieldsDirty = true;
             UpdateProcessingAvailability();
         }
 
@@ -469,6 +574,7 @@ public partial class CohortContextForm : Form
     private void BindContext(CohortContextEntity context)
     {
         _phisFieldsDirty = false;
+        _contextFieldsDirty = false;
         _isBindingContext = true;
         try
         {
@@ -513,9 +619,11 @@ public partial class CohortContextForm : Form
         _activeContext = null;
         _isUserCustomOverride = false;
         _hasSavedContext = false;
+        _contextFieldsDirty = false;
         SetCohortDate(null);
         SetClientListNameText(string.Empty);
         RefreshStandardizedCsvPreview();
+        _contextFieldsDirty = false;
         UpdateProcessingAvailability();
     }
 
@@ -708,6 +816,7 @@ public partial class CohortContextForm : Form
         grp_PdfRosterExtraction.Enabled = enabled && _hasSavedContext;
         grp_PhisSearch.Enabled = enabled && _hasSavedContext;
         btn_SaveCohortContext.Enabled = enabled;
+        _nextCohortButton.Enabled = enabled && !_isPhase2Running && !_isStartingNextCohort;
         UpdateReviewAvailability();
     }
 

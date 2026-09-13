@@ -75,9 +75,9 @@ partial class CohortContextForm
         grp_CohortContext.Controls.Add(lbl_Location);
         grp_CohortContext.Controls.Add(cb_Prefix);
         grp_CohortContext.Controls.Add(lbl_Prefix);
-        grp_CohortContext.Location = new Point(18, 18);
+        grp_CohortContext.Location = new Point(12, 44);
         grp_CohortContext.Name = "grp_CohortContext";
-        grp_CohortContext.Size = new Size(596, 450);
+        grp_CohortContext.Size = new Size(587, 440);
         grp_CohortContext.TabIndex = 0;
         grp_CohortContext.TabStop = false;
         grp_CohortContext.Text = "Phase 0 Cohort Context";
@@ -199,9 +199,9 @@ partial class CohortContextForm
         // 
         dtp_CohortDate.CustomFormat = "yyyy-MM-dd";
         dtp_CohortDate.Format = DateTimePickerFormat.Custom;
-        dtp_CohortDate.ShowCheckBox = true;
         dtp_CohortDate.Location = new Point(160, 159);
         dtp_CohortDate.Name = "dtp_CohortDate";
+        dtp_CohortDate.ShowCheckBox = true;
         dtp_CohortDate.Size = new Size(200, 27);
         dtp_CohortDate.TabIndex = 8;
         dtp_CohortDate.ValueChanged += OnContextParameterChanged;
@@ -273,9 +273,9 @@ partial class CohortContextForm
         // grp_PdfRosterExtraction
         // 
         grp_PdfRosterExtraction.Controls.Add(btn_ExtractCsv);
-        grp_PdfRosterExtraction.Location = new Point(635, 29);
+        grp_PdfRosterExtraction.Location = new Point(632, 44);
         grp_PdfRosterExtraction.Name = "grp_PdfRosterExtraction";
-        grp_PdfRosterExtraction.Size = new Size(424, 94);
+        grp_PdfRosterExtraction.Size = new Size(424, 95);
         grp_PdfRosterExtraction.TabIndex = 1;
         grp_PdfRosterExtraction.TabStop = false;
         grp_PdfRosterExtraction.Text = "Phase 1 - PDF Roster CSV Extraction";
@@ -289,22 +289,47 @@ partial class CohortContextForm
         btn_ExtractCsv.Text = "Extract CSV from PDFs";
         btn_ExtractCsv.UseVisualStyleBackColor = true;
         btn_ExtractCsv.Click += btn_ExtractCsv_Click;
-        //
+        // 
         // grp_PhisSearch
-        //
+        // 
         grp_PhisSearch.Controls.Add(lbl_Phase2Status);
         grp_PhisSearch.Controls.Add(lbl_Phase2Progress);
         grp_PhisSearch.Controls.Add(pb_Phase2);
         grp_PhisSearch.Controls.Add(btn_SearchPhis);
-        grp_PhisSearch.Location = new Point(635, 140);
+        grp_PhisSearch.Location = new Point(632, 233);
         grp_PhisSearch.Name = "grp_PhisSearch";
         grp_PhisSearch.Size = new Size(424, 180);
         grp_PhisSearch.TabIndex = 2;
         grp_PhisSearch.TabStop = false;
         grp_PhisSearch.Text = "Phase 2 - PHIS Search & Client ID Resolution";
-        //
+        // 
+        // lbl_Phase2Status
+        // 
+        lbl_Phase2Status.AutoEllipsis = true;
+        lbl_Phase2Status.Location = new Point(20, 122);
+        lbl_Phase2Status.Name = "lbl_Phase2Status";
+        lbl_Phase2Status.Size = new Size(384, 42);
+        lbl_Phase2Status.TabIndex = 3;
+        lbl_Phase2Status.Text = "Ready";
+        // 
+        // lbl_Phase2Progress
+        // 
+        lbl_Phase2Progress.AutoSize = true;
+        lbl_Phase2Progress.Location = new Point(332, 86);
+        lbl_Phase2Progress.Name = "lbl_Phase2Progress";
+        lbl_Phase2Progress.Size = new Size(39, 20);
+        lbl_Phase2Progress.TabIndex = 2;
+        lbl_Phase2Progress.Text = "0 / 0";
+        // 
+        // pb_Phase2
+        // 
+        pb_Phase2.Location = new Point(20, 84);
+        pb_Phase2.Name = "pb_Phase2";
+        pb_Phase2.Size = new Size(300, 23);
+        pb_Phase2.TabIndex = 1;
+        // 
         // btn_SearchPhis
-        //
+        // 
         btn_SearchPhis.Location = new Point(160, 30);
         btn_SearchPhis.Name = "btn_SearchPhis";
         btn_SearchPhis.Size = new Size(180, 32);
@@ -312,34 +337,9 @@ partial class CohortContextForm
         btn_SearchPhis.Text = "Search PHIS";
         btn_SearchPhis.UseVisualStyleBackColor = true;
         btn_SearchPhis.Click += btn_SearchPhis_Click;
-        //
-        // pb_Phase2
-        //
-        pb_Phase2.Location = new Point(20, 84);
-        pb_Phase2.Name = "pb_Phase2";
-        pb_Phase2.Size = new Size(300, 23);
-        pb_Phase2.TabIndex = 1;
-        //
-        // lbl_Phase2Progress
-        //
-        lbl_Phase2Progress.AutoSize = true;
-        lbl_Phase2Progress.Location = new Point(332, 86);
-        lbl_Phase2Progress.Name = "lbl_Phase2Progress";
-        lbl_Phase2Progress.Size = new Size(32, 20);
-        lbl_Phase2Progress.TabIndex = 2;
-        lbl_Phase2Progress.Text = "0 / 0";
-        //
-        // lbl_Phase2Status
-        //
-        lbl_Phase2Status.AutoEllipsis = true;
-        lbl_Phase2Status.Location = new Point(20, 122);
-        lbl_Phase2Status.Name = "lbl_Phase2Status";
-        lbl_Phase2Status.Size = new Size(384, 42);
-        lbl_Phase2Status.TabIndex = 3;
-        lbl_Phase2Status.Text = "Ready";
-        //
+        // 
         // grp_DebugLog
-        //
+        // 
         grp_DebugLog.Controls.Add(rtxt_Log);
         grp_DebugLog.Location = new Point(18, 480);
         grp_DebugLog.Name = "grp_DebugLog";
@@ -347,17 +347,19 @@ partial class CohortContextForm
         grp_DebugLog.TabIndex = 3;
         grp_DebugLog.TabStop = false;
         grp_DebugLog.Text = "Debug Log";
-        //
+        // 
         // rtxt_Log
-        //
+        // 
         rtxt_Log.BackColor = Color.Black;
         rtxt_Log.BorderStyle = BorderStyle.FixedSingle;
         rtxt_Log.Dock = DockStyle.Fill;
         rtxt_Log.Font = new Font("Consolas", 9F);
         rtxt_Log.ForeColor = Color.LimeGreen;
+        rtxt_Log.Location = new Point(3, 23);
         rtxt_Log.Name = "rtxt_Log";
         rtxt_Log.ReadOnly = true;
         rtxt_Log.ScrollBars = RichTextBoxScrollBars.Vertical;
+        rtxt_Log.Size = new Size(1035, 224);
         rtxt_Log.TabIndex = 0;
         rtxt_Log.Text = "";
         // 
@@ -365,7 +367,7 @@ partial class CohortContextForm
         // 
         AutoScaleDimensions = new SizeF(8F, 20F);
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(1120, 750);
+        ClientSize = new Size(1175, 758);
         Controls.Add(grp_DebugLog);
         Controls.Add(grp_PhisSearch);
         Controls.Add(grp_PdfRosterExtraction);
@@ -375,12 +377,13 @@ partial class CohortContextForm
         Name = "CohortContextForm";
         StartPosition = FormStartPosition.CenterScreen;
         Text = "ConsentSync Cohort Context";
-        Load += CohortContextForm_Load;
         FormClosing += CohortContextForm_FormClosing;
+        Load += CohortContextForm_Load;
         grp_CohortContext.ResumeLayout(false);
         grp_CohortContext.PerformLayout();
         grp_PdfRosterExtraction.ResumeLayout(false);
         grp_PhisSearch.ResumeLayout(false);
+        grp_PhisSearch.PerformLayout();
         grp_DebugLog.ResumeLayout(false);
         ResumeLayout(false);
     }

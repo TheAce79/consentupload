@@ -25,6 +25,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\ConsentSync.Ui\ConsentSync.Ui.csproj" />
 		<ProjectReference Include="..\ConsentSyncCore\ConsentSyncCore.csproj" />
 		<ProjectReference Include="..\CsvProcessing\CsvProcessing.csproj" />
 		<ProjectReference Include="..\Orchestrator\Orchestrator.csproj" />

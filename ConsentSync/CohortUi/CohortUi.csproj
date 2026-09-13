@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\ConsentSync.Ui\ConsentSync.Ui.csproj" />
     <ProjectReference Include="..\ConsentSync.Data\ConsentSync.Data.csproj" />
     <ProjectReference Include="..\ConsentSyncCore\ConsentSyncCore.csproj" />
   </ItemGroup>

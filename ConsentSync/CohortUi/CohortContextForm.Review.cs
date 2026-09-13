@@ -8,12 +8,13 @@ using ConsentSyncCore.Services.Configuration;
 using ConsentSyncCore.Services.Csv;
 using ConsentSyncCore.Services.Phis;
 using IWebDriver = OpenQA.Selenium.IWebDriver;
+using ConsentSync.Ui;
 
 namespace CohortUi;
 
 public partial class CohortContextForm
 {
-    private readonly TabControl _workflowTabs = new() { Dock = DockStyle.Fill };
+    private readonly LavenderTabControl _workflowTabs = new() { Dock = DockStyle.Fill };
     private readonly TabPage _reviewTab = new("Data Review & Manual Fixes");
     private readonly TabPage _eligibilityTab = new("Final Output & Eligibility");
     private readonly DataGridView _reviewGrid = new()
@@ -55,20 +56,24 @@ public partial class CohortContextForm
         grp_DebugLog.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
         _workflowTabs.TabPages.AddRange([setup, _reviewTab, _eligibilityTab]);
         Controls.Add(_workflowTabs);
+        _nextCohortButton.Click += btn_NextCohort_Click;
+        _workspaceToolbar.Controls.Add(_nextCohortButton);
+        _workspaceToolbarCard.Controls.Add(_workspaceToolbar);
+        Controls.Add(_workspaceToolbarCard);
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
         MinimumSize = new Size(1120, 820);
         Size = new Size(1180, 880);
         Text = "ConsentSync Cohort Workspace";
 
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(8) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(12), BackColor = LavenderSlatePalette.Window };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var toolbar = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
+        var toolbar = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true, Padding = new Padding(0), Margin = new Padding(0) };
         toolbar.Controls.Add(MakeButton("Reload Review", () => { if (ConfirmReviewTransition()) LoadActiveReview(); }));
         toolbar.Controls.Add(MakeButton("Start Fresh Review", StartFreshReview));
         _acceptMatch = MakeButton("Accept Suggested Match", AcceptSuggestedMatch);
@@ -97,12 +102,7 @@ public partial class CohortContextForm
                 ReadOnly = property != "ClientId", SortMode = DataGridViewColumnSortMode.NotSortable
             });
         }
-        _reviewGrid.RowsDefaultCellStyle.BackColor = Color.White;
-        _reviewGrid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(245, 247, 250);
-        _reviewGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(0, 120, 215);
-        _reviewGrid.DefaultCellStyle.SelectionForeColor = Color.White;
-        _reviewGrid.AlternatingRowsDefaultCellStyle.SelectionBackColor = Color.FromArgb(0, 120, 215);
-        _reviewGrid.AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
+        LavenderSlateTheme.ApplyGrid(_reviewGrid);
         _contextAccept = new ToolStripMenuItem("Accept Suggested Match", null, (_, _) => AcceptSuggestedMatch());
         _contextExclude = new ToolStripMenuItem("Exclude / Restore Selected", null, (_, _) => ToggleExcluded());
         _contextSave = new ToolStripMenuItem("Save Review", null, async (_, _) => await SaveReviewAsync());
@@ -123,12 +123,20 @@ public partial class CohortContextForm
             e.ThrowException = false;
             _reviewMessage.Text = "The value could not be applied. Enter the Client ID as text.";
         };
-        layout.Controls.Add(toolbar, 0, 0);
-        layout.Controls.Add(_reviewMessage, 0, 1);
-        layout.Controls.Add(_reviewGrid, 0, 2);
-        layout.Controls.Add(_reviewSummary, 0, 3);
+        var actionCard = new LavenderCardPanel { AutoSize = true, Dock = DockStyle.Fill };
+        actionCard.Controls.Add(toolbar);
+        var messageCard = new LavenderCardPanel { AutoSize = true, Dock = DockStyle.Fill };
+        messageCard.Controls.Add(_reviewMessage);
+        var gridCard = new LavenderCardPanel { Dock = DockStyle.Fill, Padding = new Padding(1) };
+        gridCard.Controls.Add(_reviewGrid);
+        var summaryCard = new LavenderCardPanel { AutoSize = true, Dock = DockStyle.Fill };
+        summaryCard.Controls.Add(_reviewSummary);
+        layout.Controls.Add(actionCard, 0, 0);
+        layout.Controls.Add(messageCard, 0, 1);
+        layout.Controls.Add(gridCard, 0, 2);
+        layout.Controls.Add(summaryCard, 0, 3);
 
-        var phisGroup = new GroupBox { Text = "PHIS Cohort", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(10) };
+        var phisGroup = new GroupBox { Text = "PHIS Cohort", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(12, 26, 12, 12) };
         var phisFields = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         phisFields.Controls.Add(Field("Client List Name", _phisListName));
         phisFields.Controls.Add(Field("PHIS Cohort ID", _phisCohortId));
@@ -150,6 +158,41 @@ public partial class CohortContextForm
         eligibility.Controls.Add(new Button { Text = "Evaluate Eligibility", AutoSize = true, Enabled = false });
         eligibility.Controls.Add(new Button { Text = "Export Final Cohort CSV", AutoSize = true, Enabled = false });
         _eligibilityTab.Controls.Add(eligibility);
+        LavenderSlateTheme.Apply(this);
+        LavenderSlateTheme.ApplyButton(btn_CreatePhisCohort, LavenderButtonKind.Primary);
+        LavenderSlateTheme.ApplyButton(_savePhisDb, LavenderButtonKind.Primary);
+        UpdateReviewAvailability();
+    }
+
+    private void ResetReviewForNextCohort()
+    {
+        _reviewGrid.EndEdit();
+        _review = null;
+        _reviewDirty = false;
+        _cacheSyncRetryAvailable = false;
+        _contextRowSelectedByClick = false;
+        _bindingPhisFields = true;
+        try
+        {
+            _phisListName.Clear();
+            _phisCohortId.Clear();
+            _phisClientListId.Clear();
+        }
+        finally
+        {
+            _bindingPhisFields = false;
+        }
+
+        _phisFieldsDirty = false;
+        _phisFieldsContextId = null;
+        _reviewMessage.Text = string.Empty;
+        _reviewSummary.Text = string.Empty;
+        _reviewFilter.SelectedIndex = 0;
+        _reviewGrid.DataSource = null;
+        _reviewGrid.ClearSelection();
+        _saveReview.Text = "Save Review";
+        _retryCacheSync.Text = "Retry Cache Sync";
+        btn_CreatePhisCohort.Text = "Create PHIS Cohort";
         UpdateReviewAvailability();
     }
 
@@ -273,7 +316,7 @@ public partial class CohortContextForm
             foreach (DataGridViewRow gridRow in _reviewGrid.Rows)
             {
                 if (gridRow.DataBoundItem is not CohortReviewRow row) continue;
-                gridRow.DefaultCellStyle.ForeColor = row.Excluded ? Color.Gray : row.RequiresAttention ? Color.DarkRed : Color.Black;
+                gridRow.DefaultCellStyle.ForeColor = row.Excluded ? LavenderSlatePalette.MutedText : row.RequiresAttention ? LavenderSlatePalette.Error : LavenderSlatePalette.Slate;
                 gridRow.DefaultCellStyle.BackColor = Color.Empty;
                 if (row.RowNumber == selectedRow) _reviewGrid.CurrentCell = gridRow.Cells["ClientId"];
             }
