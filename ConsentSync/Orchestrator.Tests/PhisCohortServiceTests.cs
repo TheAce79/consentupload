@@ -195,6 +195,54 @@ public sealed class PhisCohortServiceTests
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Upload_FirstClientListWithoutExistingDropdown_UsesSelectedNewRadioAndSaves(bool useNewRadioClone)
+    {
+        var page = new FakeSearchCohortPage
+        {
+            Url = "https://phis.example/phsdsm/ClientWeb/pages/cohort/maintainCohort.xhtml",
+            CohortNameValue = "LIST", HeaderId = "24260", AttachedListId = null,
+            ExistingMenuPresent = false, UseRadioCloneForNew = useNewRadioClone
+        };
+        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt");
+        await File.WriteAllTextAsync(path, "123\n");
+        try
+        {
+            await page.CreateService().UploadClientListAsync(24260, "LIST", path);
+
+            Assert.Equal("LIST", page.UploadName);
+            Assert.Equal(0, page.NewDestinationClicks);
+            Assert.Equal(new[] { "panel", "main" }, page.SaveOrder);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidNewClientListLayouts))]
+    public void NewClientListDestination_InvalidLayoutIsRejectedBeforeSave(Action<FakeSearchCohortPage> arrange)
+    {
+        var page = new FakeSearchCohortPage();
+        arrange(page);
+
+        bool ready = (bool)typeof(PhisCohortService)
+            .GetMethod("IsUploadDestinationModeReady", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(page.CreateService(), [false])!;
+
+        Assert.False(ready);
+        Assert.Empty(page.SaveOrder);
+    }
+
+    public static IEnumerable<object[]> InvalidNewClientListLayouts()
+    {
+        yield return [new Action<FakeSearchCohortPage>(page => page.NewNamePresent = false)];
+        yield return [new Action<FakeSearchCohortPage>(page => page.NewNameDisplayed = false)];
+        yield return [new Action<FakeSearchCohortPage>(page => page.NewNameEnabled = false)];
+        yield return [new Action<FakeSearchCohortPage>(page => page.NewSelected = false)];
+        yield return [new Action<FakeSearchCohortPage>(page => page.ExistingMenuEnabled = true)];
+    }
+
+    [Theory]
     [InlineData("MISSING")]
     [InlineData("DUPLICATE")]
     public async Task Upload_InvalidExistingDropdownMatch_DoesNotSave(string dropdownState)
@@ -322,7 +370,7 @@ public sealed class PhisCohortServiceTests
         (bool)typeof(PhisCohortService).GetMethod("IsStaticCohortTypeSelected", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(service, null)!;
 
-    private sealed class FakeSearchCohortPage
+    public sealed class FakeSearchCohortPage
     {
         public const string SearchUrl = "https://phis.example/phsdsm/ClientWeb/pages/cohort/searchCohort.xhtml?tab=review";
         private const string CriteriaPanelId = "form:CohortSearchCriteria_Panel";
@@ -354,9 +402,17 @@ public sealed class PhisCohortServiceTests
         public string UploadName { get; set; } = "";
         public int UploadClicks { get; set; }
         public int UploadSaveClicks { get; set; }
+        public int NewDestinationClicks { get; set; }
         public List<string> SaveOrder { get; } = [];
         public bool ExistingSelected { get; set; }
+        public bool NewSelected { get; set; } = true;
+        public bool UseRadioCloneForNew { get; set; }
         public bool UseRadioCloneForExisting { get; set; }
+        public bool NewNamePresent { get; set; } = true;
+        public bool NewNameDisplayed { get; set; } = true;
+        public bool? NewNameEnabled { get; set; }
+        public bool ExistingMenuPresent { get; set; } = true;
+        public bool? ExistingMenuEnabled { get; set; }
         public bool DestinationControlsContradictory { get; set; }
         public bool DropdownOpen { get; set; }
         public string? ExistingDropdownState { get; set; }
@@ -412,25 +468,28 @@ public sealed class PhisCohortServiceTests
             "maintainCohortForm:clientListDataTable:UploadClientIDListButtonId:commandButtonId" => CreateElement(onClick: () => UploadClicks++),
             "maintainCohortForm:saveButtonId:commandButtonId" => CreateElement(onClick: () => { UploadSaveClicks++; SaveOrder.Add("panel"); }),
             "actionMenuSave:commandButtonId" => CreateElement(onClick: () => { SaveOrder.Add("main"); AttachedListId ??= "24189"; }),
-            "maintainCohortForm:clientListRadio:newListName:inputText" => CreateElement(enabled: DestinationControlsContradictory || !ExistingSelected, value: () => UploadName, setValue: v => UploadName = v),
-            "maintainCohortForm:clientListRadio:selectOneRadio:0" => CreateRadio(() => !ExistingSelected),
-            "maintainCohortForm:clientListRadio:selectOneRadio:0_clone" => CreateRadio(() => !ExistingSelected),
+            "maintainCohortForm:clientListRadio:newListName:inputText" when !NewNamePresent => null,
+            "maintainCohortForm:clientListRadio:newListName:inputText" => CreateElement(displayed: NewNameDisplayed, enabled: NewNameEnabled ?? (DestinationControlsContradictory || !ExistingSelected), value: () => UploadName, setValue: v => UploadName = v),
+            "maintainCohortForm:clientListRadio:selectOneRadio:0" => CreateRadio(() => NewSelected && !UseRadioCloneForNew),
+            "maintainCohortForm:clientListRadio:selectOneRadio:0_clone" => CreateRadio(() => NewSelected),
             "maintainCohortForm:clientListRadio:selectOneRadio:1" => CreateRadio(() => ExistingSelected && !UseRadioCloneForExisting),
             "maintainCohortForm:clientListRadio:selectOneRadio:1_clone" => CreateRadio(() => ExistingSelected),
             "maintainCohortForm:clientListRadio:option1" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "FindElement"
-                ? CreateElement(onClick: () => ExistingSelected = false) : throw new NotSupportedException(m.Name)),
+                ? CreateElement(onClick: () => { NewDestinationClicks++; ExistingSelected = false; NewSelected = true; }) : throw new NotSupportedException(m.Name)),
             "maintainCohortForm:clientListRadio:option2" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name == "FindElement"
-                ? CreateElement(onClick: () => ExistingSelected = true) : throw new NotSupportedException(m.Name)),
+                ? CreateElement(onClick: () => { ExistingSelected = true; NewSelected = false; }) : throw new NotSupportedException(m.Name)),
+            "maintainCohortForm:clientListRadio:existingLists:selectOneMenu_input" when !ExistingMenuPresent => null,
             "maintainCohortForm:clientListRadio:existingLists:selectOneMenu_input" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name switch
             {
                 "GetAttribute" => SelectedUploadList,
                 "FindElements" => new ReadOnlyCollection<IWebElement>(GetDropdownOptions().Select(label => CreateElement(value: () => label.StartsWith("24189", StringComparison.Ordinal) ? "24189" : "123", text: () => string.Empty, domText: () => label)).ToList()),
                 _ => throw new NotSupportedException(m.Name)
             }),
+            "maintainCohortForm:clientListRadio:existingLists:selectOneMenu" when !ExistingMenuPresent => null,
             "maintainCohortForm:clientListRadio:existingLists:selectOneMenu" => SeleniumDispatchProxy.Create<IWebElement>((m, a) => m.Name switch
             {
                 "get_Displayed" => true,
-                "get_Enabled" => ExistingSelected && !DestinationControlsContradictory,
+                "get_Enabled" => ExistingMenuEnabled ?? (ExistingSelected && !DestinationControlsContradictory),
                 "FindElement" => CreateElement(onClick: () => DropdownOpen = true),
                 "GetAttribute" => null,
                 _ => throw new NotSupportedException(m.Name)

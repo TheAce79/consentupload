@@ -348,8 +348,14 @@ public sealed class PhisCohortService
                 .Any(element => element.Selected);
             IWebElement? newName = _driver.FindElements(By.Id("maintainCohortForm:clientListRadio:newListName:inputText")).FirstOrDefault();
             IWebElement? existingMenu = _driver.FindElements(By.Id("maintainCohortForm:clientListRadio:existingLists:selectOneMenu")).FirstOrDefault();
-            if (newName is null || existingMenu is null) return false;
-            return radioChecked && (existing ? !IsDisabled(existingMenu) && IsDisabled(newName) : !IsDisabled(newName) && IsDisabled(existingMenu));
+            if (existing)
+                return newName is not null && existingMenu is not null && radioChecked &&
+                    !IsDisabled(existingMenu) && IsDisabled(newName);
+
+            // PHIS omits the existing-list dropdown for a first upload. The New Client List
+            // text box and selected radio are the authoritative state in that layout.
+            return newName is not null && newName.Displayed && !IsDisabled(newName) && radioChecked &&
+                (existingMenu is null || IsDisabled(existingMenu));
         }
         catch (WebDriverException) { return false; }
     }
@@ -374,17 +380,17 @@ public sealed class PhisCohortService
             bool cloneNew = IsRadioChecked("0_clone");
             bool originalExisting = IsRadioChecked("1");
             bool cloneExisting = IsRadioChecked("1_clone");
-            bool newDisabled = IsElementDisabled("maintainCohortForm:clientListRadio:newListName:inputText");
-            bool existingDisabled = IsElementDisabled("maintainCohortForm:clientListRadio:existingLists:selectOneMenu");
-            return $"radio checked (new original={originalNew}, new clone={cloneNew}, existing original={originalExisting}, existing clone={cloneExisting}); controls disabled (new name={newDisabled}, existing list={existingDisabled}).";
+            string newName = DescribeControl("maintainCohortForm:clientListRadio:newListName:inputText");
+            string existingList = DescribeControl("maintainCohortForm:clientListRadio:existingLists:selectOneMenu");
+            return $"radio checked (new original={originalNew}, new clone={cloneNew}, existing original={originalExisting}, existing clone={cloneExisting}); controls (new name={newName}, existing list={existingList}).";
         }
         catch (WebDriverException) { return "radio and destination control state could not be read after PHIS updated the upload panel."; }
     }
     private bool IsRadioChecked(string suffix) => _driver.FindElements(By.Id("maintainCohortForm:clientListRadio:selectOneRadio:" + suffix)).Any(element => element.Selected);
-    private bool IsElementDisabled(string id)
+    private string DescribeControl(string id)
     {
         IWebElement? element = _driver.FindElements(By.Id(id)).FirstOrDefault();
-        return element is null || IsDisabled(element);
+        return element is null ? "missing" : $"visible={element.Displayed}, disabled={IsDisabled(element)}";
     }
     private static bool IsDisabled(IWebElement element) => !element.Enabled || element.GetAttribute("disabled") is not null ||
         string.Equals(element.GetAttribute("aria-disabled"), "true", StringComparison.OrdinalIgnoreCase) ||
