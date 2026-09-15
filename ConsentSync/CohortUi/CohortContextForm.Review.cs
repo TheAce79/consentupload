@@ -541,6 +541,7 @@ public partial class CohortContextForm
                     _activeContext = updated;
                     _phisFieldsDirty = false;
                     UpdateReviewAvailability();
+                    await RefreshCurrentScheduleReportAsync();
                 }
                 catch (Exception ex)
                 {

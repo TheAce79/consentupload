@@ -552,6 +552,27 @@ public sealed class DbManager : IConsentSyncRepository
         catch { TryRollback(transaction); throw; }
     }
 
+    public async Task<ScheduleSnapshotEntity?> GetLatestScheduleSnapshotAsync(int cohortContextId, string clientListName, CancellationToken cancellationToken = default)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        await using var connection = OpenSqliteConnection();
+        return await connection.QuerySingleOrDefaultAsync<ScheduleSnapshotEntity>(new CommandDefinition("SELECT * FROM ScheduleSnapshots WHERE CohortContextId=@cohortContextId AND ClientListName=@clientListName ORDER BY ImportedOn DESC, Id DESC LIMIT 1", new { cohortContextId, clientListName }, cancellationToken: cancellationToken));
+    }
+
+    public async Task<IReadOnlyList<ScheduleSnapshotEntity>> GetRecentScheduleSnapshotsAsync(int cohortContextId, string clientListName, int take = 2, CancellationToken cancellationToken = default)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        await using var connection = OpenSqliteConnection();
+        return (await connection.QueryAsync<ScheduleSnapshotEntity>(new CommandDefinition("SELECT * FROM ScheduleSnapshots WHERE CohortContextId=@cohortContextId AND ClientListName=@clientListName ORDER BY ImportedOn DESC, Id DESC LIMIT @take", new { cohortContextId, clientListName, take }, cancellationToken: cancellationToken))).ToList();
+    }
+
+    public async Task SaveScheduleSnapshotAsync(ScheduleSnapshotEntity snapshot, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot); await EnsureInitializedAsync(cancellationToken);
+        await using var connection = OpenSqliteConnection();
+        await connection.ExecuteAsync(new CommandDefinition("INSERT INTO ScheduleSnapshots (CohortContextId,ClientListName,BatchId,SourceFilesJson,ClientSnapshotJson,ImportedOn) VALUES (@CohortContextId,@ClientListName,@BatchId,@SourceFilesJson,@ClientSnapshotJson,@ImportedOn)", snapshot, cancellationToken: cancellationToken));
+    }
+
     private static string BuildConnectionString(IConfiguration configuration)
     {
         string baseDirectory = configuration["BaseDirectory"] ?? "C:\\PHIS";
@@ -717,6 +738,12 @@ public sealed class DbManager : IConsentSyncRepository
             );
             CREATE INDEX IF NOT EXISTS IX_PhisUploadSnapshots_Destination
                 ON PhisUploadSnapshots (CohortContextId, PhisCohortId, PhisClientListId, ClientListName, UploadedOn DESC);
+
+            CREATE TABLE IF NOT EXISTS ScheduleSnapshots (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT, CohortContextId INTEGER NOT NULL, ClientListName TEXT NOT NULL,
+                BatchId TEXT NOT NULL, SourceFilesJson TEXT NOT NULL, ClientSnapshotJson TEXT NOT NULL, ImportedOn TEXT NOT NULL,
+                FOREIGN KEY (CohortContextId) REFERENCES CohortContexts (CohortContextId) ON DELETE CASCADE);
+            CREATE INDEX IF NOT EXISTS IX_ScheduleSnapshots_Context ON ScheduleSnapshots (CohortContextId, ClientListName, ImportedOn DESC);
             """;
 
         await connection.ExecuteAsync(sql);

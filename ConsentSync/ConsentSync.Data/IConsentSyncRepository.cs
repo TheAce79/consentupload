@@ -71,4 +71,7 @@ public interface IConsentSyncRepository
     Task SaveSuccessfulPhisUploadAsync(
         CohortContextEntity context, string clientSnapshotJson,
         CancellationToken cancellationToken = default);
+
+    Task<ScheduleSnapshotEntity?> GetLatestScheduleSnapshotAsync(int cohortContextId, string clientListName, CancellationToken cancellationToken = default);
+    Task SaveScheduleSnapshotAsync(ScheduleSnapshotEntity snapshot, CancellationToken cancellationToken = default);
 }

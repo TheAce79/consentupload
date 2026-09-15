@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Security.Cryptography;
 using ConsentSync.Data;
 using ConsentSync.Data.Entities;
 using ConsentSyncCore.Services.Csv;
@@ -225,8 +226,17 @@ public partial class CohortContextForm : Form
             var (_, inputPdfDir, _) = CohortWorkspaceService.EnsureDirectories(configuration, clientListName);
             string targetCsvPath = CohortWorkspaceService.GetStandardizedInputCsvPath(configuration, clientListName);
 
+            using var dialog = new OpenFileDialog
+            {
+                InitialDirectory = inputPdfDir, Filter = "PDF files (*.pdf)|*.pdf", Multiselect = true,
+                Title = "Select the complete current clinic schedule"
+            };
+            if (dialog.ShowDialog(this) != DialogResult.OK || dialog.FileNames.Length == 0) return;
+            var selectedFiles = dialog.FileNames.OrderBy(x => x, StringComparer.Ordinal).ToList();
             var parser = new PdfRosterParserService();
-            var records = await Task.Run(() => parser.ExtractRecordsFromPdfFolder(inputPdfDir));
+            var records = await Task.Run(() => parser.ExtractRecordsFromPdfFiles(selectedFiles, LoggerService.LogInformation));
+            if (parser.LastPageWarnings.Count > 0)
+                throw new InvalidOperationException("The selected schedule has page(s) with no recognized clients. Review the PDF selection or formatting before accepting this schedule:\n" + string.Join("\n", parser.LastPageWarnings));
             if (records.Count == 0)
             {
                 LoggerService.LogWarning($"No client records found in PDF folder: {inputPdfDir}");
@@ -236,10 +246,34 @@ public partial class CohortContextForm : Form
                 return;
             }
 
-            await Task.Run(() => CsvExporterService.SaveToCsv(records, targetCsvPath));
-            LoggerService.LogInformation($"✅ Extracted {records.Count} client record(s). Input CSV: {targetCsvPath}");
+            var existing = File.Exists(targetCsvPath) ? await Task.Run(() => CsvImporterService.ReadFromCsv(targetCsvPath)) : [];
+            var existingKeys = existing.Select(ClinicScheduleSummary.Key).ToHashSet(StringComparer.Ordinal);
+            var added = records.Where(x => existingKeys.Add(ClinicScheduleSummary.Key(x))).ToList();
+            if (added.Count > 0 || !File.Exists(targetCsvPath)) await Task.Run(() => CsvExporterService.SaveToCsv(existing.Concat(added), targetCsvPath));
+
+            var prior = await _dbManager!.GetLatestScheduleSnapshotAsync(_activeContext!.CohortContextId, clientListName);
+            var currentSchedule = ClinicScheduleSummary.AttachClientIds(records, existing.Concat(added));
+            var priorSchedule = prior is null ? null : JsonSerializer.Deserialize<List<ClinicScheduleClient>>(prior.ClientSnapshotJson);
+            var comparison = ClinicScheduleSummary.Compare(currentSchedule, priorSchedule);
+            DateTime? verifiedUpload = null; int? verifiedPhisCount = null;
+            if (_activeContext.PhisCohortId is int verifiedCohortId)
+            {
+                var uploadSnapshot = await _dbManager.GetLatestPhisUploadSnapshotAsync(_activeContext.CohortContextId, verifiedCohortId, _activeContext.PhisClientListId, clientListName);
+                if (uploadSnapshot is not null)
+                {
+                    verifiedUpload = uploadSnapshot.UploadedOn;
+                    verifiedPhisCount = JsonSerializer.Deserialize<List<PhisUploadClient>>(uploadSnapshot.ClientSnapshotJson)?.Count;
+                }
+            }
+            var sourceFiles = selectedFiles.Select(path => new { Name = Path.GetFileName(path), Sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))) }).ToList();
+            await _dbManager.SaveScheduleSnapshotAsync(new ScheduleSnapshotEntity { CohortContextId = _activeContext.CohortContextId, ClientListName = clientListName, BatchId = Guid.NewGuid().ToString("N"), SourceFilesJson = JsonSerializer.Serialize(sourceFiles), ClientSnapshotJson = JsonSerializer.Serialize(currentSchedule), ImportedOn = DateTime.UtcNow });
+            string outputDirectory = Path.GetDirectoryName(CohortWorkspaceService.GetStandardizedOutputCsvPath(configuration, clientListName))!;
+            string reportPath = Path.Combine(outputDirectory, $"{clientListName}_Clinic_Schedule_Update_{DateTime.Now:yyyyMMdd_HHmmss_fff}.txt");
+            await File.WriteAllTextAsync(reportPath, ClinicScheduleSummary.Format(clientListName, _activeContext.PhisCohortId, _activeContext.PhisClientListId, comparison, prior?.ImportedOn, selectedFiles.Select(path => Path.GetFileName(path) ?? path), verifiedUpload, verifiedPhisCount), new System.Text.UTF8Encoding(false));
+            RefreshStandardizedCsvPreview();
+            LoggerService.LogInformation($"✅ Retained {existing.Count} existing record(s), added {added.Count} new client record(s). Schedule report: {reportPath}");
             MessageBox.Show(this,
-                $"Extracted {records.Count} client record(s) from PDF roster.\n\nInput CSV created at:\n{targetCsvPath}",
+                $"Current schedule: {currentSchedule.Count} client(s).\nNew CSV records added: {added.Count}.\nExisting records retained: {existing.Count}.\n\nAdministrative update:\n{reportPath}",
                 "Extraction Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
@@ -252,6 +286,23 @@ public partial class CohortContextForm : Form
             btn_ExtractCsv.Text = "Extract CSV from PDFs";
             SetFormEnabled(true);
         }
+    }
+
+    private async Task RefreshCurrentScheduleReportAsync()
+    {
+        if (_activeContext is null || string.IsNullOrWhiteSpace(_activeContext.ClientListName)) return;
+        var snapshots = await _dbManager!.GetRecentScheduleSnapshotsAsync(_activeContext.CohortContextId, _activeContext.ClientListName);
+        if (snapshots.Count == 0) return;
+        var current = JsonSerializer.Deserialize<List<ClinicScheduleClient>>(snapshots[0].ClientSnapshotJson) ?? [];
+        var prior = snapshots.Count > 1 ? JsonSerializer.Deserialize<List<ClinicScheduleClient>>(snapshots[1].ClientSnapshotJson) : null;
+        var csvPath = CohortWorkspaceService.GetStandardizedInputCsvPath(ConfigurationService.GetConfiguration(), _activeContext.ClientListName);
+        var csv = File.Exists(csvPath) ? CsvImporterService.ReadFromCsv(csvPath) : [];
+        var comparison = ClinicScheduleSummary.Compare(ClinicScheduleSummary.AttachClientIds(current.Select(x => new ConsentSyncCore.Models.ClinicPdfClientRecord { FullName = x.FullName, DateOfBirth = x.DateOfBirth, VaccineType = x.VaccineType }), csv), prior);
+        var output = Path.GetDirectoryName(CohortWorkspaceService.GetStandardizedOutputCsvPath(ConfigurationService.GetConfiguration(), _activeContext.ClientListName))!;
+        var reportPath = Path.Combine(output, $"{_activeContext.ClientListName}_Clinic_Schedule_Update_{DateTime.Now:yyyyMMdd_HHmmss_fff}.txt");
+        var sourceFiles = JsonDocument.Parse(snapshots[0].SourceFilesJson).RootElement.EnumerateArray().Select(x => x.TryGetProperty("Name", out var name) ? name.GetString() ?? "Unknown PDF" : "Unknown PDF").ToList();
+        await File.WriteAllTextAsync(reportPath, ClinicScheduleSummary.Format(_activeContext.ClientListName, _activeContext.PhisCohortId, _activeContext.PhisClientListId, comparison, snapshots.Count > 1 ? snapshots[1].ImportedOn : null, sourceFiles, DateTime.UtcNow, null), new System.Text.UTF8Encoding(false));
+        LoggerService.LogInformation($"Refreshed current schedule report with resolved PHIS IDs: {reportPath}");
     }
 
     private async void btn_SearchPhis_Click(object? sender, EventArgs e)

@@ -64,6 +64,18 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
     }
 
     [Fact]
+    public void ExtractRecordsFromLines_ParsesEnglishRangesAndVaccineDetails()
+    {
+        var records = PdfRosterParserService.ExtractRecordsFromLines([
+            "8:00 AM - 8:30 AM Jane Smith (2020-01-02) | 123 456 789 | 4 months",
+            "08:30 09:00 DOE, JEAN 2021-02-03 - PS",
+            "09:00 - 09:30 Marie Curie 2022-03-04"
+        ]);
+        Assert.Equal(["4 months", "PS", "Autre"], records.Select(x => x.VaccineType));
+        Assert.Equal("123456789", records[0].Medicare);
+    }
+
+    [Fact]
     public void ExtractRecordsFromLines_ParsesOnlyPrimaryLineOfEachAppointmentBlock()
     {
         List<ClinicPdfClientRecord> records = PdfRosterParserService.ExtractRecordsFromLines([
@@ -106,7 +118,7 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
     }
 
     [Fact]
-    public void SaveToCsv_WritesTwelveColumnsBomAndReplacesExistingOutput()
+    public void SaveToCsv_WritesVaccineTypeColumnBomAndReplacesExistingOutput()
     {
         string outputPath = Path.Combine(_directory, "roster.csv");
         File.WriteAllText(outputPath, "old output", Encoding.UTF8);
@@ -118,7 +130,7 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
         byte[] bytes = File.ReadAllBytes(outputPath);
         string csv = File.ReadAllText(outputPath, Encoding.UTF8);
         Assert.Equal([0xEF, 0xBB, 0xBF], bytes.Take(3));
-        Assert.StartsWith("\"ClientId\",\"FullName\",\"DateOfBirth\",\"Medicare\",\"ClientIdStatus\",\"FirstName\",\"LastName\",\"MiddleName\",\"ErrorDetails\",\"BestMatch\",\"Phone\",\"Email\"", csv);
+        Assert.StartsWith("\"ClientId\",\"FullName\",\"DateOfBirth\",\"Medicare\",\"ClientIdStatus\",\"FirstName\",\"LastName\",\"MiddleName\",\"ErrorDetails\",\"BestMatch\",\"Phone\",\"Email\",\"VaccineType\"", csv);
         Assert.Contains("\"\",\"KOMBOU, LUC\",\"2017/10/01\",\"026547803\",\"0\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"", csv);
         Assert.DoesNotContain("old output", csv);
         Assert.Empty(Directory.EnumerateFiles(_directory, "*.tmp"));

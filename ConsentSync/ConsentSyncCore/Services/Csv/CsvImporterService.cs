@@ -42,7 +42,7 @@ public static class CsvImporterService
                 records.Add(new ClinicPdfClientRecord
                 {
                     ClientId = NullIfEmpty(Get(csv, "ClientId")), FullName = Get(csv, "FullName"), DateOfBirth = Get(csv, "DateOfBirth"),
-                    Medicare = NullIfEmpty(Get(csv, "Medicare")), ClientIdStatus = (ClientIdStatus)statusValue,
+                    Medicare = NullIfEmpty(Get(csv, "Medicare")), VaccineType = NullIfEmpty(Get(csv, "VaccineType")) ?? "Autre", ClientIdStatus = (ClientIdStatus)statusValue,
                     FirstName = NullIfEmpty(Get(csv, "FirstName")), LastName = NullIfEmpty(Get(csv, "LastName")),
                     MiddleName = NullIfEmpty(Get(csv, "MiddleName")), ErrorDetails = NullIfEmpty(Get(csv, "ErrorDetails")),
                     BestMatch = NullIfEmpty(Get(csv, "BestMatch")), Email = FirstNonBlank(csv, "Email", "Email Address"),

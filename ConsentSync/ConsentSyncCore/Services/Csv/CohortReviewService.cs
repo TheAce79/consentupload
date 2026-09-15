@@ -150,7 +150,7 @@ public sealed class CohortReviewService
     private static ClinicPdfClientRecord Materialize(CohortReviewRow row) => new()
     {
         ClientId = string.IsNullOrWhiteSpace(row.ClientId) ? null : row.ClientId,
-        FullName = row.Source.FullName, DateOfBirth = row.Source.DateOfBirth, Medicare = row.Source.Medicare,
+        FullName = row.Source.FullName, DateOfBirth = row.Source.DateOfBirth, Medicare = row.Source.Medicare, VaccineType = row.Source.VaccineType,
         ClientIdStatus = row.SearchStatus, FirstName = row.Source.FirstName, LastName = row.Source.LastName,
         MiddleName = row.Source.MiddleName, ErrorDetails = row.ErrorDetails, BestMatch = row.Source.BestMatch,
         Phone = row.Source.Phone, Email = row.Source.Email
