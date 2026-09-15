@@ -103,7 +103,6 @@ partial class CohortContextForm
         cb_SearchClientListName.Name = "cb_SearchClientListName";
         cb_SearchClientListName.Size = new Size(280, 28);
         cb_SearchClientListName.TabIndex = 1;
-        cb_SearchClientListName.SelectionChangeCommitted += cb_SearchClientListName_SelectionChangeCommitted;
         cb_SearchClientListName.KeyDown += cb_SearchClientListName_KeyDown;
         // 
         // lbl_SearchClientListName

@@ -163,6 +163,44 @@ public partial class CohortContextForm : Form
 
         try
         {
+            CohortContextEntity? nameMatch = await _dbManager.GetCohortContextByListNameAsync(context.ClientListName);
+            int activeContextId = _activeContext?.CohortContextId ?? 0;
+            if (nameMatch is not null && nameMatch.CohortContextId != activeContextId)
+            {
+                MessageBox.Show(
+                    this,
+                    $"A cohort context for '{context.ClientListName}' already exists. Choose a unique Client List Name.",
+                    "Duplicate Client List Name",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            CohortContextEntity? businessKeyMatch = await _dbManager.GetCohortContextByBusinessKeyAsync(
+                context.Prefix,
+                context.Location,
+                context.Type,
+                context.CohortDate);
+
+            if (businessKeyMatch is not null && businessKeyMatch.CohortContextId != context.CohortContextId)
+            {
+                if (nameMatch is not null)
+                {
+                    MessageBox.Show(
+                        this,
+                        "The selected cohort name belongs to the current record, but the setup fields belong to another saved cohort. Choose a unique Client List Name before saving.",
+                        "Duplicate Client List Name",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+
+                context.CohortContextId = businessKeyMatch.CohortContextId;
+                context.PhisCohortId = businessKeyMatch.PhisCohortId;
+                context.PhisClientListId = businessKeyMatch.PhisClientListId;
+                context.CreatedOn = businessKeyMatch.CreatedOn;
+            }
+
             LoggerService.LogInformation($"\n═══ Phase 0 — Saving cohort context: {context.ClientListName} ═══");
             int contextId = await _dbManager.SaveCohortContextAsync(context);
             context.CohortContextId = contextId;
@@ -591,9 +629,6 @@ public partial class CohortContextForm : Form
         };
     }
 
-    private async void cb_SearchClientListName_SelectionChangeCommitted(object? sender, EventArgs e) =>
-        await LoadSelectedCohortContextAsync();
-
     private async void cb_SearchClientListName_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.KeyCode != Keys.Enter)
@@ -991,13 +1026,12 @@ public partial class CohortContextForm : Form
         }
 
         string currentText = selectedClientListName ?? cb_SearchClientListName.Text;
-        IReadOnlyList<CohortContextEntity> savedLists = await _dbManager.GetRecentSavedListsAsync();
+        IReadOnlyList<string> savedLists = await _dbManager.GetRecentClientListNamesAsync();
 
         cb_SearchClientListName.Items.Clear();
         var autoComplete = new AutoCompleteStringCollection();
 
         foreach (string clientListName in savedLists
-            .Select(context => context.ClientListName)
             .Where(clientListName => !string.IsNullOrWhiteSpace(clientListName))
             .Distinct(StringComparer.OrdinalIgnoreCase))
         {

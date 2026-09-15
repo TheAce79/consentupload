@@ -364,6 +364,92 @@ public sealed class ConsentSyncDataTests : IDisposable
     }
 
     [Fact]
+    public async Task GetCohortContextByBusinessKeyAsync_FindsInactiveContextUsingNormalizedValues()
+    {
+        var manager = CreateManager();
+        int id = await manager.SaveCohortContextAsync(new CohortContextEntity
+        {
+            Prefix = "CIP",
+            Location = "MONCTON",
+            Type = "SP",
+            Jurisdiction = "Jurisdiction",
+            EncounterGroup = "Immunization",
+            ClientListName = "CIPMONCTONSP20260915",
+            CohortDate = new DateTime(2026, 9, 15),
+            PhisCohortId = 123,
+            PhisClientListId = 456,
+            CreatedOn = new DateTime(2026, 9, 1)
+        });
+
+        await manager.SaveCohortContextAsync(new CohortContextEntity
+        {
+            Prefix = "ETS",
+            Location = "SHEDIAC",
+            Type = "SP",
+            Jurisdiction = "Jurisdiction",
+            EncounterGroup = "Immunization",
+            ClientListName = "ETSSHEDIACSP20260916",
+            CohortDate = new DateTime(2026, 9, 16)
+        });
+
+        CohortContextEntity? found = await manager.GetCohortContextByBusinessKeyAsync(
+            " cip ", " moncton ", " sp ", new DateTime(2026, 9, 15));
+
+        Assert.Equal(id, found?.CohortContextId);
+        Assert.False(found?.IsActive);
+        Assert.Equal(123, found?.PhisCohortId);
+        Assert.Equal(456, found?.PhisClientListId);
+        Assert.Equal(new DateTime(2026, 9, 1), found?.CreatedOn);
+    }
+
+    [Fact]
+    public async Task SaveCohortContextAsync_UpdatesBusinessKeyMatchWithUniqueNameAndRetainsPhisFields()
+    {
+        var manager = CreateManager();
+        int originalId = await manager.SaveCohortContextAsync(new CohortContextEntity
+        {
+            Prefix = "CIP",
+            Location = "MONCTON",
+            Type = "SP",
+            Jurisdiction = "Original jurisdiction",
+            EncounterGroup = "Immunization",
+            ClientListName = "CIPMONCTONSP20260915",
+            CohortDate = new DateTime(2026, 9, 15),
+            PhisCohortId = 123,
+            PhisClientListId = 456,
+            CreatedOn = new DateTime(2026, 9, 1)
+        });
+
+        CohortContextEntity match = (await manager.GetCohortContextByBusinessKeyAsync(
+            "CIP", "MONCTON", "SP", new DateTime(2026, 9, 15)))!;
+        var renamed = new CohortContextEntity
+        {
+            CohortContextId = match.CohortContextId,
+            Prefix = "CIP",
+            Location = "MONCTON",
+            Type = "SP",
+            Jurisdiction = "Updated jurisdiction",
+            EncounterGroup = "Immunization",
+            ClientListName = "CIPMONCTONSP20260915_UPDATED",
+            CohortDate = new DateTime(2026, 9, 15),
+            PhisCohortId = match.PhisCohortId,
+            PhisClientListId = match.PhisClientListId,
+            CreatedOn = match.CreatedOn
+        };
+
+        int updatedId = await manager.SaveCohortContextAsync(renamed);
+        CohortContextEntity? saved = await manager.GetCohortContextByListNameAsync("cipmonctonsp20260915_updated");
+
+        Assert.Equal(originalId, updatedId);
+        Assert.Equal(originalId, saved?.CohortContextId);
+        Assert.Equal(123, saved?.PhisCohortId);
+        Assert.Equal(456, saved?.PhisClientListId);
+        Assert.Equal(new DateTime(2026, 9, 1), saved?.CreatedOn);
+        Assert.Equal("Updated jurisdiction", saved?.Jurisdiction);
+        Assert.Single(await manager.GetRecentCohortContextsAsync());
+    }
+
+    [Fact]
     public async Task SaveCohortContextAsync_AllowsUpdatingSameContext()
     {
         var manager = CreateManager();

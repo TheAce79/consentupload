@@ -239,6 +239,47 @@ public sealed class DbManager : IConsentSyncRepository
             new CommandDefinition(sql, new { ClientListName = normalizedListName }, cancellationToken: cancellationToken));
     }
 
+    public async Task<CohortContextEntity?> GetCohortContextByBusinessKeyAsync(
+        string prefix,
+        string location,
+        string type,
+        DateTime cohortDate,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(prefix) ||
+            string.IsNullOrWhiteSpace(location) ||
+            string.IsNullOrWhiteSpace(type) ||
+            cohortDate == default)
+        {
+            return null;
+        }
+
+        const string sql = """
+            SELECT CohortContextId, PhisCohortId, PhisClientListId, Prefix, Location, Type,
+                   Jurisdiction, EncounterGroup, ClientListName, CohortDate, IsActive, CreatedOn
+            FROM CohortContexts
+            WHERE UPPER(TRIM(Prefix)) = @Prefix
+              AND UPPER(TRIM(Location)) = @Location
+              AND UPPER(TRIM(Type)) = @Type
+              AND date(CohortDate) = date(@CohortDate)
+            LIMIT 1;
+            """;
+
+        var parameters = new
+        {
+            Prefix = prefix.Trim().ToUpperInvariant(),
+            Location = location.Trim().ToUpperInvariant(),
+            Type = type.Trim().ToUpperInvariant(),
+            CohortDate = cohortDate.Date
+        };
+
+        await using SqliteConnection connection = OpenSqliteConnection();
+        return await connection.QuerySingleOrDefaultAsync<CohortContextEntity>(
+            new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
+    }
+
     public async Task<IReadOnlyList<string>> GetRecentClientListNamesAsync(
         int take = 20,
         CancellationToken cancellationToken = default)
