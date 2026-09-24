@@ -128,7 +128,7 @@ public partial class CohortContextForm
             _reviewGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 DataPropertyName = property, Name = property, HeaderText = title,
-                ReadOnly = property != "ClientId", SortMode = DataGridViewColumnSortMode.NotSortable
+                ReadOnly = property is not ("ClientId" or "FullName" or "DateOfBirth" or "Medicare"), SortMode = DataGridViewColumnSortMode.NotSortable
             });
         }
         LavenderSlateTheme.ApplyGrid(_reviewGrid);
@@ -150,7 +150,7 @@ public partial class CohortContextForm
         _reviewGrid.DataError += (_, e) =>
         {
             e.ThrowException = false;
-            _reviewMessage.Text = "The value could not be applied. Enter the Client ID as text.";
+            _reviewMessage.Text = "The value could not be applied. Enter Client ID, Full Name, Date of Birth, and Medicare as text.";
         };
         var actionCard = new LavenderCardPanel { AutoSize = true, Dock = DockStyle.Fill };
         actionCard.Controls.Add(toolbar);
@@ -318,7 +318,7 @@ public partial class CohortContextForm
             _review = CohortReviewService.Load(source, saved, startFresh);
             _ = PreloadCacheForReviewAsync(_review.Rows);
             _reviewDirty = startFresh;
-            _reviewMessage.Text = startFresh ? "Fresh review started. Save Review will replace any previous saved review." : "Edit Client IDs or explicitly accept a suggested match. Original roster details are read-only.";
+            _reviewMessage.Text = startFresh ? "Fresh review started. Save Review will replace any previous saved review." : "Edit Client ID, Full Name, Date of Birth, or Medicare, or explicitly accept a suggested match.";
         }
         catch (Exception ex)
         {
@@ -739,7 +739,11 @@ public partial class CohortContextForm
 
     private async Task<bool> SaveReviewAsync()
     {
-        _reviewGrid.EndEdit();
+        if (!_reviewGrid.EndEdit())
+        {
+            _reviewMessage.Text = "Finish or correct the active cell before saving the review.";
+            return false;
+        }
         if (_review is null) return false;
         try
         {
@@ -812,7 +816,11 @@ public partial class CohortContextForm
 
     private bool SaveReviewSynchronouslyForTransition()
     {
-        _reviewGrid.EndEdit();
+        if (!_reviewGrid.EndEdit())
+        {
+            _reviewMessage.Text = "Finish or correct the active cell before saving the review.";
+            return false;
+        }
         if (_review is null) return false;
         try
         {

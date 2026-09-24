@@ -54,6 +54,32 @@ public sealed class CohortReviewServiceTests : IDisposable
     }
 
     [Fact]
+    public void DemographicCorrections_SaveReloadAndExportIncludingMedicareClear()
+    {
+        var review = CohortReviewService.Load(SourcePath, ReviewPath);
+        review.Rows[0].FullName = " Corrected Person ";
+        review.Rows[0].DateOfBirth = " 26/02/2020 ";
+        review.Rows[0].Medicare = "001234567";
+        review.Rows[1].Medicare = "";
+        review.Save();
+
+        var csvRows = CsvImporterService.ReadFromCsv(SourcePath);
+        Assert.Equal("Corrected Person", csvRows[0].FullName);
+        Assert.Equal("26/02/2020", csvRows[0].DateOfBirth);
+        Assert.Equal("001234567", csvRows[0].Medicare);
+        Assert.Null(csvRows[1].Medicare);
+
+        var restored = CohortReviewService.Load(SourcePath, ReviewPath);
+        Assert.Equal("Corrected Person", restored.Rows[0].FullName);
+        Assert.Equal("26/02/2020", restored.Rows[0].DateOfBirth);
+        Assert.Equal("001234567", restored.Rows[0].Medicare);
+        Assert.Equal(string.Empty, restored.Rows[1].Medicare);
+        Assert.True(restored.Rows[0].HasManualCorrection);
+        restored.Save();
+        Assert.Equal("001234567", CsvImporterService.ReadFromCsv(SourcePath)[0].Medicare);
+    }
+
+    [Fact]
     public void ChangedSource_BlocksRestoreAndSaveUntilExplicitFreshReview()
     {
         var review = CohortReviewService.Load(SourcePath, ReviewPath);
@@ -120,14 +146,15 @@ public sealed class CohortReviewServiceTests : IDisposable
     [Fact]
     public void LegacySidecarOverride_UsesEffectiveFoundStatusWhenLoaded()
     {
-        var document = new CohortReviewService.ReviewDocument
+        var document = new
         {
+            Version = 1,
             SourceFingerprint = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(SourcePath))),
-            Rows =
-            [
-                new() { RowNumber = 1 },
-                new() { RowNumber = 2, ClientIdOverride = "00077" }
-            ]
+            Rows = new[]
+            {
+                new { RowNumber = 1, ClientIdOverride = (string?)null, Excluded = false },
+                new { RowNumber = 2, ClientIdOverride = (string?)"00077", Excluded = false }
+            }
         };
         File.WriteAllText(ReviewPath, JsonSerializer.Serialize(document));
 
@@ -155,6 +182,26 @@ public sealed class CohortReviewServiceTests : IDisposable
             Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM PhisClientCache;"));
             Assert.Equal("001", await connection.ExecuteScalarAsync<string>("SELECT ClientId FROM PhisClientCache;"));
         }
+        SqliteConnection.ClearAllPools();
+    }
+
+    [Fact]
+    public async Task SyncResolvedClientsAsync_UsesManualDemographicsAndMedicare()
+    {
+        var review = CohortReviewService.Load(SourcePath, ReviewPath);
+        review.Rows[0].FullName = "Corrected Person";
+        review.Rows[0].DateOfBirth = "26/02/2020";
+        review.Rows[0].Medicare = "001234567";
+        var manager = new DbManager(_directory, "cache.db");
+
+        await review.SyncResolvedClientsAsync(manager);
+
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(_directory, "cache.db"), Pooling = false }.ToString());
+        var cached = await connection.QuerySingleAsync<ConsentSync.Data.Entities.PhisClientCacheEntity>("SELECT * FROM PhisClientCache;");
+        Assert.Equal("Corrected Person", cached.FullName);
+        Assert.Equal("2020/02/26", cached.DateOfBirth);
+        Assert.Equal("001234567", cached.Medicare);
+        Assert.Equal(ConsentSync.Data.Entities.ClientSource.ManualReview, cached.Source);
         SqliteConnection.ClearAllPools();
     }
 

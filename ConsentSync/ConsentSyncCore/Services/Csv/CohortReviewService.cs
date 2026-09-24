@@ -37,6 +37,9 @@ public sealed class CohortReviewService
             for (int i = 0; i < review.Rows.Count; i++)
             {
                 review.Rows[i].ClientIdOverride = saved.Rows[i].ClientIdOverride;
+                review.Rows[i].FullNameOverride = saved.Rows[i].FullNameOverride;
+                review.Rows[i].DateOfBirthOverride = saved.Rows[i].DateOfBirthOverride;
+                review.Rows[i].MedicareOverride = saved.Rows[i].MedicareOverride;
                 review.Rows[i].Excluded = saved.Rows[i].Excluded;
             }
         }
@@ -122,7 +125,9 @@ public sealed class CohortReviewService
             {
                 CacheKey = DbManager.BuildCacheKey(row.FullName, row.DateOfBirth), ClientId = row.ClientId,
                 FullName = row.FullName, DateOfBirth = row.DateOfBirth, Email = row.Email,
-                Source = row.ClientIdOverride is null ? ClientSource.PhisSearch : ClientSource.ManualReview,
+                // Null preserves an existing cache value. An empty override intentionally clears it.
+                Medicare = row.MedicareOverride,
+                Source = row.HasManualCorrection ? ClientSource.ManualReview : ClientSource.PhisSearch,
                 UpdatedOn = DateTime.UtcNow
             }).ToList();
         _lastCacheSyncCandidates = entities;
@@ -144,13 +149,15 @@ public sealed class CohortReviewService
 
     private List<ReviewEntry> CreateEntries() => Rows.Select(r => new ReviewEntry
     {
-        RowNumber = r.RowNumber, ClientIdOverride = r.ClientIdOverride, Excluded = r.Excluded
+        RowNumber = r.RowNumber, ClientIdOverride = r.ClientIdOverride,
+        FullNameOverride = r.FullNameOverride, DateOfBirthOverride = r.DateOfBirthOverride,
+        MedicareOverride = r.MedicareOverride, Excluded = r.Excluded
     }).ToList();
 
     private static ClinicPdfClientRecord Materialize(CohortReviewRow row) => new()
     {
         ClientId = string.IsNullOrWhiteSpace(row.ClientId) ? null : row.ClientId,
-        FullName = row.Source.FullName, DateOfBirth = row.Source.DateOfBirth, Medicare = row.Source.Medicare, VaccineType = row.Source.VaccineType,
+        FullName = row.FullName, DateOfBirth = row.DateOfBirth, Medicare = row.Medicare, VaccineType = row.Source.VaccineType,
         ClientIdStatus = row.SearchStatus, FirstName = row.Source.FirstName, LastName = row.Source.LastName,
         MiddleName = row.Source.MiddleName, ErrorDetails = row.ErrorDetails, BestMatch = row.Source.BestMatch,
         Phone = row.Source.Phone, Email = row.Source.Email
@@ -196,6 +203,9 @@ public sealed class CohortReviewService
     {
         public int RowNumber { get; set; }
         public string? ClientIdOverride { get; set; }
+        public string? FullNameOverride { get; set; }
+        public string? DateOfBirthOverride { get; set; }
+        public string? MedicareOverride { get; set; }
         public bool Excluded { get; set; }
     }
 

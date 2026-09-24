@@ -177,6 +177,46 @@ public sealed class ConsentSyncDataTests : IDisposable
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM PhisClientCache;"));
     }
 
+    [Fact]
+    public async Task ClientCache_MedicarePreservesExistingValueUnlessExplicitlyCleared()
+    {
+        var manager = CreateManager();
+        var client = Client("SAME", "2020/02/26", "001");
+        client.Medicare = "001234567";
+        await manager.BulkSaveClientCacheAsync([client]);
+
+        await manager.BulkSaveClientCacheAsync([Client("SAME", "2020/02/26", "002")]);
+        await using var connection = OpenConnection();
+        Assert.Equal("001234567", await connection.ExecuteScalarAsync<string>("SELECT Medicare FROM PhisClientCache;"));
+
+        var clear = Client("SAME", "2020/02/26", "003");
+        clear.Medicare = string.Empty;
+        await manager.BulkSaveClientCacheAsync([clear]);
+        Assert.Equal(string.Empty, await connection.ExecuteScalarAsync<string>("SELECT Medicare FROM PhisClientCache;"));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_AddsMedicareToExistingCacheWithoutLosingRows()
+    {
+        await using (var connection = OpenConnection())
+        {
+            await connection.ExecuteAsync("""
+                CREATE TABLE PhisClientCache (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT, CacheKey TEXT NOT NULL UNIQUE, ClientId TEXT NOT NULL,
+                    FullName TEXT NOT NULL, DateOfBirth TEXT NOT NULL, Email TEXT NULL, Source INTEGER NOT NULL, UpdatedOn TEXT NOT NULL);
+                INSERT INTO PhisClientCache (CacheKey, ClientId, FullName, DateOfBirth, Source, UpdatedOn)
+                VALUES ('PERSON_2020/02/26', '001', 'Person', '2020/02/26', 0, '2026-01-01');
+                """);
+        }
+
+        await CreateManager().InitializeAsync();
+
+        await using var upgraded = OpenConnection();
+        Assert.Contains("Medicare", await upgraded.QueryAsync<string>("SELECT name FROM pragma_table_info('PhisClientCache');"));
+        Assert.Equal("001", await upgraded.ExecuteScalarAsync<string>("SELECT ClientId FROM PhisClientCache;"));
+        Assert.Null(await upgraded.ExecuteScalarAsync<string?>("SELECT Medicare FROM PhisClientCache;"));
+    }
+
     private static PhisClientCacheEntity Client(string name, string dob, string id) => new()
     {
         CacheKey = DbManager.BuildCacheKey(name, dob), ClientId = id, FullName = name, DateOfBirth = dob,

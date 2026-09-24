@@ -123,13 +123,14 @@ public sealed class DbManager : IConsentSyncRepository
 
         const string sql = """
             INSERT INTO PhisClientCache
-                (CacheKey, ClientId, FullName, DateOfBirth, Email, Source, UpdatedOn)
+                (CacheKey, ClientId, FullName, DateOfBirth, Medicare, Email, Source, UpdatedOn)
             VALUES
-                (@CacheKey, @ClientId, @FullName, @DateOfBirth, @Email, @Source, @UpdatedOn)
+                (@CacheKey, @ClientId, @FullName, @DateOfBirth, @Medicare, @Email, @Source, @UpdatedOn)
             ON CONFLICT(CacheKey) DO UPDATE SET
                 ClientId = excluded.ClientId,
                 FullName = excluded.FullName,
                 DateOfBirth = excluded.DateOfBirth,
+                Medicare = COALESCE(excluded.Medicare, Medicare),
                 Email = excluded.Email,
                 Source = excluded.Source,
                 UpdatedOn = excluded.UpdatedOn
@@ -155,7 +156,7 @@ public sealed class DbManager : IConsentSyncRepository
         foreach (var batch in dates.Chunk(500))
         {
             var values = batch.SelectMany(date => new[] { date.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture), date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), date.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) }).Distinct().ToArray();
-            const string sql = "SELECT Id, CacheKey, ClientId, FullName, DateOfBirth, Email, Source, UpdatedOn FROM PhisClientCache WHERE DateOfBirth IN @Values;";
+            const string sql = "SELECT Id, CacheKey, ClientId, FullName, DateOfBirth, Medicare, Email, Source, UpdatedOn FROM PhisClientCache WHERE DateOfBirth IN @Values;";
             await using SqliteConnection connection = OpenSqliteConnection();
             IEnumerable<PhisClientCacheEntity> clients = await connection.QueryAsync<PhisClientCacheEntity>(new CommandDefinition(sql, new { Values = values }, cancellationToken: cancellationToken));
             loaded.AddRange(clients.Where(client => TryNormalizeDateOfBirth(client.DateOfBirth) is not null));
@@ -176,10 +177,10 @@ public sealed class DbManager : IConsentSyncRepository
             .Select(NormalizeClient).ToList();
         if (items.Count == 0) return;
         const string sql = """
-            INSERT INTO PhisClientCache (CacheKey, ClientId, FullName, DateOfBirth, Email, Source, UpdatedOn)
-            VALUES (@CacheKey, @ClientId, @FullName, @DateOfBirth, @Email, @Source, @UpdatedOn)
+            INSERT INTO PhisClientCache (CacheKey, ClientId, FullName, DateOfBirth, Medicare, Email, Source, UpdatedOn)
+            VALUES (@CacheKey, @ClientId, @FullName, @DateOfBirth, @Medicare, @Email, @Source, @UpdatedOn)
             ON CONFLICT(CacheKey) DO UPDATE SET ClientId=excluded.ClientId, FullName=excluded.FullName,
-                DateOfBirth=excluded.DateOfBirth, Email=excluded.Email, Source=excluded.Source, UpdatedOn=excluded.UpdatedOn;
+                DateOfBirth=excluded.DateOfBirth, Medicare=COALESCE(excluded.Medicare, Medicare), Email=excluded.Email, Source=excluded.Source, UpdatedOn=excluded.UpdatedOn;
             """;
         await using SqliteConnection connection = OpenSqliteConnection();
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -643,6 +644,7 @@ public sealed class DbManager : IConsentSyncRepository
         client.ClientId,
         client.FullName,
         client.DateOfBirth,
+        client.Medicare,
         client.Email,
         Source = (int)client.Source,
         client.UpdatedOn
@@ -695,6 +697,7 @@ public sealed class DbManager : IConsentSyncRepository
                 ClientId TEXT NOT NULL,
                 FullName TEXT NOT NULL,
                 DateOfBirth TEXT NOT NULL,
+                Medicare TEXT NULL,
                 Email TEXT NULL,
                 Source INTEGER NOT NULL,
                 UpdatedOn TEXT NOT NULL
@@ -788,6 +791,9 @@ public sealed class DbManager : IConsentSyncRepository
             """;
 
         await connection.ExecuteAsync(sql);
+        var cacheColumns = await connection.QueryAsync<string>("SELECT name FROM pragma_table_info('PhisClientCache');");
+        if (!cacheColumns.Contains("Medicare", StringComparer.OrdinalIgnoreCase))
+            await connection.ExecuteAsync("ALTER TABLE PhisClientCache ADD COLUMN Medicare TEXT NULL;");
     }
 
     private static async Task<int> InsertCohortContextAsync(

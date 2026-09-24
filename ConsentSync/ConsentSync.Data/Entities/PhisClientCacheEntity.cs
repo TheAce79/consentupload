@@ -16,6 +16,7 @@ namespace ConsentSync.Data.Entities
         public string ClientId { get; set; } = string.Empty; // PHIS System ID (e.g. 1512481)
         public string FullName { get; set; } = string.Empty;
         public string DateOfBirth { get; set; } = string.Empty;
+        public string? Medicare { get; set; }
         public string? Email { get; set; }
         public ClientSource Source { get; set; } = ClientSource.PhisSearch;
         public DateTime UpdatedOn { get; set; } = DateTime.UtcNow;
