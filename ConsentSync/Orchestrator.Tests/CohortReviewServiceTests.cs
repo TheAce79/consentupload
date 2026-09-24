@@ -19,7 +19,7 @@ public sealed class CohortReviewServiceTests : IDisposable
     {
         Directory.CreateDirectory(_directory);
         CsvExporterService.SaveToCsv([
-            new() { FullName = "First", DateOfBirth = "2020/02/26", ClientId = "001", ClientIdStatus = ClientIdStatus.Found },
+            new() { FullName = "First", DateOfBirth = "2020/02/26", ClientId = "001", ClientIdStatus = ClientIdStatus.Found, BookingId = "BOOK-1", ClinicDate = "2026-10-02", PreferredLanguage = "Français" },
             new() { FullName = "Second", DateOfBirth = "2020/02/26", ClientIdStatus = ClientIdStatus.NeedsManualReview, BestMatch = "A#B##001#95.0%" }
         ], SourcePath);
     }
@@ -47,6 +47,9 @@ public sealed class CohortReviewServiceTests : IDisposable
         Assert.Equal([ClientIdStatus.NeedsManualReview, ClientIdStatus.Found], csvRows.Select(r => r.ClientIdStatus));
         Assert.Equal("Client ID cleared during manual review.", csvRows[0].ErrorDetails);
         Assert.Equal("A#B##001#95.0%", csvRows[1].BestMatch);
+        Assert.Equal("BOOK-1", csvRows[0].BookingId);
+        Assert.Equal("2026-10-02", csvRows[0].ClinicDate);
+        Assert.Equal("Français", csvRows[0].PreferredLanguage);
         restored.Rows[1].Excluded = true;
         restored.Save();
         Assert.True(CohortReviewService.Load(SourcePath, ReviewPath).Rows[1].Excluded);

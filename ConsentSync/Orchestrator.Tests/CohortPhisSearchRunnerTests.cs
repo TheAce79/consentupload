@@ -7,6 +7,17 @@ namespace Orchestrator.Tests;
 public sealed class CohortPhisSearchRunnerTests
 {
     [Fact]
+    public async Task ExecuteSearchAsync_NormalizesIsoDateForPhisSearch()
+    {
+        var search = new FakeSearch { Dob = SearchResult.NoResults() };
+        var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2020-02-03" };
+
+        await new CohortPhisSearchRunner(search, 1).ExecuteSearchAsync([record]);
+
+        Assert.Equal("2020/02/03", search.DobSearches.Single());
+        Assert.Equal("2020-02-03", record.DateOfBirth);
+    }
+    [Fact]
     public async Task ExecuteSearchAsync_ResolvesInvertedAccentedNameAndEnrichesRecord()
     {
         var search = new FakeSearch { Dob = Success(Active("42", "LUC OLIVIER", "KOMBOU TCHAPDU", "MARTIN")) };
@@ -349,11 +360,12 @@ public sealed class CohortPhisSearchRunnerTests
         public SearchResult Medicare { get; init; } = SearchResult.NoResults();
         public SearchResult Email { get; init; } = SearchResult.NoResults();
         public int MedicareCalls { get; private set; }
+        public List<string> DobSearches { get; } = [];
         public int EmailCalls { get; private set; }
         public bool ThrowOnEmailSearch { get; init; }
         public int PreviewCalls { get; private set; }
         public PhisClientPreview? Preview { get; init; }
-        public Task<SearchResult> SearchByDobAsync(string dateOfBirth, string? expectedFirstName = null, string? expectedLastName = null, string? expectedMedicare = null) => Task.FromResult(Dob);
+        public Task<SearchResult> SearchByDobAsync(string dateOfBirth, string? expectedFirstName = null, string? expectedLastName = null, string? expectedMedicare = null) { DobSearches.Add(dateOfBirth); return Task.FromResult(Dob); }
         public Task<SearchResult> SearchByMedicareAsync(string medicareNumber) { MedicareCalls++; return Task.FromResult(Medicare); }
         public Task<SearchResult> SearchByEmailAsync(string email) { EmailCalls++; if (ThrowOnEmailSearch) throw new InvalidOperationException("browser failure"); return Task.FromResult(Email); }
         public Task<PhisClientPreview?> GetClientPreviewAsync(string clientId) { PreviewCalls++; return Task.FromResult(Preview); }

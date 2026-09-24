@@ -31,4 +31,15 @@ public class ClinicPdfClientRecord
 
     /// <summary>Telephone supplied by the CSV for preview identity verification.</summary>
     public string? Phone { get; set; }
+
+    // Raw AbleAssess values retained for downstream eligibility and audit work.
+    public string? BookingId { get; set; }
+    public string? ClinicName { get; set; }
+    public string? ClinicDate { get; set; }
+    public string? AppointmentType { get; set; }
+    public string? CatalogItem { get; set; }
+    public string? Timeslot { get; set; }
+    public string? Comment { get; set; }
+    public string? SdcId { get; set; }
+    public string? PreferredLanguage { get; set; }
 }

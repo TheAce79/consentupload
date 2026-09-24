@@ -362,9 +362,13 @@ public partial class CohortContextForm : Form
             outputCsvPath = CohortWorkspaceService.GetStandardizedOutputCsvPath(config, clientListName);
             if (!File.Exists(inputCsvPath))
             {
-                LoggerService.LogWarning($"Phase 2 input CSV was not found: {inputCsvPath}");
-                MessageBox.Show(this, $"Input CSV not found:\n{inputCsvPath}\n\nPlease extract or place a CSV in 1. InputFolder\\1 Input CSV first.", "File Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                using var dialog = new OpenFileDialog
+                {
+                    InitialDirectory = Path.GetDirectoryName(inputCsvPath), Filter = "CSV files (*.csv)|*.csv", Multiselect = false,
+                    Title = "Select an AbleAssess or cohort CSV"
+                };
+                if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.FileName)) return;
+                inputCsvPath = dialog.FileName;
             }
         }
         catch (Exception ex)

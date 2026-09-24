@@ -26,14 +26,14 @@ public sealed class CohortPhisSearchRunner
             string recordLabel = $"Record {i + 1}/{records.Count} ({DisplayName(record)}, DOB {record.DateOfBirth})";
             LoggerService.LogInformation($"\n🔎 Phase 2 {recordLabel}");
             progress?.Report(new Phase2Progress(i + 1, records.Count, record.DateOfBirth, DisplayName(record)));
-            if (!DateTime.TryParseExact(record.DateOfBirth, "yyyy/MM/dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+            if (!DateOnly.TryParseExact(record.DateOfBirth, ["yyyy/MM/dd", "yyyy-MM-dd"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
             {
                 MarkFailed(record, "InvalidDateOfBirth");
                 LogOutcome(recordLabel, record);
                 continue;
             }
 
-            SearchResult dobResult = await _searchService.SearchByDobAsync(record.DateOfBirth);
+            SearchResult dobResult = await _searchService.SearchByDobAsync(parsedDate.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture));
             LogSearchResult(recordLabel, "DOB", dobResult);
             EnsureSearchSucceeded(dobResult, "DOB", recordLabel);
             CandidateSelection candidates = GetActiveCandidates(dobResult.Results);

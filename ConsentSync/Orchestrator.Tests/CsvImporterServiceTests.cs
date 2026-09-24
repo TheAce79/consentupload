@@ -69,5 +69,39 @@ public sealed class CsvImporterServiceTests : IDisposable
         Assert.Contains("row 2", Assert.Throws<FormatException>(() => CsvImporterService.ReadFromCsv(path)).Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void ReadFromCsv_CanonicalizesAbleAssessAndRoundTripsMetadata()
+    {
+        string input = Path.Combine(_directory, "able.csv");
+        File.WriteAllText(input, " BookingID ,Clinic Name,Clinic Date,Appointment Type,Catalog Item,Enrolled Person Name,Medicare Number,Email,Date of Birth,Phone,Timeslot,Comment,SDC Id,Preferred Language\nB-1,Clinique Étoile,2026-10-02,Catchup Appointment,\"\",\" AWE DJONYANG, BOUAGNI JEDIDJA \", NaN , parent@example.test ,2/3/2020,05065881736,09:00,Français,SDC-9,Français\n", Encoding.UTF8);
+
+        ClinicPdfClientRecord record = Assert.Single(CsvImporterService.ReadFromCsv(input));
+        Assert.Null(record.ClientId); Assert.Equal(ClientIdStatus.NeedsManualReview, record.ClientIdStatus);
+        Assert.Equal("AWE DJONYANG, BOUAGNI JEDIDJA", record.FullName); Assert.Equal("2020-02-03", record.DateOfBirth);
+        Assert.Null(record.Medicare); Assert.Equal("05065881736", record.Phone); Assert.Equal("Catchup Appointment", record.VaccineType);
+        Assert.Equal("B-1", record.BookingId); Assert.Equal("Clinique Étoile", record.ClinicName); Assert.Equal("Français", record.PreferredLanguage);
+
+        record.ClientId = "001"; record.ClientIdStatus = ClientIdStatus.Found;
+        string output = Path.Combine(_directory, "able-out.csv");
+        CsvExporterService.SaveToCsv([record], output);
+        string csv = File.ReadAllText(output, Encoding.UTF8);
+        Assert.Contains("\"Booking ID\"", csv); Assert.Contains("\"Preferred Language\"", csv);
+        ClinicPdfClientRecord reread = Assert.Single(CsvImporterService.ReadFromCsv(output));
+        Assert.Equal("001", reread.ClientId); Assert.Equal(ClientIdStatus.Found, reread.ClientIdStatus);
+        Assert.Equal("B-1", reread.BookingId); Assert.Equal("Clinique Étoile", reread.ClinicName);
+    }
+
+    [Fact]
+    public void ReadFromCsv_AbleAssessReportsMissingRequiredAndInvalidDates()
+    {
+        string missing = Path.Combine(_directory, "missing.csv");
+        File.WriteAllText(missing, "Booking ID,Date of Birth\nB-1,2/3/2020\n", Encoding.UTF8);
+        Assert.Contains("Enrolled Person Name", Assert.Throws<FormatException>(() => CsvImporterService.ReadFromCsv(missing)).Message);
+
+        string invalid = Path.Combine(_directory, "invalid.csv");
+        File.WriteAllText(invalid, "Booking ID,Enrolled Person Name,Date of Birth\nB-1,Name,2020/40/03\n", Encoding.UTF8);
+        Assert.Contains("row 2", Assert.Throws<FormatException>(() => CsvImporterService.ReadFromCsv(invalid)).Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }
 }

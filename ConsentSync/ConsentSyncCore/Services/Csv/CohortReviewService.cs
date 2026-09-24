@@ -160,7 +160,10 @@ public sealed class CohortReviewService
         FullName = row.FullName, DateOfBirth = row.DateOfBirth, Medicare = row.Medicare, VaccineType = row.Source.VaccineType,
         ClientIdStatus = row.SearchStatus, FirstName = row.Source.FirstName, LastName = row.Source.LastName,
         MiddleName = row.Source.MiddleName, ErrorDetails = row.ErrorDetails, BestMatch = row.Source.BestMatch,
-        Phone = row.Source.Phone, Email = row.Source.Email
+        Phone = row.Source.Phone, Email = row.Source.Email,
+        BookingId = row.Source.BookingId, ClinicName = row.Source.ClinicName, ClinicDate = row.Source.ClinicDate,
+        AppointmentType = row.Source.AppointmentType, CatalogItem = row.Source.CatalogItem, Timeslot = row.Source.Timeslot,
+        Comment = row.Source.Comment, SdcId = row.Source.SdcId, PreferredLanguage = row.Source.PreferredLanguage
     };
 
     private Exception? RestorePreviousPair(string csvBackup, string reviewBackup, bool hadReview)
