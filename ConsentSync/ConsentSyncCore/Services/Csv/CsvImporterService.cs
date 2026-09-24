@@ -7,17 +7,29 @@ namespace ConsentSyncCore.Services.Csv;
 
 public static class CsvImporterService
 {
-    private static readonly string[] RequiredCanonicalHeaders = ["ClientId", "FullName", "DateOfBirth", "Medicare", "ClientIdStatus", "FirstName", "LastName", "MiddleName"];
+    private static readonly string[] RequiredCanonicalFields = ["ClientId", "FullName", "DateOfBirth", "Medicare", "ClientIdStatus", "FirstName", "LastName", "MiddleName"];
+    private static readonly IReadOnlyDictionary<string, string[]> CanonicalHeaders = new Dictionary<string, string[]>
+    {
+        ["ClientId"] = ["ClientId"], ["FullName"] = ["FullName"], ["DateOfBirth"] = ["DateOfBirth"], ["Medicare"] = ["Medicare"],
+        ["ClientIdStatus"] = ["ClientIdStatus"], ["FirstName"] = ["FirstName"], ["LastName"] = ["LastName"], ["MiddleName"] = ["MiddleName"],
+        ["ErrorDetails"] = ["ErrorDetails"], ["BestMatch"] = ["BestMatch"], ["Phone"] = ["Phone", "Phone Number", "Telephone Number"],
+        ["Email"] = ["Email", "Email Address"], ["VaccineType"] = ["VaccineType"],
+        ["BookingId"] = ["Booking ID"], ["ClinicName"] = ["Clinic Name"], ["ClinicDate"] = ["Clinic Date"],
+        ["AppointmentType"] = ["Appointment Type"], ["CatalogItem"] = ["Catalog Item"], ["Timeslot"] = ["Timeslot"],
+        ["Comment"] = ["Comment"], ["SdcId"] = ["SDC Id"], ["PreferredLanguage"] = ["Preferred Language"]
+    };
 
-    // Add French AbleAssess header aliases here when an actual French export is available.
-    // Keep aliases grouped by canonical field so detection and extraction stay in sync.
+    // Provisional aliases pending a real French AbleAssess export. Add verified aliases here.
     private static readonly IReadOnlyDictionary<string, string[]> AbleAssessHeaders = new Dictionary<string, string[]>
     {
-        ["BookingId"] = ["Booking ID", "BookingID"], ["ClinicName"] = ["Clinic Name"], ["ClinicDate"] = ["Clinic Date"],
-        ["AppointmentType"] = ["Appointment Type"], ["CatalogItem"] = ["Catalog Item"], ["FullName"] = ["Enrolled Person Name"],
-        ["Medicare"] = ["Medicare Number"], ["Email"] = ["Email"], ["DateOfBirth"] = ["Date of Birth"],
-        ["Phone"] = ["Phone"], ["Timeslot"] = ["Timeslot"], ["Comment"] = ["Comment"],
-        ["SdcId"] = ["SDC Id"], ["PreferredLanguage"] = ["Preferred Language"]
+        ["BookingId"] = ["Booking ID", "BookingID", "ID de réservation", "No de réservation", "ID réservation"],
+        ["ClinicName"] = ["Clinic Name"], ["ClinicDate"] = ["Clinic Date", "Date de la clinique"],
+        ["AppointmentType"] = ["Appointment Type", "Type de rendez-vous"], ["CatalogItem"] = ["Catalog Item", "Article du catalogue"],
+        ["FullName"] = ["Enrolled Person Name", "Nom de la personne inscrite", "Nom"],
+        ["Medicare"] = ["Medicare Number", "Numéro d'assurance-maladie", "Assurance-maladie"],
+        ["Email"] = ["Email", "Courriel", "Adresse courriel"], ["DateOfBirth"] = ["Date of Birth", "Date de naissance"],
+        ["Phone"] = ["Phone", "Téléphone", "No de téléphone"], ["Timeslot"] = ["Timeslot", "Plage horaire", "Heure"],
+        ["Comment"] = ["Comment"], ["SdcId"] = ["SDC Id"], ["PreferredLanguage"] = ["Preferred Language", "Langue préférée"]
     };
 
     public static List<ClinicPdfClientRecord> ReadFromCsv(string csvFilePath)
@@ -30,70 +42,93 @@ public static class CsvImporterService
         {
             BadDataFound = args => throw new FormatException($"Malformed CSV data at row {args.Context?.Parser?.Row ?? 0}."),
             MissingFieldFound = args => throw new FormatException($"Missing field at row {args.Context?.Parser?.Row ?? 0}."),
-            HeaderValidated = null,
-            TrimOptions = TrimOptions.Trim
+            HeaderValidated = null, TrimOptions = TrimOptions.Trim
         });
 
         if (!csv.Read() || !csv.ReadHeader()) return [];
-        var headers = (csv.HeaderRecord ?? []).ToDictionary(NormalizeHeader, header => header, StringComparer.OrdinalIgnoreCase);
-        InputSourceType source = HasAllCanonicalHeaders(headers) ? InputSourceType.PdfRoster : DetectSource(headers);
-        if (source == InputSourceType.PdfRoster) ValidateCanonicalHeaders(headers);
-        else ValidateAbleAssessHeaders(headers);
+        string[] headers = csv.HeaderRecord ?? [];
+        bool isCanonical = RequiredCanonicalFields.All(field => FindMatchingIndexes(headers, CanonicalHeaders[field]).Count > 0);
+        var fieldIndexes = ResolveHeaders(headers, isCanonical ? CanonicalHeaders : AbleAssessHeaders);
+        InputSourceType source = isCanonical ? InputSourceType.PdfRoster : DetectSource(fieldIndexes);
+        if (source == InputSourceType.PdfRoster) ValidateCanonicalHeaders(fieldIndexes);
+        else ValidateAbleAssessHeaders(fieldIndexes);
 
         var records = new List<ClinicPdfClientRecord>();
         while (csv.Read())
         {
-            try { records.Add(source == InputSourceType.AbleAssess ? ReadAbleAssess(csv, headers) : ReadCanonical(csv)); }
+            try { records.Add(source == InputSourceType.AbleAssess ? ReadAbleAssess(csv, fieldIndexes) : ReadCanonical(csv, fieldIndexes)); }
             catch (Exception ex) when (ex is not FormatException || !ex.Message.Contains("row", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new FormatException($"CSV row {csv.Parser.Row}: {ex.Message}", ex);
-            }
+            { throw new FormatException($"CSV row {csv.Parser.Row}: {ex.Message}", ex); }
         }
         return records;
     }
 
-    private static InputSourceType DetectSource(IReadOnlyDictionary<string, string> headers) => FindHeader(headers, AbleAssessHeaders["BookingId"]) is not null ? InputSourceType.AbleAssess : InputSourceType.PdfRoster;
-    private static bool HasAllCanonicalHeaders(IReadOnlyDictionary<string, string> headers) => RequiredCanonicalHeaders.All(header => headers.ContainsKey(NormalizeHeader(header)));
-    private static void ValidateCanonicalHeaders(IReadOnlyDictionary<string, string> headers)
+    private static Dictionary<string, int> ResolveHeaders(string[] headers, IReadOnlyDictionary<string, string[]> aliases)
     {
-        foreach (string header in RequiredCanonicalHeaders)
-            if (!headers.ContainsKey(NormalizeHeader(header))) throw new FormatException($"CSV header is missing required column '{header}'.");
+        var resolved = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach ((string field, string[] fieldAliases) in aliases)
+        {
+            List<int> matches = FindMatchingIndexes(headers, fieldAliases);
+            if (matches.Count > 1) throw new FormatException($"CSV header maps multiple columns to '{field}': {string.Join(", ", matches.Select(index => $"'{headers[index]}'"))}.");
+            if (matches.Count == 1) resolved[field] = matches[0];
+        }
+        return resolved;
     }
-    private static void ValidateAbleAssessHeaders(IReadOnlyDictionary<string, string> headers)
+
+    private static List<int> FindMatchingIndexes(string[] headers, IEnumerable<string> aliases) => headers.Select((header, index) => new { header, index })
+        .Where(item => HeaderMatchesAliases(item.header, aliases)).Select(item => item.index).ToList();
+
+    private static bool HeaderMatchesAliases(string header, IEnumerable<string> aliases)
+    {
+        string normalizedHeader = NormalizeHeader(header);
+        string[] normalizedAliases = aliases.Select(NormalizeHeader).ToArray();
+        if (normalizedAliases.Any(alias => string.Equals(normalizedHeader, alias, StringComparison.OrdinalIgnoreCase))) return true;
+        string[] segments = normalizedHeader.Split('/', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length == 2 && segments.All(segment => normalizedAliases.Any(alias => string.Equals(segment, alias, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static InputSourceType DetectSource(IReadOnlyDictionary<string, int> indexes) => indexes.ContainsKey("BookingId") ? InputSourceType.AbleAssess : InputSourceType.PdfRoster;
+    private static void ValidateCanonicalHeaders(IReadOnlyDictionary<string, int> indexes)
+    {
+        foreach (string field in RequiredCanonicalFields)
+            if (!indexes.ContainsKey(field)) throw new FormatException($"CSV header is missing required column '{CanonicalHeaders[field][0]}'.");
+    }
+    private static void ValidateAbleAssessHeaders(IReadOnlyDictionary<string, int> indexes)
     {
         foreach (string field in new[] { "FullName", "DateOfBirth" })
-            if (FindHeader(headers, AbleAssessHeaders[field]) is null) throw new FormatException($"AbleAssess CSV header is missing required column '{AbleAssessHeaders[field][0]}'.");
+            if (!indexes.ContainsKey(field)) throw new FormatException($"AbleAssess CSV header is missing required column '{AbleAssessHeaders[field][0]}'.");
     }
-    private static ClinicPdfClientRecord ReadCanonical(CsvReader csv) => new()
+
+    private static ClinicPdfClientRecord ReadCanonical(CsvReader csv, IReadOnlyDictionary<string, int> fields) => new()
     {
-        ClientId = NullIfEmpty(Get(csv, "ClientId")), FullName = Get(csv, "FullName"), DateOfBirth = Get(csv, "DateOfBirth"),
-        Medicare = NullIfEmpty(Get(csv, "Medicare")), VaccineType = NullIfEmpty(Get(csv, "VaccineType")) ?? "Autre", ClientIdStatus = ParseStatus(Get(csv, "ClientIdStatus")),
-        FirstName = NullIfEmpty(Get(csv, "FirstName")), LastName = NullIfEmpty(Get(csv, "LastName")), MiddleName = NullIfEmpty(Get(csv, "MiddleName")),
-        ErrorDetails = NullIfEmpty(Get(csv, "ErrorDetails")), BestMatch = NullIfEmpty(Get(csv, "BestMatch")), Email = FirstNonBlank(csv, "Email", "Email Address"), Phone = FirstNonBlank(csv, "Phone", "Phone Number", "Telephone Number"),
-        BookingId = NullIfEmpty(Get(csv, "Booking ID")), ClinicName = NullIfEmpty(Get(csv, "Clinic Name")), ClinicDate = NullIfEmpty(Get(csv, "Clinic Date")), AppointmentType = NullIfEmpty(Get(csv, "Appointment Type")), CatalogItem = NullIfEmpty(Get(csv, "Catalog Item")), Timeslot = NullIfEmpty(Get(csv, "Timeslot")), Comment = NullIfEmpty(Get(csv, "Comment")), SdcId = NullIfEmpty(Get(csv, "SDC Id")), PreferredLanguage = NullIfEmpty(Get(csv, "Preferred Language"))
+        ClientId = NullIfEmpty(Get(csv, fields, "ClientId")), FullName = Get(csv, fields, "FullName"), DateOfBirth = Get(csv, fields, "DateOfBirth"),
+        Medicare = NullIfEmpty(Get(csv, fields, "Medicare")), VaccineType = NullIfEmpty(Get(csv, fields, "VaccineType")) ?? "Autre", ClientIdStatus = ParseStatus(Get(csv, fields, "ClientIdStatus")),
+        FirstName = NullIfEmpty(Get(csv, fields, "FirstName")), LastName = NullIfEmpty(Get(csv, fields, "LastName")), MiddleName = NullIfEmpty(Get(csv, fields, "MiddleName")),
+        ErrorDetails = NullIfEmpty(Get(csv, fields, "ErrorDetails")), BestMatch = NullIfEmpty(Get(csv, fields, "BestMatch")), Email = NullIfEmpty(Get(csv, fields, "Email")), Phone = NullIfEmpty(Get(csv, fields, "Phone")),
+        BookingId = NullIfEmpty(Get(csv, fields, "BookingId")), ClinicName = NullIfEmpty(Get(csv, fields, "ClinicName")), ClinicDate = NullIfEmpty(Get(csv, fields, "ClinicDate")), AppointmentType = NullIfEmpty(Get(csv, fields, "AppointmentType")), CatalogItem = NullIfEmpty(Get(csv, fields, "CatalogItem")), Timeslot = NullIfEmpty(Get(csv, fields, "Timeslot")), Comment = NullIfEmpty(Get(csv, fields, "Comment")), SdcId = NullIfEmpty(Get(csv, fields, "SdcId")), PreferredLanguage = NullIfEmpty(Get(csv, fields, "PreferredLanguage"))
     };
-    private static ClinicPdfClientRecord ReadAbleAssess(CsvReader csv, IReadOnlyDictionary<string, string> headers)
+
+    private static ClinicPdfClientRecord ReadAbleAssess(CsvReader csv, IReadOnlyDictionary<string, int> fields)
     {
-        string GetAble(string field) => Get(csv, FindHeader(headers, AbleAssessHeaders[field]));
-        string dob = GetAble("DateOfBirth");
+        string dob = Get(csv, fields, "DateOfBirth");
         DateOnly date = default;
         if (!string.IsNullOrWhiteSpace(dob) && !DateOnly.TryParseExact(dob.Trim(), ["M/d/yyyy", "MM/dd/yyyy", "yyyy-MM-dd"], CultureInfo.InvariantCulture, DateTimeStyles.None, out date)) throw new FormatException($"Invalid Date of Birth '{dob}'.");
         return new ClinicPdfClientRecord
         {
-            ClientId = null, FullName = GetAble("FullName").Trim(), DateOfBirth = string.IsNullOrWhiteSpace(dob) ? string.Empty : date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), Medicare = NullIfEmptyOrNaN(GetAble("Medicare")), ClientIdStatus = ClientIdStatus.NeedsManualReview, ErrorDetails = string.Empty, BestMatch = string.Empty,
-            Phone = NullIfEmpty(GetAble("Phone")), Email = NullIfEmpty(GetAble("Email")), VaccineType = NullIfEmpty(GetAble("CatalogItem")) ?? NullIfEmpty(GetAble("AppointmentType")) ?? "Autre",
-            BookingId = NullIfEmpty(GetAble("BookingId")), ClinicName = NullIfEmpty(GetAble("ClinicName")), ClinicDate = NullIfEmpty(GetAble("ClinicDate")), AppointmentType = NullIfEmpty(GetAble("AppointmentType")), CatalogItem = NullIfEmpty(GetAble("CatalogItem")), Timeslot = NullIfEmpty(GetAble("Timeslot")), Comment = NullIfEmpty(GetAble("Comment")), SdcId = NullIfEmpty(GetAble("SdcId")), PreferredLanguage = NullIfEmpty(GetAble("PreferredLanguage"))
+            ClientId = null, FullName = Get(csv, fields, "FullName").Trim(), DateOfBirth = string.IsNullOrWhiteSpace(dob) ? string.Empty : date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            Medicare = NullIfEmptyOrNaN(Get(csv, fields, "Medicare")), ClientIdStatus = ClientIdStatus.NeedsManualReview, ErrorDetails = string.Empty, BestMatch = string.Empty,
+            Phone = NullIfEmptyOrNaN(Get(csv, fields, "Phone")), Email = NullIfEmpty(Get(csv, fields, "Email")), VaccineType = NullIfEmpty(Get(csv, fields, "CatalogItem")) ?? NullIfEmpty(Get(csv, fields, "AppointmentType")) ?? "Autre",
+            BookingId = NullIfEmpty(Get(csv, fields, "BookingId")), ClinicName = NullIfEmpty(Get(csv, fields, "ClinicName")), ClinicDate = NullIfEmpty(Get(csv, fields, "ClinicDate")), AppointmentType = NullIfEmpty(Get(csv, fields, "AppointmentType")), CatalogItem = NullIfEmpty(Get(csv, fields, "CatalogItem")), Timeslot = NullIfEmpty(Get(csv, fields, "Timeslot")), Comment = NullIfEmpty(Get(csv, fields, "Comment")), SdcId = NullIfEmpty(Get(csv, fields, "SdcId")), PreferredLanguage = NullIfEmpty(Get(csv, fields, "PreferredLanguage"))
         };
     }
+
     private static ClientIdStatus ParseStatus(string status)
     {
         if (!int.TryParse(status, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) || !Enum.IsDefined(typeof(ClientIdStatus), value)) throw new FormatException($"Invalid ClientIdStatus '{status}'.");
         return (ClientIdStatus)value;
     }
-    private static string? FindHeader(IReadOnlyDictionary<string, string> headers, IEnumerable<string> aliases) => aliases.Select(alias => headers.GetValueOrDefault(NormalizeHeader(alias))).FirstOrDefault(value => value is not null);
-    private static string Get(CsvReader csv, string? header) => header is not null && csv.TryGetField(header, out string? value) ? value ?? string.Empty : string.Empty;
-    private static string NormalizeHeader(string header) => header.Trim();
+    private static string Get(CsvReader csv, IReadOnlyDictionary<string, int> fields, string field) => fields.TryGetValue(field, out int index) ? csv.GetField(index) ?? string.Empty : string.Empty;
+    private static string NormalizeHeader(string header) => string.Join(' ', header.Trim().Replace('\u2019', '\'').Replace('\u2018', '\'').Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     private static string? NullIfEmpty(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static string? NullIfEmptyOrNaN(string value) => string.Equals(value.Trim(), "NaN", StringComparison.OrdinalIgnoreCase) ? null : NullIfEmpty(value);
-    private static string? FirstNonBlank(CsvReader csv, params string[] headers) => headers.Select(header => NullIfEmpty(Get(csv, header))).FirstOrDefault(value => value is not null);
 }
