@@ -15,7 +15,7 @@ public class PdfRosterParserService
     private static readonly Regex AppointmentPrefixRegex = new(@"^\s*[\u2605]?\s*\d{1,2}h\d{2}\s*(?:\d+\s*/\s*\d+)?\s*(?:[-–—]\s*)?", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
     private static readonly Regex MilestoneRegex = new(@"\b\d+\s*(?:mois|m|months?)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    private static readonly Regex CategoryRegex = new(@"\b(?:autre|PS|Mpox|rattrapage|initiale)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex CategoryRegex = new(@"\b(?:autres?|PS|Mpox|rattrapage|initiale)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public List<ClinicPdfClientRecord> ExtractRecordsFromPdfFolder(string folder) => !Directory.Exists(folder) ? [] : ExtractRecordsFromPdfFiles(Directory.EnumerateFiles(folder, "*.pdf").OrderBy(x => x, StringComparer.Ordinal));
 
@@ -66,7 +66,7 @@ public class PdfRosterParserService
             name = WhitespaceRegex.Replace(name, " ").Trim().TrimEnd('(', ',', '-').Trim();
             if (name.Length < 3 || name.Equals("CIP", StringComparison.OrdinalIgnoreCase)) continue;
             var medicare = MedicareRegex.Match(details); var vaccine = MilestoneRegex.Match(details); if (!vaccine.Success) vaccine = CategoryRegex.Match(details);
-            records.Add(new() { FullName = name, DateOfBirth = date.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture), Medicare = medicare.Success ? medicare.Value.Replace(" ", "") : null, VaccineType = vaccine.Success ? WhitespaceRegex.Replace(vaccine.Value, " ") : "Autre" });
+            records.Add(new() { FullName = name, DateOfBirth = date.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture), Medicare = medicare.Success ? medicare.Value.Replace(" ", "") : null, VaccineType = vaccine.Success ? WhitespaceRegex.Replace(vaccine.Value, " ") : "Unknown" });
         }
         return records;
     }

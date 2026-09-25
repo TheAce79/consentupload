@@ -88,9 +88,11 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
         var records = PdfRosterParserService.ExtractRecordsFromLines([
             "8:00 AM - 8:30 AM Jane Smith (2020-01-02) | 123 456 789 | 4 months",
             "08:30 09:00 DOE, JEAN 2021-02-03 - PS",
-            "09:00 - 09:30 Marie Curie 2022-03-04"
+            "09:00 - 09:30 Marie Curie 2022-03-04",
+            "09:30 - 10:00 Louis Pasteur 2022-04-05 - Autre",
+            "10:00 - 10:30 Alice Martin 2022-05-06 - Autres"
         ]);
-        Assert.Equal(["4 months", "PS", "Autre"], records.Select(x => x.VaccineType));
+        Assert.Equal(["4 months", "PS", "Unknown", "Autre", "Autres"], records.Select(x => x.VaccineType));
         Assert.Equal("123456789", records[0].Medicare);
     }
 
