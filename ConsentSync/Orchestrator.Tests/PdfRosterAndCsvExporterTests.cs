@@ -1,5 +1,6 @@
 using System.Text;
 using System.Globalization;
+using CsvHelper.Configuration.Attributes;
 using ConsentSyncCore.Models;
 using ConsentSyncCore.Services.Csv;
 using ConsentSyncCore.Services.Pdf;
@@ -61,6 +62,24 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
         {
             CultureInfo.CurrentCulture = originalCulture;
         }
+    }
+
+    [Fact]
+    public void AssignClinicDate_StampsPdfRecordsAndPreservesExplicitAbleAssessDates()
+    {
+        var records = new List<ClinicPdfClientRecord>
+        {
+            new() { FullName = "PDF client", DateOfBirth = "2020/02/26" },
+            new() { FullName = "AbleAssess client", DateOfBirth = "2020/02/26", ClinicDate = "2026-10-02" }
+        };
+
+        PdfRosterParserService.AssignClinicDate(records, new DateTime(2026, 9, 17));
+
+        Assert.Equal("2026-09-17", records[0].ClinicDate);
+        Assert.Equal("2026-10-02", records[1].ClinicDate);
+
+        PdfRosterParserService.AssignClinicDate(records, new DateTime(2026, 9, 17), overwriteExisting: true);
+        Assert.All(records, record => Assert.Equal("2026-09-17", record.ClinicDate));
     }
 
     [Fact]
@@ -130,10 +149,33 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
         byte[] bytes = File.ReadAllBytes(outputPath);
         string csv = File.ReadAllText(outputPath, Encoding.UTF8);
         Assert.Equal([0xEF, 0xBB, 0xBF], bytes.Take(3));
-        Assert.StartsWith("\"ClientId\",\"FullName\",\"DateOfBirth\",\"Medicare\",\"ClientIdStatus\",\"FirstName\",\"LastName\",\"MiddleName\",\"ErrorDetails\",\"BestMatch\",\"Phone\",\"Email\",\"VaccineType\"", csv);
+        Assert.StartsWith("\"ClientId\",\"FullName\",\"DateOfBirth\",\"Medicare\",\"ClientIdStatus\",\"FirstName\",\"LastName\",\"MiddleName\",\"ErrorDetails\",\"BestMatch\",\"Phone\",\"Email\",\"VaccineType\",\"Clinic Date\"", csv);
         Assert.Contains("\"\",\"KOMBOU, LUC\",\"2017/10/01\",\"026547803\",\"0\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"", csv);
         Assert.DoesNotContain("old output", csv);
         Assert.Empty(Directory.EnumerateFiles(_directory, "*.tmp"));
+    }
+
+    [Fact]
+    public void SaveToCsv_AlwaysWritesClinicDateAndRoundTripsBothCanonicalHeaders()
+    {
+        string outputPath = Path.Combine(_directory, "clinic-date.csv");
+        CsvExporterService.SaveToCsv([
+            new ClinicPdfClientRecord { FullName = "PDF Client", DateOfBirth = "2020/02/26", ClinicDate = "2026-09-17" }
+        ], outputPath);
+
+        ClinicPdfClientRecord exported = Assert.Single(CsvImporterService.ReadFromCsv(outputPath));
+        Assert.Equal("2026-09-17", exported.ClinicDate);
+
+        string alternateHeaderPath = Path.Combine(_directory, "clinic-date-alternate.csv");
+        File.WriteAllText(alternateHeaderPath, "ClientId,FullName,DateOfBirth,Medicare,ClientIdStatus,FirstName,LastName,MiddleName,ClinicDate\n,PDF Client,2020/02/26,,0,,,,2026-10-02\n", Encoding.UTF8);
+        Assert.Equal("2026-10-02", Assert.Single(CsvImporterService.ReadFromCsv(alternateHeaderPath)).ClinicDate);
+    }
+
+    [Fact]
+    public void ClinicDate_UsesBothCanonicalCsvHelperNames()
+    {
+        NameAttribute attribute = Assert.Single(typeof(ClinicPdfClientRecord).GetProperty(nameof(ClinicPdfClientRecord.ClinicDate))!.GetCustomAttributes(typeof(NameAttribute), false).Cast<NameAttribute>());
+        Assert.Equal(["Clinic Date", "ClinicDate"], attribute.Names);
     }
 
     [Fact]

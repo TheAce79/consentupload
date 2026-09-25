@@ -273,6 +273,7 @@ public partial class CohortContextForm : Form
             var selectedFiles = dialog.FileNames.OrderBy(x => x, StringComparer.Ordinal).ToList();
             var parser = new PdfRosterParserService();
             var records = await Task.Run(() => parser.ExtractRecordsFromPdfFiles(selectedFiles, LoggerService.LogInformation));
+            PdfRosterParserService.AssignClinicDate(records, _activeContext!.CohortDate, overwriteExisting: true);
             if (parser.LastPageWarnings.Count > 0)
                 throw new InvalidOperationException("The selected schedule has page(s) with no recognized clients. Review the PDF selection or formatting before accepting this schedule:\n" + string.Join("\n", parser.LastPageWarnings));
             if (records.Count == 0)
@@ -285,9 +286,10 @@ public partial class CohortContextForm : Form
             }
 
             var existing = File.Exists(targetCsvPath) ? await Task.Run(() => CsvImporterService.ReadFromCsv(targetCsvPath)) : [];
+            PdfRosterParserService.AssignClinicDate(existing, _activeContext.CohortDate);
             var existingKeys = existing.Select(ClinicScheduleSummary.Key).ToHashSet(StringComparer.Ordinal);
             var added = records.Where(x => existingKeys.Add(ClinicScheduleSummary.Key(x))).ToList();
-            if (added.Count > 0 || !File.Exists(targetCsvPath)) await Task.Run(() => CsvExporterService.SaveToCsv(existing.Concat(added), targetCsvPath));
+            await Task.Run(() => CsvExporterService.SaveToCsv(existing.Concat(added), targetCsvPath));
 
             var prior = await _dbManager!.GetLatestScheduleSnapshotAsync(_activeContext!.CohortContextId, clientListName);
             var currentSchedule = ClinicScheduleSummary.AttachClientIds(records, existing.Concat(added));

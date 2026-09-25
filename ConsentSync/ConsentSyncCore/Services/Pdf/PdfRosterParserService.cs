@@ -19,6 +19,16 @@ public class PdfRosterParserService
 
     public List<ClinicPdfClientRecord> ExtractRecordsFromPdfFolder(string folder) => !Directory.Exists(folder) ? [] : ExtractRecordsFromPdfFiles(Directory.EnumerateFiles(folder, "*.pdf").OrderBy(x => x, StringComparer.Ordinal));
 
+    public static void AssignClinicDate(IEnumerable<ClinicPdfClientRecord> records, DateTime cohortDate, bool overwriteExisting = false)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        string clinicDate = cohortDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        foreach (ClinicPdfClientRecord record in records)
+        {
+            if (overwriteExisting || string.IsNullOrWhiteSpace(record.ClinicDate)) record.ClinicDate = clinicDate;
+        }
+    }
+
     public List<ClinicPdfClientRecord> ExtractRecordsFromPdfFiles(IEnumerable<string> paths, Action<string>? diagnostics = null)
     {
         LastPageWarnings.Clear();

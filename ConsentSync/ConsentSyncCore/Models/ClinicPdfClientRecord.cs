@@ -1,3 +1,5 @@
+using CsvHelper.Configuration.Attributes;
+
 namespace ConsentSyncCore.Models;
 
 public class ClinicPdfClientRecord
@@ -35,6 +37,7 @@ public class ClinicPdfClientRecord
     // Raw AbleAssess values retained for downstream eligibility and audit work.
     public string? BookingId { get; set; }
     public string? ClinicName { get; set; }
+    [Name("Clinic Date", "ClinicDate")]
     public string? ClinicDate { get; set; }
     public string? AppointmentType { get; set; }
     public string? CatalogItem { get; set; }

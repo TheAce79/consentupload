@@ -14,7 +14,7 @@ public static class CsvImporterService
         ["ClientIdStatus"] = ["ClientIdStatus"], ["FirstName"] = ["FirstName"], ["LastName"] = ["LastName"], ["MiddleName"] = ["MiddleName"],
         ["ErrorDetails"] = ["ErrorDetails"], ["BestMatch"] = ["BestMatch"], ["Phone"] = ["Phone", "Phone Number", "Telephone Number"],
         ["Email"] = ["Email", "Email Address"], ["VaccineType"] = ["VaccineType"],
-        ["BookingId"] = ["Booking ID"], ["ClinicName"] = ["Clinic Name"], ["ClinicDate"] = ["Clinic Date"],
+        ["BookingId"] = ["Booking ID"], ["ClinicName"] = ["Clinic Name"], ["ClinicDate"] = ["Clinic Date", "ClinicDate"],
         ["AppointmentType"] = ["Appointment Type"], ["CatalogItem"] = ["Catalog Item"], ["Timeslot"] = ["Timeslot"],
         ["Comment"] = ["Comment"], ["SdcId"] = ["SDC Id"], ["PreferredLanguage"] = ["Preferred Language"]
     };
