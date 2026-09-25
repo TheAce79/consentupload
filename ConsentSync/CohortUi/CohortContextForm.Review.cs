@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 using ConsentSync.Data.Entities;
+using ConsentSyncCore.Collections;
 using ConsentSyncCore.Models;
 using ConsentSyncCore.Services.Browser;
 using ConsentSyncCore.Services.Configuration;
@@ -23,6 +24,13 @@ public partial class CohortContextForm
         AllowUserToDeleteRows = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect,
         MultiSelect = true, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells
     };
+    private readonly BindingSource _reviewBindingSource = new();
+    private SortableBindingList<CohortReviewRow>? _reviewRows;
+    private string _reviewSortProperty = nameof(CohortReviewRow.FullName);
+    private ListSortDirection _reviewSortDirection = ListSortDirection.Ascending;
+    private List<CohortReviewRow> _selectedReviewRowsBeforeSort = [];
+    private CohortReviewRow? _currentReviewRowBeforeSort;
+    private string? _currentReviewColumnBeforeSort;
     private readonly ComboBox _reviewFilter = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
     private readonly Label _reviewSummary = new() { AutoSize = true, Padding = new Padding(4) };
     private readonly Label _reviewMessage = new() { AutoSize = true, Padding = new Padding(4), MaximumSize = new Size(950, 0) };
@@ -128,7 +136,7 @@ public partial class CohortContextForm
             _reviewGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 DataPropertyName = property, Name = property, HeaderText = title,
-                ReadOnly = property is not ("ClientId" or "FullName" or "DateOfBirth" or "Medicare"), SortMode = DataGridViewColumnSortMode.NotSortable
+                ReadOnly = property is not ("ClientId" or "FullName" or "DateOfBirth" or "Medicare"), SortMode = DataGridViewColumnSortMode.Automatic
             });
         }
         LavenderSlateTheme.ApplyGrid(_reviewGrid);
@@ -139,6 +147,8 @@ public partial class CohortContextForm
         _reviewContextMenu.Opening += ReviewContextMenu_Opening;
         _reviewGrid.ContextMenuStrip = _reviewContextMenu;
         _reviewGrid.MouseDown += ReviewGrid_MouseDown;
+        _reviewGrid.Sorted += ReviewGrid_Sorted;
+        _reviewGrid.CellFormatting += ReviewGrid_CellFormatting;
         FormClosed += (_, _) => _reviewContextMenu.Dispose();
         _reviewGrid.CellValueChanged += (_, e) =>
         {
@@ -229,6 +239,8 @@ public partial class CohortContextForm
         _reviewSummary.Text = string.Empty;
         _reviewFilter.SelectedIndex = 0;
         _reviewGrid.DataSource = null;
+        _reviewBindingSource.DataSource = null;
+        _reviewRows = null;
         _reviewGrid.ClearSelection();
         _saveReview.Text = "Save Review";
         _retryCacheSync.Text = "Retry Cache Sync";
@@ -238,6 +250,11 @@ public partial class CohortContextForm
 
     private void ReviewGrid_MouseDown(object? sender, MouseEventArgs e)
     {
+        if (e.Button == MouseButtons.Left)
+        {
+            if (_reviewGrid.HitTest(e.X, e.Y).Type == DataGridViewHitTestType.ColumnHeader) CaptureReviewGridSelection();
+            return;
+        }
         if (e.Button != MouseButtons.Right) return;
         _contextRowSelectedByClick = false;
         var hit = _reviewGrid.HitTest(e.X, e.Y);
@@ -339,7 +356,7 @@ public partial class CohortContextForm
     private void RefreshReviewGrid()
     {
         if (_reviewGrid.IsCurrentCellInEditMode) return;
-        int? selectedRow = (_reviewGrid.CurrentRow?.DataBoundItem as CohortReviewRow)?.RowNumber;
+        CaptureReviewGridSelection();
         _bindingReview = true;
         try
         {
@@ -352,7 +369,10 @@ public partial class CohortContextForm
                 3 => rows.Where(r => r.Excluded),
                 _ => rows
             };
-            _reviewGrid.DataSource = new BindingList<CohortReviewRow>(rows.ToList());
+            _reviewRows = new SortableBindingList<CohortReviewRow>(rows);
+            _reviewBindingSource.DataSource = _reviewRows;
+            _reviewGrid.DataSource = _reviewBindingSource;
+            _reviewBindingSource.Sort = $"{_reviewSortProperty} {(_reviewSortDirection == ListSortDirection.Ascending ? "ASC" : "DESC")}";
             foreach (DataGridViewRow gridRow in _reviewGrid.Rows)
             {
                 if (gridRow.DataBoundItem is not CohortReviewRow row) continue;
@@ -360,12 +380,62 @@ public partial class CohortContextForm
                 gridRow.DefaultCellStyle.BackColor = Color.Empty;
                 gridRow.DefaultCellStyle.SelectionBackColor = LavenderSlatePalette.Selection;
                 gridRow.DefaultCellStyle.SelectionForeColor = LavenderSlatePalette.Card;
-                if (row.RowNumber == selectedRow) _reviewGrid.CurrentCell = gridRow.Cells["ClientId"];
             }
+            RestoreReviewGridSelection();
             var all = _review?.Rows ?? [];
             _reviewSummary.Text = $"Included: {all.Count(r => !r.Excluded)}   Unresolved: {all.Count(r => !r.Excluded && r.Unresolved)}   Duplicate rows: {all.Count(r => r.DuplicateId)}   Excluded: {all.Count(r => r.Excluded)}" + (_reviewDirty ? "   • Unsaved changes" : "");
         }
         finally { _bindingReview = false; }
+    }
+
+    private void ReviewGrid_Sorted(object? sender, EventArgs e)
+    {
+        if (_reviewGrid.SortedColumn is not null && _reviewGrid.SortOrder is not SortOrder.None)
+        {
+            _reviewSortProperty = _reviewGrid.SortedColumn.DataPropertyName;
+            _reviewSortDirection = _reviewGrid.SortOrder == SortOrder.Ascending
+                ? ListSortDirection.Ascending
+                : ListSortDirection.Descending;
+        }
+        RestoreReviewGridSelection();
+    }
+
+    private void ReviewGrid_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
+    {
+        if (e.RowIndex >= 0 && _reviewGrid.Columns[e.ColumnIndex].DataPropertyName == nameof(CohortReviewRow.RowNumber))
+        {
+            e.Value = e.RowIndex + 1;
+            e.FormattingApplied = true;
+        }
+    }
+
+    private void CaptureReviewGridSelection()
+    {
+        _selectedReviewRowsBeforeSort = _reviewGrid.SelectedRows.Cast<DataGridViewRow>()
+            .Select(row => row.DataBoundItem).OfType<CohortReviewRow>().ToList();
+        _currentReviewRowBeforeSort = _reviewGrid.CurrentRow?.DataBoundItem as CohortReviewRow;
+        _currentReviewColumnBeforeSort = _reviewGrid.CurrentCell?.OwningColumn?.Name;
+    }
+
+    private void RestoreReviewGridSelection()
+    {
+        if (_selectedReviewRowsBeforeSort.Count == 0 && _currentReviewRowBeforeSort is null) return;
+
+        _reviewGrid.ClearSelection();
+        foreach (DataGridViewRow gridRow in _reviewGrid.Rows)
+        {
+            if (gridRow.DataBoundItem is CohortReviewRow row && _selectedReviewRowsBeforeSort.Contains(row)) gridRow.Selected = true;
+        }
+
+        DataGridViewRow? currentRow = _reviewGrid.Rows.Cast<DataGridViewRow>()
+            .FirstOrDefault(row => ReferenceEquals(row.DataBoundItem, _currentReviewRowBeforeSort));
+        if (currentRow is not null)
+        {
+            string columnName = _currentReviewColumnBeforeSort ?? nameof(CohortReviewRow.ClientId);
+            _reviewGrid.CurrentCell = _reviewGrid.Columns.Contains(columnName)
+                ? currentRow.Cells[columnName]
+                : currentRow.Cells[nameof(CohortReviewRow.ClientId)];
+        }
     }
 
     private List<CohortReviewRow> SelectedReviewRows()

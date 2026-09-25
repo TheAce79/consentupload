@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Security.Cryptography;
+using System.Diagnostics;
 using ConsentSync.Data;
 using ConsentSync.Data.Entities;
 using ConsentSyncCore.Services.Csv;
@@ -245,6 +246,31 @@ public partial class CohortContextForm : Form
             RestoreSaveButton();
             SetFormEnabled(true);
             UpdateProcessingAvailability();
+        }
+    }
+
+    private void btn_OpenCohortExplorer_Click(object? sender, EventArgs e)
+    {
+        try
+        {
+            var configuration = ConfigurationService.GetConfiguration();
+            string clientListName = txt_ClientListName.Text.Trim();
+            var paths = CohortWorkspaceService.ResolveWorkspacePaths(configuration,
+                string.IsNullOrWhiteSpace(clientListName) ? "COHORT_WORKSPACE" : clientListName);
+            string cohortDirectory = Directory.GetParent(paths.inputCsvDir)!.Parent!.FullName;
+            string targetDirectory = string.IsNullOrWhiteSpace(clientListName)
+                ? Directory.GetParent(cohortDirectory)!.FullName
+                : cohortDirectory;
+
+            Directory.CreateDirectory(targetDirectory);
+            var explorer = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+            explorer.ArgumentList.Add(targetDirectory);
+            Process.Start(explorer);
+        }
+        catch (Exception ex)
+        {
+            LoggerService.LogError("Could not open the cohort workspace in File Explorer.", ex);
+            MessageBox.Show(this, $"Could not open the cohort workspace.\n\n{ex.Message}", "Explorer Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 

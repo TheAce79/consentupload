@@ -24,6 +24,7 @@ partial class CohortContextForm
         cb_SearchClientListName = new ComboBox();
         lbl_SearchClientListName = new Label();
         btn_SaveCohortContext = new Button();
+        btn_OpenCohortExplorer = new Button();
         txt_StandardizedCsvName = new TextBox();
         lbl_StandardizedCsvName = new Label();
         txt_ClientListName = new TextBox();
@@ -60,6 +61,7 @@ partial class CohortContextForm
         grp_CohortContext.Controls.Add(btn_LoadContext);
         grp_CohortContext.Controls.Add(cb_SearchClientListName);
         grp_CohortContext.Controls.Add(lbl_SearchClientListName);
+        grp_CohortContext.Controls.Add(btn_OpenCohortExplorer);
         grp_CohortContext.Controls.Add(btn_SaveCohortContext);
         grp_CohortContext.Controls.Add(txt_StandardizedCsvName);
         grp_CohortContext.Controls.Add(lbl_StandardizedCsvName);
@@ -126,6 +128,16 @@ partial class CohortContextForm
         btn_SaveCohortContext.Text = "Save Cohort Context";
         btn_SaveCohortContext.UseVisualStyleBackColor = false;
         btn_SaveCohortContext.Click += btn_SaveCohortContext_Click;
+        //
+        // btn_OpenCohortExplorer
+        //
+        btn_OpenCohortExplorer.Location = new Point(350, 396);
+        btn_OpenCohortExplorer.Name = "btn_OpenCohortExplorer";
+        btn_OpenCohortExplorer.Size = new Size(180, 34);
+        btn_OpenCohortExplorer.TabIndex = 18;
+        btn_OpenCohortExplorer.Text = "Go to Explorer";
+        btn_OpenCohortExplorer.UseVisualStyleBackColor = true;
+        btn_OpenCohortExplorer.Click += btn_OpenCohortExplorer_Click;
         // 
         // txt_StandardizedCsvName
         // 
@@ -412,6 +424,7 @@ partial class CohortContextForm
     private TextBox txt_StandardizedCsvName;
     private Label lbl_StandardizedCsvName;
     private Button btn_SaveCohortContext;
+    private Button btn_OpenCohortExplorer;
     private LavenderGroupBox grp_PhisSearch;
     private Button btn_SearchPhis;
     private ProgressBar pb_Phase2;
