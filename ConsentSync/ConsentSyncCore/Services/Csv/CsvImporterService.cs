@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using ConsentSyncCore.Models;
+using ConsentSyncCore.Services;
 using CsvHelper;
 using CsvHelper.Configuration;
 
@@ -156,7 +157,7 @@ public static class CsvImporterService
     private static ClinicPdfClientRecord ReadCanonical(CsvReader csv, IReadOnlyDictionary<string, int> fields) => new()
     {
         ClientId = NullIfEmpty(Get(csv, fields, "ClientId")), FullName = Get(csv, fields, "FullName"), DateOfBirth = Get(csv, fields, "DateOfBirth"),
-        Medicare = NullIfEmpty(Get(csv, fields, "Medicare")), VaccineType = NullIfEmpty(Get(csv, fields, "VaccineType")) ?? "Autre", ClientIdStatus = ParseStatus(Get(csv, fields, "ClientIdStatus")),
+        Medicare = NullIfEmpty(Get(csv, fields, "Medicare")), VaccineType = VaccineTypeNormalizer.Normalize(NullIfEmpty(Get(csv, fields, "VaccineType"))), ClientIdStatus = ParseStatus(Get(csv, fields, "ClientIdStatus")),
         FirstName = NullIfEmpty(Get(csv, fields, "FirstName")), LastName = NullIfEmpty(Get(csv, fields, "LastName")), MiddleName = NullIfEmpty(Get(csv, fields, "MiddleName")),
         ErrorDetails = NullIfEmpty(Get(csv, fields, "ErrorDetails")), BestMatch = NullIfEmpty(Get(csv, fields, "BestMatch")), Email = NullIfEmpty(Get(csv, fields, "Email")), Phone = NullIfEmpty(Get(csv, fields, "Phone")),
         BookingId = NullIfEmpty(Get(csv, fields, "BookingId")), ClinicName = NullIfEmpty(Get(csv, fields, "ClinicName")), ClinicDate = NullIfEmpty(Get(csv, fields, "ClinicDate")), AppointmentType = NullIfEmpty(Get(csv, fields, "AppointmentType")), CatalogItem = NullIfEmpty(Get(csv, fields, "CatalogItem")), Timeslot = NullIfEmpty(Get(csv, fields, "Timeslot")), Comment = NullIfEmpty(Get(csv, fields, "Comment")), SdcId = NullIfEmpty(Get(csv, fields, "SdcId")), PreferredLanguage = NullIfEmpty(Get(csv, fields, "PreferredLanguage"))
@@ -171,7 +172,7 @@ public static class CsvImporterService
         {
             ClientId = null, FullName = Get(csv, fields, "FullName").Trim(), DateOfBirth = string.IsNullOrWhiteSpace(dob) ? string.Empty : date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             Medicare = NullIfEmptyOrNaN(Get(csv, fields, "Medicare")), ClientIdStatus = ClientIdStatus.NeedsManualReview, ErrorDetails = string.Empty, BestMatch = string.Empty,
-            Phone = NullIfEmptyOrNaN(Get(csv, fields, "Phone")), Email = NullIfEmpty(Get(csv, fields, "Email")), VaccineType = NullIfEmpty(Get(csv, fields, "CatalogItem")) ?? NullIfEmpty(Get(csv, fields, "AppointmentType")) ?? "Autre",
+            Phone = NullIfEmptyOrNaN(Get(csv, fields, "Phone")), Email = NullIfEmpty(Get(csv, fields, "Email")), VaccineType = VaccineTypeNormalizer.Normalize(NullIfEmpty(Get(csv, fields, "CatalogItem")) ?? NullIfEmpty(Get(csv, fields, "AppointmentType"))),
             BookingId = NullIfEmpty(Get(csv, fields, "BookingId")), ClinicName = NullIfEmpty(Get(csv, fields, "ClinicName")), ClinicDate = NullIfEmpty(Get(csv, fields, "ClinicDate")), AppointmentType = NullIfEmpty(Get(csv, fields, "AppointmentType")), CatalogItem = NullIfEmpty(Get(csv, fields, "CatalogItem")), Timeslot = NullIfEmpty(Get(csv, fields, "Timeslot")), Comment = NullIfEmpty(Get(csv, fields, "Comment")), SdcId = NullIfEmpty(Get(csv, fields, "SdcId")), PreferredLanguage = NullIfEmpty(Get(csv, fields, "PreferredLanguage"))
         };
     }

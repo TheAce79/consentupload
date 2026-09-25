@@ -788,6 +788,34 @@ public sealed class DbManager : IConsentSyncRepository
                 BatchId TEXT NOT NULL, SourceFilesJson TEXT NOT NULL, ClientSnapshotJson TEXT NOT NULL, ImportedOn TEXT NOT NULL,
                 FOREIGN KEY (CohortContextId) REFERENCES CohortContexts (CohortContextId) ON DELETE CASCADE);
             CREATE INDEX IF NOT EXISTS IX_ScheduleSnapshots_Context ON ScheduleSnapshots (CohortContextId, ClientListName, ImportedOn DESC);
+
+            CREATE TABLE IF NOT EXISTS Jurisdictions (
+                JurisdictionId INTEGER PRIMARY KEY AUTOINCREMENT,
+                Code TEXT NOT NULL UNIQUE,
+                Name TEXT NOT NULL,
+                IsActive INTEGER NOT NULL DEFAULT 1
+            );
+
+            INSERT OR IGNORE INTO Jurisdictions (Code, Name)
+            VALUES ('NB', 'New Brunswick');
+
+            CREATE TABLE IF NOT EXISTS ImmunizationRules (
+                RuleId INTEGER PRIMARY KEY AUTOINCREMENT,
+                JurisdictionId INTEGER NOT NULL,
+                CatalogItemPattern TEXT NOT NULL,
+                TargetMilestoneMonths INTEGER NOT NULL DEFAULT 0,
+                MinAgeMonths REAL NOT NULL DEFAULT 0.0,
+                MinIntervalDays INTEGER NOT NULL DEFAULT 0,
+                RequiresPreviousHistory INTEGER NOT NULL DEFAULT 0,
+                MustBeAfterFirstBirthday INTEGER NOT NULL DEFAULT 0,
+                RequiresManualReview INTEGER NOT NULL DEFAULT 0,
+                RuleDescription TEXT NOT NULL,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (JurisdictionId) REFERENCES Jurisdictions(JurisdictionId) ON DELETE CASCADE
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS UX_Jurisdiction_Pattern
+                ON ImmunizationRules (JurisdictionId, CatalogItemPattern);
             """;
 
         await connection.ExecuteAsync(sql);

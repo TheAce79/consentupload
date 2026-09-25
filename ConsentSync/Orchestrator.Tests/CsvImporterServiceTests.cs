@@ -16,7 +16,7 @@ public sealed class CsvImporterServiceTests : IDisposable
         string path = Path.Combine(_directory, "legacy.csv");
         File.WriteAllText(path, "ClientId,FullName,DateOfBirth,Medicare,ClientIdStatus,FirstName,LastName,MiddleName\n001,\"KOMBOU, LUC\",2017/10/01,026547803,0,,,\n", Encoding.UTF8);
         ClinicPdfClientRecord record = Assert.Single(CsvImporterService.ReadFromCsv(path));
-        Assert.Equal("001", record.ClientId); Assert.Equal("026547803", record.Medicare); Assert.Null(record.ErrorDetails);
+        Assert.Equal("001", record.ClientId); Assert.Equal("026547803", record.Medicare); Assert.Null(record.ErrorDetails); Assert.Equal("Unknown", record.VaccineType);
     }
 
     [Fact]
@@ -78,7 +78,7 @@ public sealed class CsvImporterServiceTests : IDisposable
         ClinicPdfClientRecord record = Assert.Single(CsvImporterService.ReadFromCsv(input));
         Assert.Null(record.ClientId); Assert.Equal(ClientIdStatus.NeedsManualReview, record.ClientIdStatus);
         Assert.Equal("AWE DJONYANG, BOUAGNI JEDIDJA", record.FullName); Assert.Equal("2020-02-03", record.DateOfBirth);
-        Assert.Null(record.Medicare); Assert.Equal("05065881736", record.Phone); Assert.Equal("Catchup Appointment", record.VaccineType);
+        Assert.Null(record.Medicare); Assert.Equal("05065881736", record.Phone); Assert.Equal("Other / Autre", record.VaccineType);
         Assert.Equal("B-1", record.BookingId); Assert.Equal("Clinique Étoile", record.ClinicName); Assert.Equal("Français", record.PreferredLanguage);
 
         record.ClientId = "001"; record.ClientIdStatus = ClientIdStatus.Found;
@@ -104,6 +104,18 @@ public sealed class CsvImporterServiceTests : IDisposable
     }
 
     [Fact]
+    public void ReadFromCsv_AbleAssessWithoutVaccineOrClinicDateHeaders_UsesUnknownVaccineType()
+    {
+        string input = Path.Combine(_directory, "able-legacy.csv");
+        File.WriteAllText(input, "Booking ID,Enrolled Person Name,Date of Birth\nB-1,Person,2/3/2020\n", Encoding.UTF8);
+
+        ClinicPdfClientRecord record = Assert.Single(CsvImporterService.ReadFromCsv(input));
+
+        Assert.Equal("Unknown", record.VaccineType);
+        Assert.Null(record.ClinicDate);
+    }
+
+    [Fact]
     public void ReadFromCsv_AcceptsFrenchMixedAndBilingualAbleAssessHeaders()
     {
         string french = Path.Combine(_directory, "french.csv");
@@ -116,7 +128,7 @@ public sealed class CsvImporterServiceTests : IDisposable
         string bilingual = Path.Combine(_directory, "bilingual.csv");
         File.WriteAllText(bilingual, "ID de réservation / Booking ID,Nom / Enrolled Person Name,Date of Birth / Date de naissance,Appointment Type / Type de rendez-vous\nBI-1,Person,2020-02-03,Appointment\n", Encoding.UTF8);
         ClinicPdfClientRecord bilingualRecord = Assert.Single(CsvImporterService.ReadFromCsv(bilingual));
-        Assert.Equal("BI-1", bilingualRecord.BookingId); Assert.Equal("2020-02-03", bilingualRecord.DateOfBirth); Assert.Equal("Appointment", bilingualRecord.VaccineType);
+        Assert.Equal("BI-1", bilingualRecord.BookingId); Assert.Equal("2020-02-03", bilingualRecord.DateOfBirth); Assert.Equal("Other / Autre", bilingualRecord.VaccineType);
     }
 
     [Fact]

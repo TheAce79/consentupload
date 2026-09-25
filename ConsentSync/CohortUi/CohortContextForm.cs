@@ -414,6 +414,7 @@ public partial class CohortContextForm : Form
             MessageBox.Show(this, $"Input CSV could not be read.\n\n{ex.Message}", "CSV Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
+        PdfRosterParserService.AssignClinicDate(records, _activeContext!.CohortDate);
         if (records.Count == 0)
         {
             LoggerService.LogWarning($"Phase 2 input CSV has no client records: {inputCsvPath}");

@@ -31,11 +31,11 @@ public sealed class ConsentSyncDataTests : IDisposable
             SELECT name
             FROM sqlite_master
             WHERE type = 'table'
-              AND name IN ('PhisClientCache', 'CohortContexts', 'ClientListHistory', 'LocationLookups', 'PrefixLookups')
+              AND name IN ('PhisClientCache', 'CohortContexts', 'ClientListHistory', 'LocationLookups', 'PrefixLookups', 'Jurisdictions', 'ImmunizationRules')
             ORDER BY name;
             """)).ToArray();
 
-        Assert.Equal(["ClientListHistory", "CohortContexts", "LocationLookups", "PhisClientCache", "PrefixLookups"], tables);
+        Assert.Equal(["ClientListHistory", "CohortContexts", "ImmunizationRules", "Jurisdictions", "LocationLookups", "PhisClientCache", "PrefixLookups"], tables);
 
         string[] cohortColumns = (await connection.QueryAsync<string>(
             """
@@ -84,6 +84,24 @@ public sealed class ConsentSyncDataTests : IDisposable
 
         Assert.Equal(["PrefixLookups"], tables);
         Assert.Equal(["CIP", "ETS"], prefixes);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_CreatesAndSeedsJurisdictionsAndImmunizationRules()
+    {
+        await CreateManager().InitializeAsync();
+        await CreateManager().InitializeAsync();
+
+        await using var connection = OpenConnection();
+        int nbId = await connection.ExecuteScalarAsync<int>("SELECT JurisdictionId FROM Jurisdictions WHERE Code = 'NB';");
+        Assert.Equal("New Brunswick", await connection.ExecuteScalarAsync<string>("SELECT Name FROM Jurisdictions WHERE JurisdictionId = @nbId;", new { nbId }));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM Jurisdictions WHERE Code = 'NB';"));
+
+        await connection.ExecuteAsync("INSERT INTO ImmunizationRules (JurisdictionId, CatalogItemPattern, RuleDescription) VALUES (@nbId, '4 Month%', 'Four month rule');", new { nbId });
+        await Assert.ThrowsAsync<SqliteException>(() => connection.ExecuteAsync("INSERT INTO ImmunizationRules (JurisdictionId, CatalogItemPattern, RuleDescription) VALUES (@nbId, '4 Month%', 'Duplicate');", new { nbId }));
+
+        await connection.ExecuteAsync("DELETE FROM Jurisdictions WHERE JurisdictionId = @nbId;", new { nbId });
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM ImmunizationRules;"));
     }
 
     [Fact]

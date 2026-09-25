@@ -92,7 +92,7 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
             "09:30 - 10:00 Louis Pasteur 2022-04-05 - Autre",
             "10:00 - 10:30 Alice Martin 2022-05-06 - Autres"
         ]);
-        Assert.Equal(["4 months", "PS", "Unknown", "Autre", "Autres"], records.Select(x => x.VaccineType));
+        Assert.Equal(["4 Month Appointment", "Preschool Appointment", "Unknown", "Other / Autre", "Other / Autre"], records.Select(x => x.VaccineType));
         Assert.Equal("123456789", records[0].Medicare);
     }
 

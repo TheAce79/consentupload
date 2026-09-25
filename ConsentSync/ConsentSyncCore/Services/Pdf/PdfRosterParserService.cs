@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using ConsentSyncCore.Models;
+using ConsentSyncCore.Services;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 
@@ -66,7 +67,7 @@ public class PdfRosterParserService
             name = WhitespaceRegex.Replace(name, " ").Trim().TrimEnd('(', ',', '-').Trim();
             if (name.Length < 3 || name.Equals("CIP", StringComparison.OrdinalIgnoreCase)) continue;
             var medicare = MedicareRegex.Match(details); var vaccine = MilestoneRegex.Match(details); if (!vaccine.Success) vaccine = CategoryRegex.Match(details);
-            records.Add(new() { FullName = name, DateOfBirth = date.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture), Medicare = medicare.Success ? medicare.Value.Replace(" ", "") : null, VaccineType = vaccine.Success ? WhitespaceRegex.Replace(vaccine.Value, " ") : "Unknown" });
+            records.Add(new() { FullName = name, DateOfBirth = date.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture), Medicare = medicare.Success ? medicare.Value.Replace(" ", "") : null, VaccineType = VaccineTypeNormalizer.Normalize(vaccine.Success ? WhitespaceRegex.Replace(vaccine.Value, " ") : null) });
         }
         return records;
     }
