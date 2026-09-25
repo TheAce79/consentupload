@@ -101,6 +101,45 @@ public sealed class CohortReviewServiceTests : IDisposable
     }
 
     [Fact]
+    public void LegacyCanonicalCsvWithoutClinicDate_IsMigratedWithMatchingReview()
+    {
+        File.WriteAllText(SourcePath,
+            "ClientId,FullName,DateOfBirth,Medicare,ClientIdStatus,FirstName,LastName,MiddleName\n001,First,2020/02/26,,1,,,,\n,Second,2020/02/26,,2,,,,\n");
+        string originalFingerprint = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(SourcePath)));
+        var saved = new CohortReviewService.ReviewDocument
+        {
+            SourceFingerprint = originalFingerprint,
+            Rows =
+            [
+                new() { RowNumber = 1, Excluded = true },
+                new() { RowNumber = 2, ClientIdOverride = "00042" }
+            ]
+        };
+        File.WriteAllText(ReviewPath, JsonSerializer.Serialize(saved));
+
+        CohortReviewService review = CohortReviewService.Load(SourcePath, ReviewPath);
+
+        Assert.Contains("Clinic Date", File.ReadLines(SourcePath).First());
+        Assert.All(CsvImporterService.ReadFromCsv(SourcePath), row => Assert.Null(row.ClinicDate));
+        Assert.True(review.Rows[0].Excluded);
+        Assert.Equal("00042", review.Rows[1].ClientId);
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(SourcePath))),
+            JsonSerializer.Deserialize<CohortReviewService.ReviewDocument>(File.ReadAllText(ReviewPath))!.SourceFingerprint);
+        Assert.True(CohortReviewService.Load(SourcePath, ReviewPath).Rows[0].Excluded);
+    }
+
+    [Fact]
+    public void AppendMissingClinicDateColumn_LeavesAbleAssessCsvUnchanged()
+    {
+        string ableAssessPath = Path.Combine(_directory, "able-assess.csv");
+        const string contents = "Booking ID,Enrolled Person Name,Date of Birth\nB-1,Client,2020-02-26\n";
+        File.WriteAllText(ableAssessPath, contents);
+
+        Assert.False(CsvImporterService.AppendMissingClinicDateColumn(ableAssessPath));
+        Assert.Equal(contents, File.ReadAllText(ableAssessPath));
+    }
+
+    [Fact]
     public void DuplicateIds_RecalculateAfterCorrectionExclusionAndRestore()
     {
         var review = CohortReviewService.Load(SourcePath, ReviewPath);

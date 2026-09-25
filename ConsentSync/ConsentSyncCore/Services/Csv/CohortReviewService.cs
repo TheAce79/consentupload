@@ -27,24 +27,61 @@ public sealed class CohortReviewService
     public static CohortReviewService Load(string sourcePath, string reviewPath, bool startFresh = false)
     {
         var review = new CohortReviewService(sourcePath, reviewPath);
+        ReviewDocument? saved = null;
         if (!startFresh && File.Exists(reviewPath))
         {
-            var saved = JsonSerializer.Deserialize<ReviewDocument>(File.ReadAllText(reviewPath));
-            if (saved is null || saved.Version != 1 || saved.SourceFingerprint != review.SourceFingerprint ||
-                saved.Rows is null || saved.Rows.Count != review.Rows.Count ||
-                saved.Rows.Where((row, index) => row is null || row.RowNumber != index + 1).Any())
+            saved = JsonSerializer.Deserialize<ReviewDocument>(File.ReadAllText(reviewPath));
+            if (saved is null || !IsCompatibleReviewDocument(saved, review) || saved.SourceFingerprint != review.SourceFingerprint)
                 throw new InvalidDataException("Saved review does not match this source CSV or has an unsupported format. Start a fresh review explicitly to replace it.");
-            for (int i = 0; i < review.Rows.Count; i++)
+        }
+
+        string preMigrationFingerprint = review.SourceFingerprint;
+        if (CsvImporterService.AppendMissingClinicDateColumn(sourcePath))
+        {
+            review = new CohortReviewService(sourcePath, reviewPath);
+            if (saved is not null)
             {
-                review.Rows[i].ClientIdOverride = saved.Rows[i].ClientIdOverride;
-                review.Rows[i].FullNameOverride = saved.Rows[i].FullNameOverride;
-                review.Rows[i].DateOfBirthOverride = saved.Rows[i].DateOfBirthOverride;
-                review.Rows[i].MedicareOverride = saved.Rows[i].MedicareOverride;
-                review.Rows[i].Excluded = saved.Rows[i].Excluded;
+                if (saved.SourceFingerprint != preMigrationFingerprint || !IsCompatibleReviewDocument(saved, review))
+                    throw new InvalidDataException("Saved review does not match this source CSV or has an unsupported format. Start a fresh review explicitly to replace it.");
+                saved.SourceFingerprint = review.SourceFingerprint;
+                WriteReviewDocument(reviewPath, saved);
             }
         }
+
+        if (saved is not null) ApplySavedReview(review, saved);
         review.RefreshDuplicates();
         return review;
+    }
+
+    private static bool IsCompatibleReviewDocument(ReviewDocument? saved, CohortReviewService review) =>
+        saved is not null && saved.Version == 1 && saved.Rows is not null && saved.Rows.Count == review.Rows.Count &&
+        !saved.Rows.Where((row, index) => row is null || row.RowNumber != index + 1).Any();
+
+    private static void ApplySavedReview(CohortReviewService review, ReviewDocument saved)
+    {
+        for (int i = 0; i < review.Rows.Count; i++)
+        {
+            review.Rows[i].ClientIdOverride = saved.Rows[i].ClientIdOverride;
+            review.Rows[i].FullNameOverride = saved.Rows[i].FullNameOverride;
+            review.Rows[i].DateOfBirthOverride = saved.Rows[i].DateOfBirthOverride;
+            review.Rows[i].MedicareOverride = saved.Rows[i].MedicareOverride;
+            review.Rows[i].Excluded = saved.Rows[i].Excluded;
+        }
+    }
+
+    private static void WriteReviewDocument(string reviewPath, ReviewDocument document)
+    {
+        string directory = Path.GetDirectoryName(reviewPath) ?? throw new ArgumentException("The review path must include a directory.", nameof(reviewPath));
+        string temporaryPath = Path.Combine(directory, $".{Path.GetFileName(reviewPath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true }));
+            File.Replace(temporaryPath, reviewPath, null);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
     }
 
     public void RefreshDuplicates()

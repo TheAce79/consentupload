@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using ConsentSyncCore.Models;
 using CsvHelper;
 using CsvHelper.Configuration;
@@ -61,6 +62,59 @@ public static class CsvImporterService
             { throw new FormatException($"CSV row {csv.Parser.Row}: {ex.Message}", ex); }
         }
         return records;
+    }
+
+    /// <summary>Adds an empty Clinic Date column to a legacy canonical cohort CSV without changing its source values.</summary>
+    public static bool AppendMissingClinicDateColumn(string csvFilePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(csvFilePath);
+        if (!File.Exists(csvFilePath)) throw new FileNotFoundException("CSV input file was not found.", csvFilePath);
+
+        string[] headers;
+        var rows = new List<string[]>();
+        using (var reader = new StreamReader(csvFilePath))
+        using (var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
+        {
+            BadDataFound = args => throw new FormatException($"Malformed CSV data at row {args.Context?.Parser?.Row ?? 0}."),
+            MissingFieldFound = args => throw new FormatException($"Missing field at row {args.Context?.Parser?.Row ?? 0}."),
+            HeaderValidated = null, TrimOptions = TrimOptions.Trim
+        }))
+        {
+            if (!csv.Read() || !csv.ReadHeader()) return false;
+            headers = csv.HeaderRecord ?? [];
+            bool isCanonical = RequiredCanonicalFields.All(field => FindMatchingIndexes(headers, CanonicalHeaders[field]).Count > 0);
+            bool hasClinicDate = FindMatchingIndexes(headers, CanonicalHeaders["ClinicDate"]).Count > 0;
+            if (!isCanonical || hasClinicDate) return false;
+
+            while (csv.Read())
+                rows.Add(Enumerable.Range(0, headers.Length).Select(index => csv.GetField(index) ?? string.Empty).ToArray());
+        }
+
+        string directory = Path.GetDirectoryName(csvFilePath) ?? throw new ArgumentException("The CSV path must include a directory.", nameof(csvFilePath));
+        string temporaryPath = Path.Combine(directory, $".{Path.GetFileName(csvFilePath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (var writer = new StreamWriter(temporaryPath, false, new UTF8Encoding(true)))
+            using (var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture) { ShouldQuote = _ => true }))
+            {
+                foreach (string header in headers) csv.WriteField(header);
+                csv.WriteField("Clinic Date");
+                csv.NextRecord();
+                foreach (string[] row in rows)
+                {
+                    foreach (string value in row) csv.WriteField(value);
+                    csv.WriteField(string.Empty);
+                    csv.NextRecord();
+                }
+            }
+
+            File.Replace(temporaryPath, csvFilePath, null);
+            return true;
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
     }
 
     private static Dictionary<string, int> ResolveHeaders(string[] headers, IReadOnlyDictionary<string, string[]> aliases)
