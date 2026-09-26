@@ -38,6 +38,7 @@ public partial class CohortContextForm
     private readonly Label _reviewMessage = new() { AutoSize = true, Padding = new Padding(4), MaximumSize = new Size(950, 0) };
     private readonly Label _eligibilityMessage = new() { AutoSize = true, MaximumSize = new Size(1040, 0), Text = "Parse GNB2009 history from 3.Criteria and preview history matches. Eligibility rules are not applied yet." };
     private readonly Label _eligibilityWarning = new() { AutoSize = true, MaximumSize = new Size(1040, 0), ForeColor = LavenderSlatePalette.Error };
+    private readonly Label _eligibilitySummary = new() { AutoSize = true, Padding = new Padding(4), Text = "Total Cohort: 0 | History Found: 0 | No History Found: 0 | Warnings: 0" };
     private readonly LavenderDataGridView _eligibilityGrid = new()
     {
         Dock = DockStyle.Fill, AutoGenerateColumns = false, AllowUserToAddRows = false,
@@ -233,11 +234,26 @@ public partial class CohortContextForm
             (nameof(EligibilityHistoryPreviewRow.Warning), "Warning")
         })
         {
-            _eligibilityGrid.Columns.Add(new DataGridViewTextBoxColumn
+            var column = new DataGridViewTextBoxColumn
             {
                 DataPropertyName = property, Name = property, HeaderText = title, ReadOnly = true,
                 SortMode = DataGridViewColumnSortMode.Automatic
-            });
+            };
+            if (property == nameof(EligibilityHistoryPreviewRow.FullName))
+            {
+                column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                column.FillWeight = 140;
+            }
+            else if (property == nameof(EligibilityHistoryPreviewRow.Warning))
+            {
+                column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                column.FillWeight = 220;
+            }
+            else if (property == nameof(EligibilityHistoryPreviewRow.DoseCount))
+            {
+                column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            }
+            _eligibilityGrid.Columns.Add(column);
         }
         _eligibilityGrid.DataSource = _eligibilityBindingSource;
         _eligibilityGrid.CellFormatting += EligibilityGrid_CellFormatting;
@@ -245,6 +261,9 @@ public partial class CohortContextForm
         var eligibilityGridCard = new LavenderCardPanel { Dock = DockStyle.Fill, Padding = new Padding(1) };
         eligibilityGridCard.Controls.Add(_eligibilityGrid);
         eligibility.Controls.Add(eligibilityGridCard, 0, 3);
+        var eligibilitySummaryCard = new LavenderCardPanel { AutoSize = true, Dock = DockStyle.Fill };
+        eligibilitySummaryCard.Controls.Add(_eligibilitySummary);
+        eligibility.Controls.Add(eligibilitySummaryCard, 0, 4);
         _eligibilityTab.Controls.Add(eligibility);
         LavenderSlateTheme.Apply(this);
         LavenderSlateTheme.ApplyButton(btn_CreatePhisCohort, LavenderButtonKind.Primary);
@@ -294,6 +313,7 @@ public partial class CohortContextForm
         _reviewGrid.ClearSelection();
         _eligibilityBindingSource.DataSource = null;
         _eligibilityWarning.Text = string.Empty;
+        _eligibilitySummary.Text = "Total Cohort: 0 | History Found: 0 | No History Found: 0 | Warnings: 0";
         _eligibilityMessage.Text = "Parse GNB2009 history from 3.Criteria and preview history matches. Eligibility rules are not applied yet.";
         _saveReview.Text = "Save Review";
         _retryCacheSync.Text = "Retry Cache Sync";
@@ -439,6 +459,7 @@ public partial class CohortContextForm
             SetFormEnabled(false);
             _evaluateEligibility.Text = "Evaluating...";
             _eligibilityWarning.Text = string.Empty;
+            _eligibilitySummary.Text = "Total Cohort: 0 | History Found: 0 | No History Found: 0 | Warnings: 0";
             _eligibilityMessage.Text = "Parsing GNB2009 Excel history and building preview...";
 
             string criteriaDirectory = CohortWorkspaceService.GetCriteriaDirectory(config, clientListName);
@@ -453,7 +474,9 @@ public partial class CohortContextForm
 
             EligibilityHistoryPreviewResult preview = Gnb2009HistoryPreviewService.BuildPreview(review.Rows, histories);
             _eligibilityBindingSource.DataSource = new SortableBindingList<EligibilityHistoryPreviewRow>(preview.Rows);
+            _eligibilityBindingSource.Sort = $"{nameof(EligibilityHistoryPreviewRow.FullName)} ASC";
             _eligibilityWarning.Text = preview.Warnings.Count == 0 ? string.Empty : string.Join(Environment.NewLine, preview.Warnings);
+            UpdateEligibilitySummary(review.Rows, preview.Rows);
             foreach (string warning in preview.Warnings) LoggerService.LogWarning(warning);
             LoggerService.LogInformation($"GNB2009 history preview completed. Histories={histories.Count}; rows={preview.Rows.Count}; diagnostic={debugCsvPath}");
             _eligibilityMessage.Text = $"History preview complete. Parsed {histories.Count} client history section(s). Diagnostic CSV: {debugCsvPath}";
@@ -576,10 +599,43 @@ public partial class CohortContextForm
     private void EligibilityGrid_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
     {
         if (e.RowIndex < 0 || _eligibilityGrid.Rows[e.RowIndex].DataBoundItem is not EligibilityHistoryPreviewRow row) return;
-        bool warning = !string.IsNullOrWhiteSpace(row.Warning);
-        _eligibilityGrid.Rows[e.RowIndex].DefaultCellStyle.ForeColor = warning ? LavenderSlatePalette.Error : LavenderSlatePalette.Slate;
-        _eligibilityGrid.Rows[e.RowIndex].DefaultCellStyle.SelectionBackColor = LavenderSlatePalette.Selection;
-        _eligibilityGrid.Rows[e.RowIndex].DefaultCellStyle.SelectionForeColor = LavenderSlatePalette.Card;
+
+        e.CellStyle.SelectionBackColor = LavenderSlatePalette.Selection;
+        e.CellStyle.SelectionForeColor = Color.White;
+
+        string propertyName = _eligibilityGrid.Columns[e.ColumnIndex].DataPropertyName;
+        if (propertyName == nameof(EligibilityHistoryPreviewRow.HistoryMatchStatus))
+        {
+            if (string.Equals(row.HistoryMatchStatus, "History Found", StringComparison.OrdinalIgnoreCase))
+            {
+                e.CellStyle.BackColor = Color.FromArgb(0xE8, 0xF5, 0xEE);
+                e.CellStyle.ForeColor = LavenderSlatePalette.Success;
+            }
+            else if (string.Equals(row.HistoryMatchStatus, "No History Found", StringComparison.OrdinalIgnoreCase))
+            {
+                e.CellStyle.BackColor = Color.FromArgb(0xFF, 0xF4, 0xD8);
+                e.CellStyle.ForeColor = LavenderSlatePalette.Warning;
+            }
+        }
+        else if (propertyName == nameof(EligibilityHistoryPreviewRow.Warning) && !string.IsNullOrWhiteSpace(row.Warning))
+        {
+            e.CellStyle.BackColor = Color.FromArgb(0xFF, 0xF9, 0xDB);
+            e.CellStyle.ForeColor = LavenderSlatePalette.Warning;
+        }
+        else if (propertyName == nameof(EligibilityHistoryPreviewRow.DoseCount))
+        {
+            e.CellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+        }
+    }
+
+    private void UpdateEligibilitySummary(IEnumerable<CohortReviewRow> cohortRows, IEnumerable<EligibilityHistoryPreviewRow> previewRows)
+    {
+        List<EligibilityHistoryPreviewRow> rows = previewRows.ToList();
+        int totalCohort = cohortRows.Count(row => !row.Excluded);
+        int found = rows.Count(row => string.Equals(row.HistoryMatchStatus, "History Found", StringComparison.OrdinalIgnoreCase));
+        int missing = rows.Count(row => string.Equals(row.HistoryMatchStatus, "No History Found", StringComparison.OrdinalIgnoreCase));
+        int warnings = rows.Count(row => !string.IsNullOrWhiteSpace(row.Warning));
+        _eligibilitySummary.Text = $"Total Cohort: {totalCohort} | History Found: {found} | No History Found: {missing} | Warnings: {warnings}";
     }
 
     private void CaptureReviewGridSelection()
