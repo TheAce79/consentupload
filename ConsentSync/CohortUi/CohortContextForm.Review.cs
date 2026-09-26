@@ -40,6 +40,9 @@ public partial class CohortContextForm
     private readonly Label _eligibilityMessage = new() { AutoSize = true, MaximumSize = new Size(1040, 0), Text = "Parse GNB2009 history from 3.Criteria and evaluate administrative eligibility." };
     private readonly Label _eligibilityWarning = new() { AutoSize = true, MaximumSize = new Size(1040, 0), ForeColor = LavenderSlatePalette.Error };
     private readonly Label _eligibilitySummary = new() { AutoSize = true, Padding = new Padding(4), Text = "Total Cohort: 0 | Eligible: 0 | Ineligible: 0 | Manual Review: 0" };
+    private readonly ComboBox cmb_FilterVaccineType = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220, Enabled = false };
+    private readonly ComboBox cmb_FilterStatus = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160, Enabled = false };
+    private readonly Button btn_ClearFilters = new() { Text = "Clear Filters", AutoSize = true, Enabled = false };
     private readonly LavenderDataGridView _eligibilityGrid = new()
     {
         Dock = DockStyle.Fill, AutoGenerateColumns = false, AllowUserToAddRows = false,
@@ -47,6 +50,8 @@ public partial class CohortContextForm
         MultiSelect = true, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells
     };
     private readonly BindingSource _eligibilityBindingSource = new();
+    private List<EligibilityHistoryPreviewRow> _eligibilityPreviewRows = [];
+    private List<CohortReviewRow> _eligibilityCohortRows = [];
     private readonly Button _evaluateEligibility = new() { Text = "Evaluate Eligibility", AutoSize = true, Enabled = false };
     private readonly TextBox _phisListName = new() { Width = 300 };
     private readonly TextBox _phisCohortId = new() { Width = 140 };
@@ -68,6 +73,7 @@ public partial class CohortContextForm
     private CohortReviewService? _review;
     private bool _reviewDirty;
     private bool _bindingReview;
+    private bool _bindingEligibilityFilters;
     private bool _formBusy;
     private bool _contextRowSelectedByClick;
     private bool _cacheSyncRetryAvailable;
@@ -207,8 +213,9 @@ public partial class CohortContextForm
         layout.Controls.Add(phisGroup, 0, 4);
         _reviewTab.Controls.Add(layout);
 
-        var eligibility = new LavenderTableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(20), BackColor = LavenderSlatePalette.Window };
+        var eligibility = new LavenderTableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(20), BackColor = LavenderSlatePalette.Window };
         eligibility.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        eligibility.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         eligibility.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         eligibility.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         eligibility.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -223,6 +230,16 @@ public partial class CohortContextForm
         eligibilityActions.Controls.Add(new Button { Text = "Export Final Cohort CSV", AutoSize = true, Enabled = false });
         eligibility.Controls.Add(eligibilityActions, 0, 1);
         eligibility.Controls.Add(_eligibilityWarning, 0, 2);
+        var eligibilityFilters = new LavenderFlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true };
+        eligibilityFilters.Controls.Add(new Label { Text = "Vaccine Type", AutoSize = true, Padding = new Padding(0, 7, 4, 0) });
+        eligibilityFilters.Controls.Add(cmb_FilterVaccineType);
+        eligibilityFilters.Controls.Add(new Label { Text = "Status", AutoSize = true, Padding = new Padding(12, 7, 4, 0) });
+        eligibilityFilters.Controls.Add(cmb_FilterStatus);
+        eligibilityFilters.Controls.Add(btn_ClearFilters);
+        cmb_FilterVaccineType.SelectedIndexChanged += (_, _) => ApplyGridFilters();
+        cmb_FilterStatus.SelectedIndexChanged += (_, _) => ApplyGridFilters();
+        btn_ClearFilters.Click += (_, _) => ClearEligibilityFilters();
+        eligibility.Controls.Add(eligibilityFilters, 0, 3);
         foreach (var (property, title) in new (string, string)[]
         {
             (nameof(EligibilityHistoryPreviewRow.ClientId), "Client ID"),
@@ -268,10 +285,10 @@ public partial class CohortContextForm
         LavenderSlateTheme.ApplyGrid(_eligibilityGrid);
         var eligibilityGridCard = new LavenderCardPanel { Dock = DockStyle.Fill, Padding = new Padding(1) };
         eligibilityGridCard.Controls.Add(_eligibilityGrid);
-        eligibility.Controls.Add(eligibilityGridCard, 0, 3);
+        eligibility.Controls.Add(eligibilityGridCard, 0, 4);
         var eligibilitySummaryCard = new LavenderCardPanel { AutoSize = true, Dock = DockStyle.Fill };
         eligibilitySummaryCard.Controls.Add(_eligibilitySummary);
-        eligibility.Controls.Add(eligibilitySummaryCard, 0, 4);
+        eligibility.Controls.Add(eligibilitySummaryCard, 0, 5);
         _eligibilityTab.Controls.Add(eligibility);
         LavenderSlateTheme.Apply(this);
         LavenderSlateTheme.ApplyButton(btn_CreatePhisCohort, LavenderButtonKind.Primary);
@@ -320,9 +337,10 @@ public partial class CohortContextForm
         _reviewRows = null;
         _reviewGrid.ClearSelection();
         _eligibilityBindingSource.DataSource = null;
+        ResetEligibilityFilters();
         _eligibilityWarning.Text = string.Empty;
-        _eligibilitySummary.Text = "Total Cohort: 0 | History Found: 0 | No History Found: 0 | Warnings: 0";
-        _eligibilityMessage.Text = "Parse GNB2009 history from 3.Criteria and preview history matches. Eligibility rules are not applied yet.";
+        _eligibilitySummary.Text = "Total Cohort: 0 | Eligible: 0 | Ineligible: 0 | Manual Review: 0";
+        _eligibilityMessage.Text = "Parse GNB2009 history from 3.Criteria and evaluate administrative eligibility.";
         _saveReview.Text = "Save Review";
         _retryCacheSync.Text = "Retry Cache Sync";
         btn_CreatePhisCohort.Text = "Create PHIS Cohort";
@@ -467,6 +485,7 @@ public partial class CohortContextForm
             SetFormEnabled(false);
             _evaluateEligibility.Text = "Evaluating...";
             _eligibilityWarning.Text = string.Empty;
+            ResetEligibilityFilters();
             _eligibilitySummary.Text = "Total Cohort: 0 | Eligible: 0 | Ineligible: 0 | Manual Review: 0";
             _eligibilityMessage.Text = "Parsing GNB2009 Excel history and evaluating administrative eligibility...";
 
@@ -482,10 +501,11 @@ public partial class CohortContextForm
 
             EligibilityHistoryPreviewResult preview = Gnb2009HistoryPreviewService.BuildPreview(review.Rows, histories);
             ApplyEligibilityResults(preview.Rows, review.Rows, histories, _activeContext?.CohortDate ?? default, GetEligibilityJurisdiction());
-            _eligibilityBindingSource.DataSource = new SortableBindingList<EligibilityHistoryPreviewRow>(preview.Rows);
-            _eligibilityBindingSource.Sort = $"{nameof(EligibilityHistoryPreviewRow.FullName)} ASC";
+            _eligibilityPreviewRows = preview.Rows.ToList();
+            _eligibilityCohortRows = review.Rows.Where(row => !row.Excluded).ToList();
+            PopulateEligibilityFilters();
+            ApplyGridFilters();
             _eligibilityWarning.Text = preview.Warnings.Count == 0 ? string.Empty : string.Join(Environment.NewLine, preview.Warnings);
-            UpdateEligibilitySummary(review.Rows, preview.Rows);
             foreach (string warning in preview.Warnings) LoggerService.LogWarning(warning);
             LoggerService.LogInformation($"GNB2009 eligibility evaluation completed. Histories={histories.Count}; rows={preview.Rows.Count}; diagnostic={debugCsvPath}");
             _eligibilityMessage.Text = $"Eligibility evaluation complete. Parsed {histories.Count} client history section(s). Diagnostic CSV: {debugCsvPath}";
@@ -682,14 +702,106 @@ public partial class CohortContextForm
         _activeContext?.Jurisdiction.Contains("New Brunswick", StringComparison.OrdinalIgnoreCase) == true ? "NB" :
         _activeContext?.Jurisdiction?.Trim() ?? "NB";
 
-    private void UpdateEligibilitySummary(IEnumerable<CohortReviewRow> cohortRows, IEnumerable<EligibilityHistoryPreviewRow> previewRows)
+    private void PopulateEligibilityFilters()
+    {
+        _bindingEligibilityFilters = true;
+        try
+        {
+            cmb_FilterVaccineType.Items.Clear();
+            cmb_FilterVaccineType.Items.Add("[All Vaccine Types]");
+            foreach (string vaccineType in _eligibilityPreviewRows
+                         .Select(row => row.VaccineType)
+                         .Where(value => !string.IsNullOrWhiteSpace(value))
+                         .Distinct(StringComparer.OrdinalIgnoreCase)
+                         .OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
+                cmb_FilterVaccineType.Items.Add(vaccineType);
+            cmb_FilterVaccineType.SelectedIndex = 0;
+
+            cmb_FilterStatus.Items.Clear();
+            cmb_FilterStatus.Items.AddRange(["[All Statuses]", "Eligible", "Ineligible", "Manual Review"]);
+            cmb_FilterStatus.SelectedIndex = 0;
+            cmb_FilterVaccineType.Enabled = true;
+            cmb_FilterStatus.Enabled = true;
+            btn_ClearFilters.Enabled = true;
+        }
+        finally
+        {
+            _bindingEligibilityFilters = false;
+        }
+    }
+
+    private void ClearEligibilityFilters()
+    {
+        if (_eligibilityPreviewRows.Count == 0) return;
+        _bindingEligibilityFilters = true;
+        try
+        {
+            cmb_FilterVaccineType.SelectedIndex = 0;
+            cmb_FilterStatus.SelectedIndex = 0;
+        }
+        finally
+        {
+            _bindingEligibilityFilters = false;
+        }
+        ApplyGridFilters();
+    }
+
+    private void ResetEligibilityFilters()
+    {
+        _bindingEligibilityFilters = true;
+        try
+        {
+            _eligibilityPreviewRows = [];
+            _eligibilityCohortRows = [];
+            _eligibilityBindingSource.DataSource = null;
+            cmb_FilterVaccineType.Items.Clear();
+            cmb_FilterStatus.Items.Clear();
+            cmb_FilterVaccineType.Enabled = false;
+            cmb_FilterStatus.Enabled = false;
+            btn_ClearFilters.Enabled = false;
+        }
+        finally
+        {
+            _bindingEligibilityFilters = false;
+        }
+    }
+
+    private void ApplyGridFilters()
+    {
+        if (_bindingEligibilityFilters || _eligibilityPreviewRows.Count == 0) return;
+
+        string selectedVaccine = cmb_FilterVaccineType.SelectedItem?.ToString() ?? "[All Vaccine Types]";
+        string selectedStatus = cmb_FilterStatus.SelectedItem?.ToString() ?? "[All Statuses]";
+        bool allVaccines = string.Equals(selectedVaccine, "[All Vaccine Types]", StringComparison.Ordinal);
+        bool allStatuses = string.Equals(selectedStatus, "[All Statuses]", StringComparison.Ordinal);
+
+        List<EligibilityHistoryPreviewRow> filtered = _eligibilityPreviewRows
+            .Where(row => (allVaccines || string.Equals(row.VaccineType, selectedVaccine, StringComparison.OrdinalIgnoreCase)) &&
+                          (allStatuses || StatusMatches(row.Status, selectedStatus)))
+            .ToList();
+        _eligibilityBindingSource.DataSource = new SortableBindingList<EligibilityHistoryPreviewRow>(filtered);
+        _eligibilityBindingSource.Sort = $"{nameof(EligibilityHistoryPreviewRow.FullName)} ASC";
+        UpdateEligibilitySummary(filtered);
+    }
+
+    private static bool StatusMatches(EligibilityStatus? status, string selectedStatus) => selectedStatus switch
+    {
+        "Eligible" => status == EligibilityStatus.Eligible,
+        "Ineligible" => status == EligibilityStatus.Ineligible,
+        "Manual Review" => status == EligibilityStatus.ManualReview,
+        _ => false
+    };
+
+    private void UpdateEligibilitySummary(IEnumerable<EligibilityHistoryPreviewRow> previewRows)
     {
         List<EligibilityHistoryPreviewRow> rows = previewRows.ToList();
-        int totalCohort = cohortRows.Count(row => !row.Excluded);
-        int eligible = rows.Count(row => row.Status == EligibilityStatus.Eligible);
-        int ineligible = rows.Count(row => row.Status == EligibilityStatus.Ineligible);
-        int manualReview = rows.Count(row => row.Status == EligibilityStatus.ManualReview);
-        _eligibilitySummary.Text = $"Total Cohort: {totalCohort} | Eligible: {eligible} | Ineligible: {ineligible} | Manual Review: {manualReview}";
+        List<EligibilityHistoryPreviewRow> activeCohortRows = rows.Where(row => row.Status.HasValue).ToList();
+        int eligible = activeCohortRows.Count(row => row.Status == EligibilityStatus.Eligible);
+        int ineligible = activeCohortRows.Count(row => row.Status == EligibilityStatus.Ineligible);
+        int manualReview = activeCohortRows.Count(row => row.Status == EligibilityStatus.ManualReview);
+        int phisOnly = rows.Count(row => !row.Status.HasValue);
+        _eligibilitySummary.Text = $"Showing: {activeCohortRows.Count} / {_eligibilityCohortRows.Count} Clients | Eligible: {eligible} | Ineligible: {ineligible} | Manual Review: {manualReview}" +
+            (phisOnly == 0 ? string.Empty : $" | PHIS-only additions visible: {phisOnly}");
     }
 
     private void CaptureReviewGridSelection()
