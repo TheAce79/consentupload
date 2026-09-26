@@ -9,6 +9,7 @@ using ConsentSyncCore.Services.Browser;
 using ConsentSyncCore.Services.Configuration;
 using ConsentSyncCore.Services.Csv;
 using ConsentSyncCore.Services.Excel;
+using ConsentSyncCore.Services.Eligibility;
 using ConsentSyncCore.Services.Phis;
 using IWebDriver = OpenQA.Selenium.IWebDriver;
 using ConsentSync.Ui;
@@ -36,9 +37,9 @@ public partial class CohortContextForm
     private readonly ComboBox _reviewFilter = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
     private readonly Label _reviewSummary = new() { AutoSize = true, Padding = new Padding(4) };
     private readonly Label _reviewMessage = new() { AutoSize = true, Padding = new Padding(4), MaximumSize = new Size(950, 0) };
-    private readonly Label _eligibilityMessage = new() { AutoSize = true, MaximumSize = new Size(1040, 0), Text = "Parse GNB2009 history from 3.Criteria and preview history matches. Eligibility rules are not applied yet." };
+    private readonly Label _eligibilityMessage = new() { AutoSize = true, MaximumSize = new Size(1040, 0), Text = "Parse GNB2009 history from 3.Criteria and evaluate administrative eligibility." };
     private readonly Label _eligibilityWarning = new() { AutoSize = true, MaximumSize = new Size(1040, 0), ForeColor = LavenderSlatePalette.Error };
-    private readonly Label _eligibilitySummary = new() { AutoSize = true, Padding = new Padding(4), Text = "Total Cohort: 0 | History Found: 0 | No History Found: 0 | Warnings: 0" };
+    private readonly Label _eligibilitySummary = new() { AutoSize = true, Padding = new Padding(4), Text = "Total Cohort: 0 | Eligible: 0 | Ineligible: 0 | Manual Review: 0" };
     private readonly LavenderDataGridView _eligibilityGrid = new()
     {
         Dock = DockStyle.Fill, AutoGenerateColumns = false, AllowUserToAddRows = false,
@@ -228,6 +229,8 @@ public partial class CohortContextForm
             (nameof(EligibilityHistoryPreviewRow.FullName), "Full Name"),
             (nameof(EligibilityHistoryPreviewRow.DateOfBirth), "Date of Birth"),
             (nameof(EligibilityHistoryPreviewRow.VaccineType), "Vaccine Type"),
+            (nameof(EligibilityHistoryPreviewRow.Status), "Status"),
+            (nameof(EligibilityHistoryPreviewRow.EvaluationReason), "Evaluation Reason"),
             (nameof(EligibilityHistoryPreviewRow.HistoryMatchStatus), "History Status"),
             (nameof(EligibilityHistoryPreviewRow.DoseCount), "Dose Count"),
             (nameof(EligibilityHistoryPreviewRow.LatestDoseDate), "Latest Dose Date"),
@@ -244,10 +247,15 @@ public partial class CohortContextForm
                 column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
                 column.FillWeight = 140;
             }
-            else if (property == nameof(EligibilityHistoryPreviewRow.Warning))
+            else if (property == nameof(EligibilityHistoryPreviewRow.EvaluationReason))
             {
                 column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
                 column.FillWeight = 220;
+            }
+            else if (property == nameof(EligibilityHistoryPreviewRow.Warning))
+            {
+                column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                column.FillWeight = 160;
             }
             else if (property == nameof(EligibilityHistoryPreviewRow.DoseCount))
             {
@@ -459,8 +467,8 @@ public partial class CohortContextForm
             SetFormEnabled(false);
             _evaluateEligibility.Text = "Evaluating...";
             _eligibilityWarning.Text = string.Empty;
-            _eligibilitySummary.Text = "Total Cohort: 0 | History Found: 0 | No History Found: 0 | Warnings: 0";
-            _eligibilityMessage.Text = "Parsing GNB2009 Excel history and building preview...";
+            _eligibilitySummary.Text = "Total Cohort: 0 | Eligible: 0 | Ineligible: 0 | Manual Review: 0";
+            _eligibilityMessage.Text = "Parsing GNB2009 Excel history and evaluating administrative eligibility...";
 
             string criteriaDirectory = CohortWorkspaceService.GetCriteriaDirectory(config, clientListName);
             string debugCsvPath = Path.Combine(Path.GetDirectoryName(cohortCsvPath)!, $"{clientListName}_ParsedHistory_Debug.csv");
@@ -473,13 +481,14 @@ public partial class CohortContextForm
             });
 
             EligibilityHistoryPreviewResult preview = Gnb2009HistoryPreviewService.BuildPreview(review.Rows, histories);
+            ApplyEligibilityResults(preview.Rows, review.Rows, histories, _activeContext?.CohortDate ?? default, GetEligibilityJurisdiction());
             _eligibilityBindingSource.DataSource = new SortableBindingList<EligibilityHistoryPreviewRow>(preview.Rows);
             _eligibilityBindingSource.Sort = $"{nameof(EligibilityHistoryPreviewRow.FullName)} ASC";
             _eligibilityWarning.Text = preview.Warnings.Count == 0 ? string.Empty : string.Join(Environment.NewLine, preview.Warnings);
             UpdateEligibilitySummary(review.Rows, preview.Rows);
             foreach (string warning in preview.Warnings) LoggerService.LogWarning(warning);
-            LoggerService.LogInformation($"GNB2009 history preview completed. Histories={histories.Count}; rows={preview.Rows.Count}; diagnostic={debugCsvPath}");
-            _eligibilityMessage.Text = $"History preview complete. Parsed {histories.Count} client history section(s). Diagnostic CSV: {debugCsvPath}";
+            LoggerService.LogInformation($"GNB2009 eligibility evaluation completed. Histories={histories.Count}; rows={preview.Rows.Count}; diagnostic={debugCsvPath}");
+            _eligibilityMessage.Text = $"Eligibility evaluation complete. Parsed {histories.Count} client history section(s). Diagnostic CSV: {debugCsvPath}";
         }
         catch (Exception ex)
         {
@@ -617,6 +626,24 @@ public partial class CohortContextForm
                 e.CellStyle.ForeColor = LavenderSlatePalette.Warning;
             }
         }
+        else if (propertyName == nameof(EligibilityHistoryPreviewRow.Status) && row.Status.HasValue)
+        {
+            switch (row.Status.Value)
+            {
+                case EligibilityStatus.Eligible:
+                    e.CellStyle.BackColor = Color.FromArgb(0xE8, 0xF5, 0xEE);
+                    e.CellStyle.ForeColor = LavenderSlatePalette.Success;
+                    break;
+                case EligibilityStatus.Ineligible:
+                    e.CellStyle.BackColor = Color.FromArgb(0xFD, 0xE9, 0xE7);
+                    e.CellStyle.ForeColor = LavenderSlatePalette.Error;
+                    break;
+                case EligibilityStatus.ManualReview:
+                    e.CellStyle.BackColor = Color.FromArgb(0xFF, 0xF4, 0xD8);
+                    e.CellStyle.ForeColor = LavenderSlatePalette.Warning;
+                    break;
+            }
+        }
         else if (propertyName == nameof(EligibilityHistoryPreviewRow.Warning) && !string.IsNullOrWhiteSpace(row.Warning))
         {
             e.CellStyle.BackColor = Color.FromArgb(0xFF, 0xF9, 0xDB);
@@ -628,14 +655,41 @@ public partial class CohortContextForm
         }
     }
 
+    private static void ApplyEligibilityResults(
+        IEnumerable<EligibilityHistoryPreviewRow> previewRows,
+        IEnumerable<CohortReviewRow> cohortRows,
+        IReadOnlyDictionary<string, ClientImmunizationHistory> histories,
+        DateTime cohortDate,
+        string jurisdiction)
+    {
+        var reviewByClientId = cohortRows.Where(row => !row.Excluded && !string.IsNullOrWhiteSpace(row.ClientId))
+            .GroupBy(row => row.ClientId.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var evaluator = new EligibilityEvaluationService();
+        foreach (EligibilityHistoryPreviewRow previewRow in previewRows)
+        {
+            if (!reviewByClientId.TryGetValue(previewRow.ClientId, out CohortReviewRow? reviewRow)) continue;
+            histories.TryGetValue(previewRow.ClientId, out ClientImmunizationHistory? history);
+            EligibilityEvaluationResult result = evaluator.EvaluateRecord(reviewRow, history, cohortDate, jurisdiction);
+            previewRow.Status = result.Status;
+            previewRow.EvaluationReason = result.EvaluationReason;
+            previewRow.DoseCount = result.DoseCount;
+            previewRow.LatestDoseDate = result.LatestDoseDate?.ToString("yyyy-MM-dd");
+        }
+    }
+
+    private string GetEligibilityJurisdiction() =>
+        _activeContext?.Jurisdiction.Contains("New Brunswick", StringComparison.OrdinalIgnoreCase) == true ? "NB" :
+        _activeContext?.Jurisdiction?.Trim() ?? "NB";
+
     private void UpdateEligibilitySummary(IEnumerable<CohortReviewRow> cohortRows, IEnumerable<EligibilityHistoryPreviewRow> previewRows)
     {
         List<EligibilityHistoryPreviewRow> rows = previewRows.ToList();
         int totalCohort = cohortRows.Count(row => !row.Excluded);
-        int found = rows.Count(row => string.Equals(row.HistoryMatchStatus, "History Found", StringComparison.OrdinalIgnoreCase));
-        int missing = rows.Count(row => string.Equals(row.HistoryMatchStatus, "No History Found", StringComparison.OrdinalIgnoreCase));
-        int warnings = rows.Count(row => !string.IsNullOrWhiteSpace(row.Warning));
-        _eligibilitySummary.Text = $"Total Cohort: {totalCohort} | History Found: {found} | No History Found: {missing} | Warnings: {warnings}";
+        int eligible = rows.Count(row => row.Status == EligibilityStatus.Eligible);
+        int ineligible = rows.Count(row => row.Status == EligibilityStatus.Ineligible);
+        int manualReview = rows.Count(row => row.Status == EligibilityStatus.ManualReview);
+        _eligibilitySummary.Text = $"Total Cohort: {totalCohort} | Eligible: {eligible} | Ineligible: {ineligible} | Manual Review: {manualReview}";
     }
 
     private void CaptureReviewGridSelection()

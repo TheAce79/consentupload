@@ -6,6 +6,8 @@ public sealed class EligibilityHistoryPreviewRow
     public string FullName { get; set; } = string.Empty;
     public string DateOfBirth { get; set; } = string.Empty;
     public string VaccineType { get; set; } = string.Empty;
+    public EligibilityStatus? Status { get; set; }
+    public string EvaluationReason { get; set; } = string.Empty;
     public string HistoryMatchStatus { get; set; } = string.Empty;
     public int DoseCount { get; set; }
     public string? LatestDoseDate { get; set; }
