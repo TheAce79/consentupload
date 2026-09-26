@@ -11,6 +11,7 @@ public static class CohortWorkspaceService
     private const string DefaultInputCsvFolder = "1 Input CSV";
     private const string DefaultInputPdfFolder = "2 Input PDF";
     private const string DefaultOutputCsvFolder = "2 Output CSV";
+    private const string DefaultCriteriaFolder = "3.Criteria";
     private const string DefaultCsvFormat = "{ClientListName}_Cohort.csv";
 
     public static (string inputCsvDir, string inputPdfDir, string outputCsvDir) EnsureDirectories(IConfiguration config)
@@ -24,7 +25,16 @@ public static class CohortWorkspaceService
         Directory.CreateDirectory(paths.InputCsvDir);
         Directory.CreateDirectory(paths.InputPdfDir);
         Directory.CreateDirectory(paths.OutputCsvDir);
+        Directory.CreateDirectory(paths.CriteriaDir);
         return (paths.InputCsvDir, paths.InputPdfDir, paths.OutputCsvDir);
+    }
+
+    /// <summary>Gets the cohort folder where eligibility criteria files are stored.</summary>
+    public static string GetCriteriaDirectory(IConfiguration config, string clientListName)
+    {
+        WorkspacePaths paths = ResolveWorkspacePathsCore(config, clientListName);
+        Directory.CreateDirectory(paths.CriteriaDir);
+        return paths.CriteriaDir;
     }
 
     public static string GetStandardizedOutputCsvPath(IConfiguration config, string clientListName)
@@ -107,8 +117,9 @@ public static class CohortWorkspaceService
         string inputCsvDir = ResolveChildPath(inputFolder, config[$"{WorkspaceSection}:SubFolders:InputCsv"] ?? DefaultInputCsvFolder, "SubFolders:InputCsv");
         string inputPdfDir = ResolveChildPath(inputFolder, config[$"{WorkspaceSection}:SubFolders:InputPdf"] ?? DefaultInputPdfFolder, "SubFolders:InputPdf");
         string outputCsvDir = ResolveChildPath(outputFolder, config[$"{WorkspaceSection}:SubFolders:OutputCsv"] ?? DefaultOutputCsvFolder, "SubFolders:OutputCsv");
+        string criteriaDir = ResolveChildPath(cohortPath, config[$"{WorkspaceSection}:CriteriaFolder"] ?? DefaultCriteriaFolder, "CriteriaFolder");
 
-        return new WorkspacePaths(inputCsvDir, inputPdfDir, outputCsvDir);
+        return new WorkspacePaths(inputCsvDir, inputPdfDir, outputCsvDir, criteriaDir);
     }
 
     private static string NormalizeClientListName(string? clientListName)
@@ -155,5 +166,5 @@ public static class CohortWorkspaceService
         }
     }
 
-    private sealed record WorkspacePaths(string InputCsvDir, string InputPdfDir, string OutputCsvDir);
+    private sealed record WorkspacePaths(string InputCsvDir, string InputPdfDir, string OutputCsvDir, string CriteriaDir);
 }

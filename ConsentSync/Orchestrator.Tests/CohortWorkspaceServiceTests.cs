@@ -22,6 +22,7 @@ public sealed class CohortWorkspaceServiceTests : IDisposable
         Assert.True(Directory.Exists(Path.Combine(_tempDirectory, "Cohort", "CIPMONCTONSP20260910", "1. InputFolder", "1 Input CSV")));
         Assert.True(Directory.Exists(Path.Combine(_tempDirectory, "Cohort", "CIPMONCTONSP20260910", "1. InputFolder", "2 Input PDF")));
         Assert.True(Directory.Exists(Path.Combine(_tempDirectory, "Cohort", "CIPMONCTONSP20260910", "2. OutputFolder", "2 Output CSV")));
+        Assert.Equal(Path.Combine(_tempDirectory, "Cohort", "CIPMONCTONSP20260910", "3.Criteria"), CohortWorkspaceService.GetCriteriaDirectory(config, "CIPMONCTONSP20260910"));
         Assert.Equal(
             Path.Combine(_tempDirectory, "Cohort", "CIPMONCTONSP20260910", "2. OutputFolder", "2 Output CSV", "CIPMONCTONSP20260910_Cohort.csv"),
             CohortWorkspaceService.GetStandardizedOutputCsvPath(config, "CIPMONCTONSP20260910"));
@@ -92,6 +93,27 @@ public sealed class CohortWorkspaceServiceTests : IDisposable
         Assert.NotEqual(first.inputCsvDir, second.inputCsvDir);
         Assert.True(File.Exists(preservedFile));
         Assert.True(Directory.Exists(second.outputCsvDir));
+
+        string firstCriteria = CohortWorkspaceService.GetCriteriaDirectory(config, "firstlist");
+        string criteriaFile = Path.Combine(firstCriteria, "eligibility.xlsx");
+        File.WriteAllText(criteriaFile, "criteria");
+        Assert.Equal(firstCriteria, CohortWorkspaceService.GetCriteriaDirectory(config, "firstlist"));
+        Assert.True(File.Exists(criteriaFile));
+        Assert.NotEqual(firstCriteria, CohortWorkspaceService.GetCriteriaDirectory(config, "secondlist"));
+    }
+
+    [Fact]
+    public void GetCriteriaDirectory_UsesConfiguredFolderInsideCohortWorkspace()
+    {
+        IConfiguration config = CreateConfiguration(new Dictionary<string, string?>
+        {
+            ["CohortContext:Workspace:CriteriaFolder"] = "Criteria Files"
+        });
+
+        string directory = CohortWorkspaceService.GetCriteriaDirectory(config, "testlist");
+
+        Assert.Equal(Path.Combine(_tempDirectory, "Cohort", "TESTLIST", "Criteria Files"), directory);
+        Assert.True(Directory.Exists(directory));
     }
 
     [Theory]
@@ -115,8 +137,13 @@ public sealed class CohortWorkspaceServiceTests : IDisposable
         {
             ["CohortContext:Workspace:FileNaming:StandardizedCsvFormat"] = "{ClientListName}_{Run}.csv"
         });
+        IConfiguration criteriaTraversalConfig = CreateConfiguration(new Dictionary<string, string?>
+        {
+            ["CohortContext:Workspace:CriteriaFolder"] = "..\\outside"
+        });
 
         Assert.Throws<InvalidOperationException>(() => CohortWorkspaceService.EnsureDirectories(traversalConfig));
+        Assert.Throws<InvalidOperationException>(() => CohortWorkspaceService.GetCriteriaDirectory(criteriaTraversalConfig, "list"));
         Assert.Throws<InvalidOperationException>(() => CohortWorkspaceService.FormatStandardizedCsvFileName(unresolvedTemplateConfig, "list"));
     }
 

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using ConsentSync.Data.Entities;
@@ -38,6 +39,7 @@ public partial class CohortContextForm
     private readonly TextBox _phisCohortId = new() { Width = 140 };
     private readonly TextBox _phisClientListId = new() { Width = 140 };
     private readonly Button _savePhisDb = new() { Text = "Save Db", AutoSize = true };
+    private readonly Button _openCriteriaExplorer = new() { Text = "Go To Criteria Explorer", AutoSize = true, Enabled = false };
     private bool _phisFieldsDirty;
     private bool _bindingPhisFields;
     private int? _phisFieldsContextId;
@@ -194,6 +196,8 @@ public partial class CohortContextForm
 
         var eligibility = new LavenderFlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), FlowDirection = FlowDirection.TopDown };
         eligibility.Controls.Add(new Label { AutoSize = true, Text = "Dose-history sourcing and eligibility rules are pending. Eligibility evaluation and final export are not yet available." });
+        _openCriteriaExplorer.Click += btn_OpenCriteriaExplorer_Click;
+        eligibility.Controls.Add(_openCriteriaExplorer);
         eligibility.Controls.Add(new Button { Text = "Evaluate Eligibility", AutoSize = true, Enabled = false });
         eligibility.Controls.Add(new Button { Text = "Export Final Cohort CSV", AutoSize = true, Enabled = false });
         _eligibilityTab.Controls.Add(eligibility);
@@ -306,6 +310,7 @@ public partial class CohortContextForm
             _bindingPhisFields = false;
         }
         _savePhisDb.Enabled = available;
+        _openCriteriaExplorer.Enabled = available;
         if (_saveReview is null) return;
         _saveReview.Enabled = _acceptMatch.Enabled = _toggleExcluded.Enabled = available && _review is not null;
         _retryCacheSync.Enabled = available && _review is not null && _cacheSyncRetryAvailable;
@@ -314,6 +319,26 @@ public partial class CohortContextForm
         {
             _contextSave.Enabled = available && _review is not null;
             _contextAccept.Enabled = _contextExclude.Enabled = available && _review is not null && SelectedReviewRows().Count > 0;
+        }
+    }
+
+    private void btn_OpenCriteriaExplorer_Click(object? sender, EventArgs e)
+    {
+        if (!TryGetSavedClientListName(out string clientListName)) return;
+
+        try
+        {
+            string criteriaDirectory = CohortWorkspaceService.GetCriteriaDirectory(
+                ConfigurationService.GetConfiguration(), clientListName);
+            var explorer = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+            explorer.ArgumentList.Add(criteriaDirectory);
+            Process.Start(explorer);
+            LoggerService.LogInformation($"Opened cohort criteria folder in File Explorer: {criteriaDirectory}");
+        }
+        catch (Exception ex)
+        {
+            LoggerService.LogError("Could not open the cohort criteria folder in File Explorer.", ex);
+            MessageBox.Show(this, $"Could not open the cohort criteria folder.\n\n{ex.Message}", "Explorer Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
