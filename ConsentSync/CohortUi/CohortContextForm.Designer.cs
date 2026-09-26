@@ -35,6 +35,8 @@ partial class CohortContextForm
         lbl_Jurisdiction = new Label();
         dtp_CohortDate = new DateTimePicker();
         lbl_CohortDate = new Label();
+        txt_AbleAssessDateFormat = new TextBox();
+        lbl_AbleAssessDateFormat = new Label();
         txt_Type = new TextBox();
         lbl_Type = new Label();
         cb_Location = new ComboBox();
@@ -73,6 +75,8 @@ partial class CohortContextForm
         grp_CohortContext.Controls.Add(lbl_Jurisdiction);
         grp_CohortContext.Controls.Add(dtp_CohortDate);
         grp_CohortContext.Controls.Add(lbl_CohortDate);
+        grp_CohortContext.Controls.Add(txt_AbleAssessDateFormat);
+        grp_CohortContext.Controls.Add(lbl_AbleAssessDateFormat);
         grp_CohortContext.Controls.Add(txt_Type);
         grp_CohortContext.Controls.Add(lbl_Type);
         grp_CohortContext.Controls.Add(cb_Location);
@@ -138,7 +142,7 @@ partial class CohortContextForm
         btn_OpenCohortExplorer.Text = "Go to Explorer";
         btn_OpenCohortExplorer.UseVisualStyleBackColor = true;
         btn_OpenCohortExplorer.Click += btn_OpenCohortExplorer_Click;
-        // 
+        //
         // txt_StandardizedCsvName
         // 
         txt_StandardizedCsvName.Location = new Point(160, 304);
@@ -227,6 +231,23 @@ partial class CohortContextForm
         lbl_CohortDate.Size = new Size(88, 20);
         lbl_CohortDate.TabIndex = 7;
         lbl_CohortDate.Text = "Cohort date";
+        //
+        // txt_AbleAssessDateFormat
+        //
+        txt_AbleAssessDateFormat.Location = new Point(444, 159);
+        txt_AbleAssessDateFormat.Name = "txt_AbleAssessDateFormat";
+        txt_AbleAssessDateFormat.Size = new Size(116, 27);
+        txt_AbleAssessDateFormat.TabIndex = 9;
+        txt_AbleAssessDateFormat.Text = "M/d/yyyy";
+        //
+        // lbl_AbleAssessDateFormat
+        //
+        lbl_AbleAssessDateFormat.AutoSize = true;
+        lbl_AbleAssessDateFormat.Location = new Point(370, 163);
+        lbl_AbleAssessDateFormat.Name = "lbl_AbleAssessDateFormat";
+        lbl_AbleAssessDateFormat.Size = new Size(72, 20);
+        lbl_AbleAssessDateFormat.TabIndex = 8;
+        lbl_AbleAssessDateFormat.Text = "Date format";
         // 
         // txt_Type
         // 
@@ -415,6 +436,8 @@ partial class CohortContextForm
     private Label lbl_Type;
     private DateTimePicker dtp_CohortDate;
     private Label lbl_CohortDate;
+    private TextBox txt_AbleAssessDateFormat;
+    private Label lbl_AbleAssessDateFormat;
     private TextBox txt_Jurisdiction;
     private Label lbl_Jurisdiction;
     private TextBox txt_EncounterGroup;

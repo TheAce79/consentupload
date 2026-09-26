@@ -80,6 +80,7 @@ public sealed class CsvImporterServiceTests : IDisposable
         Assert.Equal("AWE DJONYANG, BOUAGNI JEDIDJA", record.FullName); Assert.Equal("2020-02-03", record.DateOfBirth);
         Assert.Null(record.Medicare); Assert.Equal("05065881736", record.Phone); Assert.Equal("Other / Autre", record.VaccineType);
         Assert.Equal("B-1", record.BookingId); Assert.Equal("Clinique Étoile", record.ClinicName); Assert.Equal("Français", record.PreferredLanguage);
+        Assert.Equal("2026-10-02", record.ClinicDate);
 
         record.ClientId = "001"; record.ClientIdStatus = ClientIdStatus.Found;
         string output = Path.Combine(_directory, "able-out.csv");
@@ -101,6 +102,10 @@ public sealed class CsvImporterServiceTests : IDisposable
         string invalid = Path.Combine(_directory, "invalid.csv");
         File.WriteAllText(invalid, "Booking ID,Enrolled Person Name,Date of Birth\nB-1,Name,2020/40/03\n", Encoding.UTF8);
         Assert.Contains("row 2", Assert.Throws<FormatException>(() => CsvImporterService.ReadFromCsv(invalid)).Message, StringComparison.OrdinalIgnoreCase);
+
+        string invalidClinicDate = Path.Combine(_directory, "invalid-clinic-date.csv");
+        File.WriteAllText(invalidClinicDate, "Booking ID,Enrolled Person Name,Date of Birth,Clinic Date\nB-1,Name,2/3/2020,2026/40/03\n", Encoding.UTF8);
+        Assert.Contains("Clinic Date", Assert.Throws<FormatException>(() => CsvImporterService.ReadFromCsv(invalidClinicDate)).Message);
     }
 
     [Fact]
@@ -123,7 +128,7 @@ public sealed class CsvImporterServiceTests : IDisposable
         ClinicPdfClientRecord frenchRecord = Assert.Single(CsvImporterService.ReadFromCsv(french));
         Assert.Equal("FR-1", frenchRecord.BookingId); Assert.Equal("Nom Français", frenchRecord.FullName);
         Assert.Equal("2020-03-04", frenchRecord.DateOfBirth); Assert.Equal("001234567", frenchRecord.Medicare);
-        Assert.Null(frenchRecord.Email); Assert.Null(frenchRecord.Phone); Assert.Equal("18/11/2026", frenchRecord.ClinicDate);
+        Assert.Null(frenchRecord.Email); Assert.Null(frenchRecord.Phone); Assert.Equal("2026-11-18", frenchRecord.ClinicDate);
 
         string bilingual = Path.Combine(_directory, "bilingual.csv");
         File.WriteAllText(bilingual, "ID de réservation / Booking ID,Nom / Enrolled Person Name,Date of Birth / Date de naissance,Appointment Type / Type de rendez-vous\nBI-1,Person,2020-02-03,Appointment\n", Encoding.UTF8);
@@ -132,7 +137,7 @@ public sealed class CsvImporterServiceTests : IDisposable
     }
 
     [Fact]
-    public void ReadFromCsv_RejectsConflictingAbleAssessAliasesAndUnsupportedDayMonthDate()
+    public void ReadFromCsv_RejectsConflictingAbleAssessAliasesAndAcceptsApprovedDayMonthDate()
     {
         string conflicting = Path.Combine(_directory, "conflicting.csv");
         File.WriteAllText(conflicting, "Booking ID,ID de réservation,Nom,Date de naissance\nB-1,B-2,Name,03/04/2020\n", Encoding.UTF8);
@@ -140,7 +145,25 @@ public sealed class CsvImporterServiceTests : IDisposable
 
         string dayMonth = Path.Combine(_directory, "day-month.csv");
         File.WriteAllText(dayMonth, "No de réservation,Nom,Date de naissance\nB-1,Name,31/01/2020\n", Encoding.UTF8);
-        Assert.Contains("Invalid Date of Birth", Assert.Throws<FormatException>(() => CsvImporterService.ReadFromCsv(dayMonth)).Message);
+        Assert.Equal("2020-01-31", Assert.Single(CsvImporterService.ReadFromCsv(dayMonth)).DateOfBirth);
+    }
+
+    [Fact]
+    public void ReadFromCsv_AbleAssessNormalizesMonthDayDatesAndHonorsSessionFormat()
+    {
+        string monthDay = Path.Combine(_directory, "month-day.csv");
+        File.WriteAllText(monthDay, "Booking ID,Enrolled Person Name,Date of Birth,Clinic Date\nB-1,Name,11/12/2025,10/1/2026\n", Encoding.UTF8);
+
+        ClinicPdfClientRecord defaultRecord = Assert.Single(CsvImporterService.ReadFromCsv(monthDay));
+        Assert.Equal("2025-11-12", defaultRecord.DateOfBirth);
+        Assert.Equal("2026-10-01", defaultRecord.ClinicDate);
+
+        string dayMonth = Path.Combine(_directory, "preferred-day-month.csv");
+        File.WriteAllText(dayMonth, "Booking ID,Enrolled Person Name,Date of Birth,Clinic Date\nB-2,Name,03/04/2020,05/06/2026\n", Encoding.UTF8);
+        ClinicPdfClientRecord configuredRecord = Assert.Single(CsvImporterService.ReadFromCsv(dayMonth, "d/M/yyyy"));
+        Assert.Equal("2020-04-03", configuredRecord.DateOfBirth);
+        Assert.Equal("2026-06-05", configuredRecord.ClinicDate);
+        Assert.False(CsvImporterService.IsSupportedAbleAssessDateFormat("MM-dd-yyyy"));
     }
 
     public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }

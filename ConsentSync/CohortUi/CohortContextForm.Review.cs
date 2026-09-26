@@ -336,11 +336,7 @@ public partial class CohortContextForm
         _reviewBindingSource.DataSource = null;
         _reviewRows = null;
         _reviewGrid.ClearSelection();
-        _eligibilityBindingSource.DataSource = null;
-        ResetEligibilityFilters();
-        _eligibilityWarning.Text = string.Empty;
-        _eligibilitySummary.Text = "Total Cohort: 0 | Eligible: 0 | Ineligible: 0 | Manual Review: 0";
-        _eligibilityMessage.Text = "Parse GNB2009 history from 3.Criteria and evaluate administrative eligibility.";
+        ResetEligibilityPreview();
         _saveReview.Text = "Save Review";
         _retryCacheSync.Text = "Retry Cache Sync";
         btn_CreatePhisCohort.Text = "Create PHIS Cohort";
@@ -764,6 +760,14 @@ public partial class CohortContextForm
         {
             _bindingEligibilityFilters = false;
         }
+    }
+
+    private void ResetEligibilityPreview()
+    {
+        ResetEligibilityFilters();
+        _eligibilityWarning.Text = string.Empty;
+        _eligibilitySummary.Text = "Total Cohort: 0 | Eligible: 0 | Ineligible: 0 | Manual Review: 0";
+        _eligibilityMessage.Text = "Parse GNB2009 history from 3.Criteria and evaluate administrative eligibility.";
     }
 
     private void ApplyGridFilters()

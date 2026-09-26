@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Security.Cryptography;
 using System.Diagnostics;
+using System.Globalization;
 using ConsentSync.Data;
 using ConsentSync.Data.Entities;
 using ConsentSyncCore.Services.Csv;
@@ -206,6 +207,7 @@ public partial class CohortContextForm : Form
             int contextId = await _dbManager.SaveCohortContextAsync(context);
             context.CohortContextId = contextId;
             _activeContext = context;
+            ResetEligibilityPreview();
             _contextFieldsDirty = false;
             SetClientListNameText(context.ClientListName);
             _isUserCustomOverride = !string.Equals(
@@ -407,7 +409,7 @@ public partial class CohortContextForm : Form
         }
 
         List<ConsentSyncCore.Models.ClinicPdfClientRecord> records;
-        try { records = CsvImporterService.ReadFromCsv(inputCsvPath); }
+        try { records = CsvImporterService.ReadFromCsv(inputCsvPath, txt_AbleAssessDateFormat.Text); }
         catch (Exception ex)
         {
             LoggerService.LogError($"Phase 2 input CSV could not be read: {inputCsvPath}", ex);
@@ -421,6 +423,8 @@ public partial class CohortContextForm : Form
             MessageBox.Show(this, "The input CSV contains no client records.", "No Records", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
+
+        if (!ValidatePhase2ClinicDates(records, _activeContext.CohortDate)) return;
 
         try
         {
@@ -1022,6 +1026,7 @@ public partial class CohortContextForm : Form
 
             context.IsActive = true;
             _activeContext = context;
+            ResetEligibilityPreview();
             await LoadPrefixesAsync(context.Prefix);
             await LoadLocationsAsync(context.Location);
             BindContext(context);
@@ -1049,6 +1054,36 @@ public partial class CohortContextForm : Form
             RestoreLoadButton();
             SetFormEnabled(true);
         }
+    }
+
+    private bool ValidatePhase2ClinicDates(IEnumerable<ConsentSyncCore.Models.ClinicPdfClientRecord> records, DateTime cohortDate)
+    {
+        DateOnly expected = DateOnly.FromDateTime(cohortDate.Date);
+        var mismatches = records.Select(record => new { Record = record, Parsed = ParsePhase2ClinicDate(record.ClinicDate) })
+            .Where(item => !item.Parsed.HasValue || item.Parsed.Value != expected)
+            .ToList();
+        if (mismatches.Count == 0) return true;
+
+        string values = string.Join(", ", mismatches
+            .Select(item => item.Parsed?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? item.Record.ClinicDate ?? "(blank)")
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal));
+        string message = $"PHIS search was blocked because {mismatches.Count} record(s) have a Clinic Date different from the Phase 0 Cohort Date.\n\n" +
+            $"Cohort Date: {expected:yyyy-MM-dd}\nCSV Clinic Date value(s): {values}\n\n" +
+            "Correct the Cohort Date or select the matching AbleAssess CSV before searching PHIS.";
+        LoggerService.LogWarning(message.Replace(Environment.NewLine, " "));
+        lbl_Phase2Status.Text = "Blocked: CSV Clinic Date does not match the Cohort Date.";
+        MessageBox.Show(this, message, "Clinic Date Verification Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        return false;
+    }
+
+    private static DateOnly? ParsePhase2ClinicDate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        string[] formats = ["yyyy-MM-dd", "yyyy/MM/dd", "M/d/yyyy", "MM/dd/yyyy", "d/M/yyyy", "dd/MM/yyyy"];
+        return DateOnly.TryParseExact(value.Trim(), formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly parsed)
+            ? parsed
+            : null;
     }
 
     private async Task RefreshClientListSearchAsync(string? selectedClientListName = null)

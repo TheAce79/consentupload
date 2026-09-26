@@ -9,6 +9,7 @@ namespace ConsentSyncCore.Services.Csv;
 
 public static class CsvImporterService
 {
+    private static readonly string[] SupportedAbleAssessDateFormats = ["M/d/yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "d/M/yyyy", "dd/MM/yyyy"];
     private static readonly string[] RequiredCanonicalFields = ["ClientId", "FullName", "DateOfBirth", "Medicare", "ClientIdStatus", "FirstName", "LastName", "MiddleName"];
     private static readonly IReadOnlyDictionary<string, string[]> CanonicalHeaders = new Dictionary<string, string[]>
     {
@@ -34,7 +35,7 @@ public static class CsvImporterService
         ["Comment"] = ["Comment"], ["SdcId"] = ["SDC Id"], ["PreferredLanguage"] = ["Preferred Language", "Langue préférée"]
     };
 
-    public static List<ClinicPdfClientRecord> ReadFromCsv(string csvFilePath)
+    public static List<ClinicPdfClientRecord> ReadFromCsv(string csvFilePath, string? ableAssessDateFormat = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(csvFilePath);
         if (!File.Exists(csvFilePath)) throw new FileNotFoundException("CSV input file was not found.", csvFilePath);
@@ -54,11 +55,14 @@ public static class CsvImporterService
         InputSourceType source = isCanonical ? InputSourceType.PdfRoster : DetectSource(fieldIndexes);
         if (source == InputSourceType.PdfRoster) ValidateCanonicalHeaders(fieldIndexes);
         else ValidateAbleAssessHeaders(fieldIndexes);
+        string[] ableAssessDateFormats = source == InputSourceType.AbleAssess
+            ? GetAbleAssessDateFormats(ableAssessDateFormat)
+            : [];
 
         var records = new List<ClinicPdfClientRecord>();
         while (csv.Read())
         {
-            try { records.Add(source == InputSourceType.AbleAssess ? ReadAbleAssess(csv, fieldIndexes) : ReadCanonical(csv, fieldIndexes)); }
+            try { records.Add(source == InputSourceType.AbleAssess ? ReadAbleAssess(csv, fieldIndexes, ableAssessDateFormats) : ReadCanonical(csv, fieldIndexes)); }
             catch (Exception ex) when (ex is not FormatException || !ex.Message.Contains("row", StringComparison.OrdinalIgnoreCase))
             { throw new FormatException($"CSV row {csv.Parser.Row}: {ex.Message}", ex); }
         }
@@ -163,18 +167,38 @@ public static class CsvImporterService
         BookingId = NullIfEmpty(Get(csv, fields, "BookingId")), ClinicName = NullIfEmpty(Get(csv, fields, "ClinicName")), ClinicDate = NullIfEmpty(Get(csv, fields, "ClinicDate")), AppointmentType = NullIfEmpty(Get(csv, fields, "AppointmentType")), CatalogItem = NullIfEmpty(Get(csv, fields, "CatalogItem")), Timeslot = NullIfEmpty(Get(csv, fields, "Timeslot")), Comment = NullIfEmpty(Get(csv, fields, "Comment")), SdcId = NullIfEmpty(Get(csv, fields, "SdcId")), PreferredLanguage = NullIfEmpty(Get(csv, fields, "PreferredLanguage"))
     };
 
-    private static ClinicPdfClientRecord ReadAbleAssess(CsvReader csv, IReadOnlyDictionary<string, int> fields)
+    public static bool IsSupportedAbleAssessDateFormat(string? format) =>
+        !string.IsNullOrWhiteSpace(format) && SupportedAbleAssessDateFormats.Contains(format.Trim(), StringComparer.Ordinal);
+
+    private static string[] GetAbleAssessDateFormats(string? preferredFormat)
+    {
+        string format = string.IsNullOrWhiteSpace(preferredFormat) ? "M/d/yyyy" : preferredFormat.Trim();
+        if (!IsSupportedAbleAssessDateFormat(format))
+            throw new FormatException($"Unsupported AbleAssess date format '{format}'. Use one of: {string.Join(", ", SupportedAbleAssessDateFormats)}.");
+        return [format, .. SupportedAbleAssessDateFormats.Where(candidate => !string.Equals(candidate, format, StringComparison.Ordinal))];
+    }
+
+    private static ClinicPdfClientRecord ReadAbleAssess(CsvReader csv, IReadOnlyDictionary<string, int> fields, string[] dateFormats)
     {
         string dob = Get(csv, fields, "DateOfBirth");
-        DateOnly date = default;
-        if (!string.IsNullOrWhiteSpace(dob) && !DateOnly.TryParseExact(dob.Trim(), ["M/d/yyyy", "MM/dd/yyyy", "yyyy-MM-dd"], CultureInfo.InvariantCulture, DateTimeStyles.None, out date)) throw new FormatException($"Invalid Date of Birth '{dob}'.");
+        DateOnly? dateOfBirth = ParseAbleAssessDate(dob, "Date of Birth", dateFormats);
+        string clinicDate = Get(csv, fields, "ClinicDate");
+        DateOnly? parsedClinicDate = ParseAbleAssessDate(clinicDate, "Clinic Date", dateFormats);
         return new ClinicPdfClientRecord
         {
-            ClientId = null, FullName = Get(csv, fields, "FullName").Trim(), DateOfBirth = string.IsNullOrWhiteSpace(dob) ? string.Empty : date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            ClientId = null, FullName = Get(csv, fields, "FullName").Trim(), DateOfBirth = dateOfBirth?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty,
             Medicare = NullIfEmptyOrNaN(Get(csv, fields, "Medicare")), ClientIdStatus = ClientIdStatus.NeedsManualReview, ErrorDetails = string.Empty, BestMatch = string.Empty,
             Phone = NullIfEmptyOrNaN(Get(csv, fields, "Phone")), Email = NullIfEmpty(Get(csv, fields, "Email")), VaccineType = VaccineTypeNormalizer.Normalize(NullIfEmpty(Get(csv, fields, "CatalogItem")) ?? NullIfEmpty(Get(csv, fields, "AppointmentType"))),
-            BookingId = NullIfEmpty(Get(csv, fields, "BookingId")), ClinicName = NullIfEmpty(Get(csv, fields, "ClinicName")), ClinicDate = NullIfEmpty(Get(csv, fields, "ClinicDate")), AppointmentType = NullIfEmpty(Get(csv, fields, "AppointmentType")), CatalogItem = NullIfEmpty(Get(csv, fields, "CatalogItem")), Timeslot = NullIfEmpty(Get(csv, fields, "Timeslot")), Comment = NullIfEmpty(Get(csv, fields, "Comment")), SdcId = NullIfEmpty(Get(csv, fields, "SdcId")), PreferredLanguage = NullIfEmpty(Get(csv, fields, "PreferredLanguage"))
+            BookingId = NullIfEmpty(Get(csv, fields, "BookingId")), ClinicName = NullIfEmpty(Get(csv, fields, "ClinicName")), ClinicDate = parsedClinicDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), AppointmentType = NullIfEmpty(Get(csv, fields, "AppointmentType")), CatalogItem = NullIfEmpty(Get(csv, fields, "CatalogItem")), Timeslot = NullIfEmpty(Get(csv, fields, "Timeslot")), Comment = NullIfEmpty(Get(csv, fields, "Comment")), SdcId = NullIfEmpty(Get(csv, fields, "SdcId")), PreferredLanguage = NullIfEmpty(Get(csv, fields, "PreferredLanguage"))
         };
+    }
+
+    private static DateOnly? ParseAbleAssessDate(string value, string fieldName, string[] dateFormats)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (!DateOnly.TryParseExact(value.Trim(), dateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly parsed))
+            throw new FormatException($"Invalid {fieldName} '{value}'.");
+        return parsed;
     }
 
     private static ClientIdStatus ParseStatus(string status)
