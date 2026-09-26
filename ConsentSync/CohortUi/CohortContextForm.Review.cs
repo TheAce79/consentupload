@@ -8,6 +8,7 @@ using ConsentSyncCore.Models;
 using ConsentSyncCore.Services.Browser;
 using ConsentSyncCore.Services.Configuration;
 using ConsentSyncCore.Services.Csv;
+using ConsentSyncCore.Services.Excel;
 using ConsentSyncCore.Services.Phis;
 using IWebDriver = OpenQA.Selenium.IWebDriver;
 using ConsentSync.Ui;
@@ -35,6 +36,16 @@ public partial class CohortContextForm
     private readonly ComboBox _reviewFilter = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
     private readonly Label _reviewSummary = new() { AutoSize = true, Padding = new Padding(4) };
     private readonly Label _reviewMessage = new() { AutoSize = true, Padding = new Padding(4), MaximumSize = new Size(950, 0) };
+    private readonly Label _eligibilityMessage = new() { AutoSize = true, MaximumSize = new Size(1040, 0), Text = "Parse GNB2009 history from 3.Criteria and preview history matches. Eligibility rules are not applied yet." };
+    private readonly Label _eligibilityWarning = new() { AutoSize = true, MaximumSize = new Size(1040, 0), ForeColor = LavenderSlatePalette.Error };
+    private readonly LavenderDataGridView _eligibilityGrid = new()
+    {
+        Dock = DockStyle.Fill, AutoGenerateColumns = false, AllowUserToAddRows = false,
+        AllowUserToDeleteRows = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+        MultiSelect = true, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells
+    };
+    private readonly BindingSource _eligibilityBindingSource = new();
+    private readonly Button _evaluateEligibility = new() { Text = "Evaluate Eligibility", AutoSize = true, Enabled = false };
     private readonly TextBox _phisListName = new() { Width = 300 };
     private readonly TextBox _phisCohortId = new() { Width = 140 };
     private readonly TextBox _phisClientListId = new() { Width = 140 };
@@ -194,16 +205,51 @@ public partial class CohortContextForm
         layout.Controls.Add(phisGroup, 0, 4);
         _reviewTab.Controls.Add(layout);
 
-        var eligibility = new LavenderFlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), FlowDirection = FlowDirection.TopDown };
-        eligibility.Controls.Add(new Label { AutoSize = true, Text = "Dose-history sourcing and eligibility rules are pending. Eligibility evaluation and final export are not yet available." });
+        var eligibility = new LavenderTableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(20), BackColor = LavenderSlatePalette.Window };
+        eligibility.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        eligibility.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        eligibility.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        eligibility.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        eligibility.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        eligibility.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        eligibility.Controls.Add(_eligibilityMessage, 0, 0);
+        var eligibilityActions = new LavenderFlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true };
         _openCriteriaExplorer.Click += btn_OpenCriteriaExplorer_Click;
-        eligibility.Controls.Add(_openCriteriaExplorer);
-        eligibility.Controls.Add(new Button { Text = "Evaluate Eligibility", AutoSize = true, Enabled = false });
-        eligibility.Controls.Add(new Button { Text = "Export Final Cohort CSV", AutoSize = true, Enabled = false });
+        _evaluateEligibility.Click += btn_EvaluateEligibility_Click;
+        eligibilityActions.Controls.Add(_openCriteriaExplorer);
+        eligibilityActions.Controls.Add(_evaluateEligibility);
+        eligibilityActions.Controls.Add(new Button { Text = "Export Final Cohort CSV", AutoSize = true, Enabled = false });
+        eligibility.Controls.Add(eligibilityActions, 0, 1);
+        eligibility.Controls.Add(_eligibilityWarning, 0, 2);
+        foreach (var (property, title) in new (string, string)[]
+        {
+            (nameof(EligibilityHistoryPreviewRow.ClientId), "Client ID"),
+            (nameof(EligibilityHistoryPreviewRow.FullName), "Full Name"),
+            (nameof(EligibilityHistoryPreviewRow.DateOfBirth), "Date of Birth"),
+            (nameof(EligibilityHistoryPreviewRow.VaccineType), "Vaccine Type"),
+            (nameof(EligibilityHistoryPreviewRow.HistoryMatchStatus), "History Status"),
+            (nameof(EligibilityHistoryPreviewRow.DoseCount), "Dose Count"),
+            (nameof(EligibilityHistoryPreviewRow.LatestDoseDate), "Latest Dose Date"),
+            (nameof(EligibilityHistoryPreviewRow.Warning), "Warning")
+        })
+        {
+            _eligibilityGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                DataPropertyName = property, Name = property, HeaderText = title, ReadOnly = true,
+                SortMode = DataGridViewColumnSortMode.Automatic
+            });
+        }
+        _eligibilityGrid.DataSource = _eligibilityBindingSource;
+        _eligibilityGrid.CellFormatting += EligibilityGrid_CellFormatting;
+        LavenderSlateTheme.ApplyGrid(_eligibilityGrid);
+        var eligibilityGridCard = new LavenderCardPanel { Dock = DockStyle.Fill, Padding = new Padding(1) };
+        eligibilityGridCard.Controls.Add(_eligibilityGrid);
+        eligibility.Controls.Add(eligibilityGridCard, 0, 3);
         _eligibilityTab.Controls.Add(eligibility);
         LavenderSlateTheme.Apply(this);
         LavenderSlateTheme.ApplyButton(btn_CreatePhisCohort, LavenderButtonKind.Primary);
         LavenderSlateTheme.ApplyButton(_savePhisDb, LavenderButtonKind.Primary);
+        LavenderSlateTheme.ApplyButton(_evaluateEligibility, LavenderButtonKind.Primary);
         UpdateReviewAvailability();
     }
 
@@ -246,6 +292,9 @@ public partial class CohortContextForm
         _reviewBindingSource.DataSource = null;
         _reviewRows = null;
         _reviewGrid.ClearSelection();
+        _eligibilityBindingSource.DataSource = null;
+        _eligibilityWarning.Text = string.Empty;
+        _eligibilityMessage.Text = "Parse GNB2009 history from 3.Criteria and preview history matches. Eligibility rules are not applied yet.";
         _saveReview.Text = "Save Review";
         _retryCacheSync.Text = "Retry Cache Sync";
         btn_CreatePhisCohort.Text = "Create PHIS Cohort";
@@ -311,6 +360,7 @@ public partial class CohortContextForm
         }
         _savePhisDb.Enabled = available;
         _openCriteriaExplorer.Enabled = available;
+        _evaluateEligibility.Enabled = available;
         if (_saveReview is null) return;
         _saveReview.Enabled = _acceptMatch.Enabled = _toggleExcluded.Enabled = available && _review is not null;
         _retryCacheSync.Enabled = available && _review is not null && _cacheSyncRetryAvailable;
@@ -341,6 +391,95 @@ public partial class CohortContextForm
             MessageBox.Show(this, $"Could not open the cohort criteria folder.\n\n{ex.Message}", "Explorer Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
+
+    private async void btn_EvaluateEligibility_Click(object? sender, EventArgs e)
+    {
+        if (_formBusy || !TryGetSavedClientListName(out string clientListName)) return;
+
+        if (!_reviewGrid.EndEdit())
+        {
+            BlockEligibility("Finish or correct the active review cell, then click Save Review before evaluating eligibility.");
+            return;
+        }
+
+        try
+        {
+            var config = ConfigurationService.GetConfiguration();
+            string cohortCsvPath = CohortWorkspaceService.GetStandardizedOutputCsvPath(config, clientListName);
+            string reviewPath = GetReviewPath(cohortCsvPath, clientListName);
+
+            if (!File.Exists(cohortCsvPath))
+            {
+                BlockEligibility($"Cannot proceed with eligibility evaluation.\n\nThe saved cohort CSV was not found:\n{cohortCsvPath}\n\nComplete PHIS search and Save Review before evaluating eligibility.");
+                return;
+            }
+
+            if (!File.Exists(reviewPath))
+            {
+                BlockEligibility("Cannot proceed with eligibility evaluation.\n\nSave Review must be completed before evaluating eligibility.");
+                return;
+            }
+
+            if (_reviewDirty)
+            {
+                BlockEligibility("Cannot proceed with eligibility evaluation.\n\nThere are unsaved edits in Data Review. Please click Save Review before evaluating eligibility.");
+                return;
+            }
+
+            CohortReviewService review = _review ?? CohortReviewService.Load(cohortCsvPath, reviewPath);
+            var unresolvedRows = review.Rows
+                .Where(r => !r.Excluded && (r.SearchStatus != ClientIdStatus.Found || string.IsNullOrWhiteSpace(r.ClientId)))
+                .ToList();
+            if (unresolvedRows.Count > 0)
+            {
+                BlockEligibility($"Cannot proceed with eligibility evaluation.\n\nThere are {unresolvedRows.Count} client record(s) with unresolved search status (Search Status != 'Found' or missing Client ID).\n\nPlease return to 'Data Review _ Manual Fixes' (Tab 2), resolve or exclude the missing records, and click 'Save Review' before evaluating eligibility.");
+                return;
+            }
+
+            SetFormEnabled(false);
+            _evaluateEligibility.Text = "Evaluating...";
+            _eligibilityWarning.Text = string.Empty;
+            _eligibilityMessage.Text = "Parsing GNB2009 Excel history and building preview...";
+
+            string criteriaDirectory = CohortWorkspaceService.GetCriteriaDirectory(config, clientListName);
+            string debugCsvPath = Path.Combine(Path.GetDirectoryName(cohortCsvPath)!, $"{clientListName}_ParsedHistory_Debug.csv");
+            var parser = new Gnb2009ExcelParserService();
+            Dictionary<string, ClientImmunizationHistory> histories = await Task.Run(() =>
+            {
+                var parsed = parser.ExtractHistoriesFromDirectory(criteriaDirectory);
+                parser.ExportDiagnosticCsv(parsed, debugCsvPath);
+                return parsed;
+            });
+
+            EligibilityHistoryPreviewResult preview = Gnb2009HistoryPreviewService.BuildPreview(review.Rows, histories);
+            _eligibilityBindingSource.DataSource = new SortableBindingList<EligibilityHistoryPreviewRow>(preview.Rows);
+            _eligibilityWarning.Text = preview.Warnings.Count == 0 ? string.Empty : string.Join(Environment.NewLine, preview.Warnings);
+            foreach (string warning in preview.Warnings) LoggerService.LogWarning(warning);
+            LoggerService.LogInformation($"GNB2009 history preview completed. Histories={histories.Count}; rows={preview.Rows.Count}; diagnostic={debugCsvPath}");
+            _eligibilityMessage.Text = $"History preview complete. Parsed {histories.Count} client history section(s). Diagnostic CSV: {debugCsvPath}";
+        }
+        catch (Exception ex)
+        {
+            LoggerService.LogError("Eligibility history preview failed.", ex);
+            MessageBox.Show(this, $"Eligibility history preview failed.\n\n{ex.Message}", "Evaluate Eligibility", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            _eligibilityMessage.Text = "Eligibility history preview failed. Review the log for details.";
+        }
+        finally
+        {
+            _evaluateEligibility.Text = "Evaluate Eligibility";
+            SetFormEnabled(true);
+        }
+    }
+
+    private void BlockEligibility(string message)
+    {
+        LoggerService.LogWarning(message.Replace(Environment.NewLine, " "));
+        MessageBox.Show(this, message, "Data Review Verification Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        _workflowTabs.SelectedTab = _reviewTab;
+    }
+
+    private static string GetReviewPath(string cohortCsvPath, string clientListName) =>
+        Path.Combine(Path.GetDirectoryName(cohortCsvPath)!, clientListName + "_Cohort.review.json");
 
     private void LoadActiveReview(bool startFresh = false)
     {
@@ -432,6 +571,15 @@ public partial class CohortContextForm
             e.Value = e.RowIndex + 1;
             e.FormattingApplied = true;
         }
+    }
+
+    private void EligibilityGrid_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
+    {
+        if (e.RowIndex < 0 || _eligibilityGrid.Rows[e.RowIndex].DataBoundItem is not EligibilityHistoryPreviewRow row) return;
+        bool warning = !string.IsNullOrWhiteSpace(row.Warning);
+        _eligibilityGrid.Rows[e.RowIndex].DefaultCellStyle.ForeColor = warning ? LavenderSlatePalette.Error : LavenderSlatePalette.Slate;
+        _eligibilityGrid.Rows[e.RowIndex].DefaultCellStyle.SelectionBackColor = LavenderSlatePalette.Selection;
+        _eligibilityGrid.Rows[e.RowIndex].DefaultCellStyle.SelectionForeColor = LavenderSlatePalette.Card;
     }
 
     private void CaptureReviewGridSelection()
