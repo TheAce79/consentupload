@@ -743,7 +743,7 @@ public sealed class DbManager : IConsentSyncRepository
             );
 
             INSERT OR IGNORE INTO LocationLookups (Name)
-            VALUES ('MONCTON'), ('SHEDIAC'), ('RICHIBUCTO');
+            VALUES ('MONCTON'), ('SHEDIAC'), ('RICHIBUCTO'), ('SACKVILLE');
 
             CREATE TABLE IF NOT EXISTS PrefixLookups (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,

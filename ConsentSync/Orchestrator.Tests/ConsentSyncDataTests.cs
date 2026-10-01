@@ -121,7 +121,7 @@ public sealed class ConsentSyncDataTests : IDisposable
 
         IReadOnlyList<string> locations = await manager.GetLocationsAsync();
 
-        Assert.Equal(["MONCTON", "RICHIBUCTO", "SHEDIAC"], locations);
+        Assert.Equal(["MONCTON", "RICHIBUCTO", "SACKVILLE", "SHEDIAC"], locations);
     }
 
     [Fact]
