@@ -90,9 +90,10 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
             "08:30 09:00 DOE, JEAN 2021-02-03 - PS",
             "09:00 - 09:30 Marie Curie 2022-03-04",
             "09:30 - 10:00 Louis Pasteur 2022-04-05 - Autre",
-            "10:00 - 10:30 Alice Martin 2022-05-06 - Autres"
+            "10:00 - 10:30 Alice Martin 2022-05-06 - Autres",
+            "10:30 - 11:00 Jackson Murray 2022-09-01 (Jessica 506-955-2898) *F* ML preschool"
         ]);
-        Assert.Equal(["4 Month Appointment", "Preschool Appointment", "Unknown", "Other / Autre", "Other / Autre"], records.Select(x => x.VaccineType));
+        Assert.Equal(["4 Month Appointment", "Preschool Appointment", "Unknown", "Other / Autre", "Other / Autre", "Preschool Appointment"], records.Select(x => x.VaccineType));
         Assert.Equal("123456789", records[0].Medicare);
     }
 

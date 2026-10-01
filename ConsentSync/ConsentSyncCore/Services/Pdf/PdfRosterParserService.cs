@@ -16,7 +16,7 @@ public class PdfRosterParserService
     private static readonly Regex AppointmentPrefixRegex = new(@"^\s*[\u2605]?\s*\d{1,2}h\d{2}\s*(?:\d+\s*/\s*\d+)?\s*(?:[-–—]\s*)?", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
     private static readonly Regex MilestoneRegex = new(@"\b\d+\s*(?:mois|m|months?)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    private static readonly Regex CategoryRegex = new(@"\b(?:autres?|PS|Mpox|rattrapage|initiale)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex CategoryRegex = new(@"\b(?:autres?|PS|preschool|Mpox|rattrapage|initiale)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public List<ClinicPdfClientRecord> ExtractRecordsFromPdfFolder(string folder) => !Directory.Exists(folder) ? [] : ExtractRecordsFromPdfFiles(Directory.EnumerateFiles(folder, "*.pdf").OrderBy(x => x, StringComparer.Ordinal));
 
