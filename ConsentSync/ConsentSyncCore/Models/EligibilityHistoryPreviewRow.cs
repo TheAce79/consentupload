@@ -5,6 +5,7 @@ public sealed class EligibilityHistoryPreviewRow
     public string ClientId { get; set; } = string.Empty;
     public string FullName { get; set; } = string.Empty;
     public string DateOfBirth { get; set; } = string.Empty;
+    public decimal? AgeMonths { get; set; }
     public string VaccineType { get; set; } = string.Empty;
     public EligibilityStatus? Status { get; set; }
     public string EvaluationReason { get; set; } = string.Empty;

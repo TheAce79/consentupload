@@ -23,6 +23,9 @@ public static class VaccineTypeNormalizer
         if (string.Equals(value, "6 Month Appointment", StringComparison.OrdinalIgnoreCase)) return "6 Month Appointment";
         if (string.Equals(value, "12 Month Appointment", StringComparison.OrdinalIgnoreCase)) return "12 Month Appointment";
         if (string.Equals(value, "18 Month Appointment", StringComparison.OrdinalIgnoreCase)) return "18 Month Appointment";
+        if (IsEtsPlus(value)) return "ETS+";
+        if (IsEts(value)) return "ETS";
+        if (string.Equals(value, "Catchup Appointment", StringComparison.OrdinalIgnoreCase)) return "Catchup Appointment";
         if (string.Equals(value, Other, StringComparison.OrdinalIgnoreCase)) return Other;
 
         if (PreschoolRegex.IsMatch(value)) return "Preschool Appointment";
@@ -40,4 +43,16 @@ public static class VaccineTypeNormalizer
         value,
         $@"\b{months}\s*(?:mois|months?|m)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static bool IsEtsPlus(string value) =>
+        value.Contains("ETS+", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("ETS Plus", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("ETS +", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("ETS/", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsEts(string value) =>
+        (string.Equals(value, "ETS", StringComparison.OrdinalIgnoreCase) ||
+         value.StartsWith("ETS ", StringComparison.OrdinalIgnoreCase)) &&
+        !IsEtsPlus(value) &&
+        !value.Contains("Plus", StringComparison.OrdinalIgnoreCase);
 }

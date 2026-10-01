@@ -11,6 +11,7 @@ using ConsentSyncCore.Services.Csv;
 using ConsentSyncCore.Services.Excel;
 using ConsentSyncCore.Services.Eligibility;
 using ConsentSyncCore.Services.Phis;
+using ConsentSyncCore.Services;
 using IWebDriver = OpenQA.Selenium.IWebDriver;
 using ConsentSync.Ui;
 
@@ -52,6 +53,15 @@ public partial class CohortContextForm
     private readonly BindingSource _eligibilityBindingSource = new();
     private List<EligibilityHistoryPreviewRow> _eligibilityPreviewRows = [];
     private List<CohortReviewRow> _eligibilityCohortRows = [];
+    private IReadOnlyDictionary<string, ClientImmunizationHistory> _eligibilityHistories = new Dictionary<string, ClientImmunizationHistory>(StringComparer.OrdinalIgnoreCase);
+    private bool _updatingEligibilityVaccine;
+    private readonly Dictionary<EligibilityHistoryPreviewRow, string> _eligibilityVaccineValuesBeforeEdit = [];
+    private static readonly string[] EligibilityVaccineTypes =
+    [
+        "2 Month Appointment", "4 Month Appointment", "6 Month Appointment", "12 Month Appointment",
+        "18 Month Appointment", "Preschool Appointment", "ETS", "ETS+", "Other / Autre",
+        "Catchup Appointment", "Unknown"
+    ];
     private readonly Button _evaluateEligibility = new() { Text = "Evaluate Eligibility", AutoSize = true, Enabled = false };
     private readonly TextBox _phisListName = new() { Width = 300 };
     private readonly TextBox _phisCohortId = new() { Width = 140 };
@@ -245,6 +255,7 @@ public partial class CohortContextForm
             (nameof(EligibilityHistoryPreviewRow.ClientId), "Client ID"),
             (nameof(EligibilityHistoryPreviewRow.FullName), "Full Name"),
             (nameof(EligibilityHistoryPreviewRow.DateOfBirth), "Date of Birth"),
+            (nameof(EligibilityHistoryPreviewRow.AgeMonths), "Age (Months)"),
             (nameof(EligibilityHistoryPreviewRow.VaccineType), "Vaccine Type"),
             (nameof(EligibilityHistoryPreviewRow.Status), "Status"),
             (nameof(EligibilityHistoryPreviewRow.EvaluationReason), "Evaluation Reason"),
@@ -254,11 +265,21 @@ public partial class CohortContextForm
             (nameof(EligibilityHistoryPreviewRow.Warning), "Warning")
         })
         {
-            var column = new DataGridViewTextBoxColumn
-            {
-                DataPropertyName = property, Name = property, HeaderText = title, ReadOnly = true,
-                SortMode = DataGridViewColumnSortMode.Automatic
-            };
+            DataGridViewColumn column = property == nameof(EligibilityHistoryPreviewRow.VaccineType)
+                ? new DataGridViewComboBoxColumn
+                {
+                    DataPropertyName = property, Name = "col_VaccineType", HeaderText = title, ReadOnly = false,
+                    SortMode = DataGridViewColumnSortMode.Automatic,
+                    FlatStyle = FlatStyle.Flat,
+                    DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton
+                }
+                : new DataGridViewTextBoxColumn
+                {
+                    DataPropertyName = property, Name = property == nameof(EligibilityHistoryPreviewRow.AgeMonths) ? "col_AgeMonths" : property, HeaderText = title, ReadOnly = true,
+                    SortMode = DataGridViewColumnSortMode.Automatic
+                };
+            if (column is DataGridViewComboBoxColumn vaccineColumn)
+                vaccineColumn.Items.AddRange(EligibilityVaccineTypes);
             if (property == nameof(EligibilityHistoryPreviewRow.FullName))
             {
                 column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
@@ -278,10 +299,19 @@ public partial class CohortContextForm
             {
                 column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
             }
+            else if (property == nameof(EligibilityHistoryPreviewRow.AgeMonths))
+            {
+                column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+                column.DefaultCellStyle.Format = "0.#";
+            }
             _eligibilityGrid.Columns.Add(column);
         }
         _eligibilityGrid.DataSource = _eligibilityBindingSource;
         _eligibilityGrid.CellFormatting += EligibilityGrid_CellFormatting;
+        _eligibilityGrid.CurrentCellDirtyStateChanged += EligibilityGrid_CurrentCellDirtyStateChanged;
+        _eligibilityGrid.CellBeginEdit += EligibilityGrid_CellBeginEdit;
+        _eligibilityGrid.CellValueChanged += async (_, e) => await EligibilityGrid_CellValueChangedAsync(e.RowIndex, e.ColumnIndex);
+        _eligibilityGrid.DataError += (_, e) => e.ThrowException = false;
         LavenderSlateTheme.ApplyGrid(_eligibilityGrid);
         var eligibilityGridCard = new LavenderCardPanel { Dock = DockStyle.Fill, Padding = new Padding(1) };
         eligibilityGridCard.Controls.Add(_eligibilityGrid);
@@ -497,8 +527,10 @@ public partial class CohortContextForm
 
             EligibilityHistoryPreviewResult preview = Gnb2009HistoryPreviewService.BuildPreview(review.Rows, histories);
             ApplyEligibilityResults(preview.Rows, review.Rows, histories, _activeContext?.CohortDate ?? default, GetEligibilityJurisdiction());
+            _review = review;
             _eligibilityPreviewRows = preview.Rows.ToList();
             _eligibilityCohortRows = review.Rows.Where(row => !row.Excluded).ToList();
+            _eligibilityHistories = histories;
             PopulateEligibilityFilters();
             ApplyGridFilters();
             _eligibilityWarning.Text = preview.Warnings.Count == 0 ? string.Empty : string.Join(Environment.NewLine, preview.Warnings);
@@ -671,6 +703,88 @@ public partial class CohortContextForm
         }
     }
 
+    private void EligibilityGrid_CurrentCellDirtyStateChanged(object? sender, EventArgs e)
+    {
+        DataGridViewCell? currentCell = _eligibilityGrid.CurrentCell;
+        if (_eligibilityGrid.IsCurrentCellDirty && currentCell is not null &&
+            currentCell.OwningColumn?.DataPropertyName == nameof(EligibilityHistoryPreviewRow.VaccineType))
+            _eligibilityGrid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+    }
+
+    private void EligibilityGrid_CellBeginEdit(object? sender, DataGridViewCellCancelEventArgs e)
+    {
+        if (e.RowIndex < 0 || _eligibilityGrid.Columns[e.ColumnIndex].DataPropertyName != nameof(EligibilityHistoryPreviewRow.VaccineType)) return;
+        if (_eligibilityGrid.Rows[e.RowIndex].DataBoundItem is EligibilityHistoryPreviewRow row)
+            _eligibilityVaccineValuesBeforeEdit[row] = row.VaccineType;
+    }
+
+    private async Task EligibilityGrid_CellValueChangedAsync(int rowIndex, int columnIndex)
+    {
+        if (_updatingEligibilityVaccine || rowIndex < 0 || columnIndex < 0 ||
+            _eligibilityGrid.Columns[columnIndex].DataPropertyName != nameof(EligibilityHistoryPreviewRow.VaccineType) ||
+            _eligibilityGrid.Rows[rowIndex].DataBoundItem is not EligibilityHistoryPreviewRow previewRow) return;
+
+        string previousPreviewVaccine = _eligibilityVaccineValuesBeforeEdit.Remove(previewRow, out string? captured)
+            ? captured
+            : previewRow.VaccineType;
+        string updatedVaccine = VaccineTypeNormalizer.Normalize(previewRow.VaccineType);
+        List<CohortReviewRow> matchingRows = _eligibilityCohortRows
+            .Where(row => string.Equals(row.ClientId.Trim(), previewRow.ClientId.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (_review is null || matchingRows.Count != 1)
+        {
+            _updatingEligibilityVaccine = true;
+            try { previewRow.VaccineType = previousPreviewVaccine; }
+            finally { _updatingEligibilityVaccine = false; }
+            _eligibilityBindingSource.ResetCurrentItem();
+            MessageBox.Show(this, "Vaccine Type can only be changed for a single matching included cohort client.", "Vaccine Type", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        CohortReviewRow reviewRow = matchingRows[0];
+        string previousSourceVaccine = reviewRow.Source.VaccineType;
+        decimal? previousAgeMonths = previewRow.AgeMonths;
+        EligibilityStatus? previousStatus = previewRow.Status;
+        string previousReason = previewRow.EvaluationReason;
+        int previousDoseCount = previewRow.DoseCount;
+        string? previousLatestDoseDate = previewRow.LatestDoseDate;
+
+        _updatingEligibilityVaccine = true;
+        _eligibilityGrid.Enabled = false;
+        try
+        {
+            reviewRow.Source.VaccineType = updatedVaccine;
+            _eligibilityHistories.TryGetValue(previewRow.ClientId.Trim(), out ClientImmunizationHistory? history);
+            EligibilityEvaluationResult result = new EligibilityEvaluationService().EvaluateRecord(
+                reviewRow, history, _activeContext?.CohortDate ?? default, GetEligibilityJurisdiction());
+            ApplyEligibilityResult(previewRow, result);
+
+            await Task.Run(_review.Save);
+            _reviewDirty = false;
+            _eligibilityMessage.Text = $"Vaccine Type updated to '{updatedVaccine}' and saved to the cohort CSV.";
+        }
+        catch (Exception ex)
+        {
+            reviewRow.Source.VaccineType = previousSourceVaccine;
+            previewRow.VaccineType = previousPreviewVaccine;
+            previewRow.AgeMonths = previousAgeMonths;
+            previewRow.Status = previousStatus;
+            previewRow.EvaluationReason = previousReason;
+            previewRow.DoseCount = previousDoseCount;
+            previewRow.LatestDoseDate = previousLatestDoseDate;
+            LoggerService.LogError("Could not save the edited eligibility vaccine type.", ex);
+            MessageBox.Show(this, $"Vaccine Type could not be saved. The change was reverted.\n\n{ex.Message}", "Vaccine Type", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _eligibilityGrid.Enabled = true;
+            _updatingEligibilityVaccine = false;
+            PopulateEligibilityFilters();
+            ApplyGridFilters();
+            _eligibilityGrid.Invalidate();
+        }
+    }
+
     private static void ApplyEligibilityResults(
         IEnumerable<EligibilityHistoryPreviewRow> previewRows,
         IEnumerable<CohortReviewRow> cohortRows,
@@ -687,11 +801,18 @@ public partial class CohortContextForm
             if (!reviewByClientId.TryGetValue(previewRow.ClientId, out CohortReviewRow? reviewRow)) continue;
             histories.TryGetValue(previewRow.ClientId, out ClientImmunizationHistory? history);
             EligibilityEvaluationResult result = evaluator.EvaluateRecord(reviewRow, history, cohortDate, jurisdiction);
-            previewRow.Status = result.Status;
-            previewRow.EvaluationReason = result.EvaluationReason;
-            previewRow.DoseCount = result.DoseCount;
-            previewRow.LatestDoseDate = result.LatestDoseDate?.ToString("yyyy-MM-dd");
+            ApplyEligibilityResult(previewRow, result);
         }
+    }
+
+    private static void ApplyEligibilityResult(EligibilityHistoryPreviewRow previewRow, EligibilityEvaluationResult result)
+    {
+        previewRow.VaccineType = result.VaccineType;
+        previewRow.AgeMonths = result.AgeMonths;
+        previewRow.Status = result.Status;
+        previewRow.EvaluationReason = result.EvaluationReason;
+        previewRow.DoseCount = result.DoseCount;
+        previewRow.LatestDoseDate = result.LatestDoseDate?.ToString("yyyy-MM-dd");
     }
 
     private string GetEligibilityJurisdiction() =>
@@ -749,6 +870,8 @@ public partial class CohortContextForm
         {
             _eligibilityPreviewRows = [];
             _eligibilityCohortRows = [];
+            _eligibilityHistories = new Dictionary<string, ClientImmunizationHistory>(StringComparer.OrdinalIgnoreCase);
+            _eligibilityVaccineValuesBeforeEdit.Clear();
             _eligibilityBindingSource.DataSource = null;
             cmb_FilterVaccineType.Items.Clear();
             cmb_FilterStatus.Items.Clear();

@@ -28,6 +28,7 @@ public sealed class EligibilityEvaluationService
             ClientId = record.ClientId.Trim(),
             FullName = record.FullName,
             DateOfBirth = dateOfBirth,
+            AgeMonths = dateOfBirth.HasValue && clinicDate.HasValue ? CalculateAgeMonths(dateOfBirth.Value, clinicDate.Value) : null,
             VaccineType = record.Source.VaccineType,
             ClinicDate = clinicDate,
             DoseCount = doseCount,
@@ -50,6 +51,10 @@ public sealed class EligibilityEvaluationService
 
         DateTime dob = dateOfBirth.Value.Date;
         DateTime clinic = clinicDate.Value.Date;
+        if (IsEtsPlus(vaccineType))
+            return EvaluateEtsPlus(result, history, dob, clinic);
+        if (IsEts(vaccineType))
+            return EvaluateEts(result, dob, clinic);
         if (vaccineType.Contains("18 Month", StringComparison.OrdinalIgnoreCase))
         {
             if (clinic < dob.AddMonths(18))
@@ -72,6 +77,44 @@ public sealed class EligibilityEvaluationService
                 : Ineligible(result, "Other/Autre KO. Appointment requires prior vaccination history in PHIS; 0 previous doses found.");
 
         return ManualReview(result, $"Unrecognized appointment category '{vaccineType}'. Manual review required.");
+    }
+
+    public static decimal CalculateAgeMonths(DateTime dateOfBirth, DateTime clinicDate)
+    {
+        DateTime dob = dateOfBirth.Date;
+        DateTime clinic = clinicDate.Date;
+        int completedMonths = ((clinic.Year - dob.Year) * 12) + clinic.Month - dob.Month;
+        if (clinic.Day < dob.Day) completedMonths--;
+
+        DateTime intervalStart = dob.AddMonths(completedMonths);
+        DateTime intervalEnd = intervalStart.AddMonths(1);
+        decimal fraction = (decimal)(clinic - intervalStart).TotalDays / (decimal)(intervalEnd - intervalStart).TotalDays;
+        return completedMonths + fraction;
+    }
+
+    private static EligibilityEvaluationResult EvaluateEts(EligibilityEvaluationResult result, DateTime dob, DateTime clinic)
+    {
+        string age = FormatAgeMonths(result.AgeMonths);
+        bool eligible = clinic >= dob.AddMonths(18) && clinic < dob.AddMonths(24);
+        return eligible
+            ? Eligible(result, $"ETS Evaluation criteria OK. Client age is {age}m (>= 18m and < 24m).")
+            : Ineligible(result, $"ETS Evaluation age criteria KO. Client age is {age}m (must be >= 18m and < 24m).");
+    }
+
+    private static EligibilityEvaluationResult EvaluateEtsPlus(EligibilityEvaluationResult result, ClientImmunizationHistory history, DateTime dob, DateTime clinic)
+    {
+        string age = FormatAgeMonths(result.AgeMonths);
+        if (clinic < dob.AddMonths(18) || clinic >= dob.AddMonths(24))
+            return Ineligible(result, $"ETS+ age criteria KO. Age = {age}m (must be >= 18m and < 24m).");
+
+        DateTime? priorDose = history.GetMaxAgentDate("MMR", "MMRV");
+        if (!priorDose.HasValue)
+            return Eligible(result, $"ETS+ criteria OK. Age = {age}m (18-23m). No prior MMRV dose found in PHIS history.");
+
+        int interval = (clinic - priorDose.Value.Date).Days;
+        return interval > 180
+            ? Eligible(result, $"ETS+ criteria OK. Age = {age}m (18-23m). Previous MMRV = {priorDose:yyyy-MM-dd}, interval > 6 months.")
+            : Ineligible(result, $"ETS+ dose interval KO. Previous MMRV = {priorDose:yyyy-MM-dd}, Clinic Date = {clinic:yyyy-MM-dd}. Interval is <= 6 months.");
     }
 
     private static EligibilityEvaluationResult AgeRule(EligibilityEvaluationResult result, bool eligible, string requiredAge, DateTime dob, DateTime clinic) =>
@@ -98,6 +141,20 @@ public sealed class EligibilityEvaluationService
         result.EvaluationReason = reason;
         return result;
     }
+
+    private static string FormatAgeMonths(decimal? ageMonths) => ageMonths?.ToString("0.#", CultureInfo.InvariantCulture) ?? "unknown";
+
+    private static bool IsEtsPlus(string value) =>
+        value.Contains("ETS+", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("ETS Plus", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("ETS +", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("ETS/", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsEts(string value) =>
+        (string.Equals(value, "ETS", StringComparison.OrdinalIgnoreCase) ||
+         value.StartsWith("ETS ", StringComparison.OrdinalIgnoreCase)) &&
+        !IsEtsPlus(value) &&
+        !value.Contains("Plus", StringComparison.OrdinalIgnoreCase);
 
     private static DateTime? ParseDate(string? value)
     {

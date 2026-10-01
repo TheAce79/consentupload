@@ -54,6 +54,7 @@ public sealed class EligibilityEvaluationServiceTests
     [Theory]
     [InlineData("Other / Autre", 0, EligibilityStatus.Ineligible)]
     [InlineData("Other / Autre", 1, EligibilityStatus.Eligible)]
+    [InlineData("Catchup Appointment", 1, EligibilityStatus.ManualReview)]
     [InlineData("Unknown", 1, EligibilityStatus.ManualReview)]
     public void OtherAndUnknownRules_UseHistoryAndManualReview(string vaccineType, int doses, EligibilityStatus expected)
     {
@@ -78,6 +79,77 @@ public sealed class EligibilityEvaluationServiceTests
 
         Assert.Equal(EligibilityStatus.Eligible, result.Status);
         Assert.Equal(new DateTime(2026, 5, 1), result.ClinicDate);
+    }
+
+    [Fact]
+    public void AgeMonths_UsesCalendarMonthFraction()
+    {
+        EligibilityEvaluationResult result = Evaluate("ETS", "2022-09-21", "2026-10-01", History());
+
+        Assert.Equal(48.3m, Math.Round(result.AgeMonths!.Value, 1));
+    }
+
+    [Fact]
+    public void AgeMonths_IsWholeAtCalendarMonthAnniversary()
+    {
+        EligibilityEvaluationResult result = Evaluate("ETS", "2022-09-21", "2026-09-21", History());
+
+        Assert.Equal(48m, result.AgeMonths);
+    }
+
+    [Fact]
+    public void Ets_IgnoresRecentMmrvHistoryWithinAgeRange()
+    {
+        EligibilityEvaluationResult result = Evaluate("ETS", "2025-03-01", "2026-10-01", History(("MMRV", new DateTime(2026, 8, 1))));
+
+        Assert.Equal(EligibilityStatus.Eligible, result.Status);
+        Assert.Contains("ETS Evaluation criteria OK", result.EvaluationReason);
+    }
+
+    [Theory]
+    [InlineData("ETS+", EligibilityStatus.Eligible)]
+    [InlineData("ETS Plus", EligibilityStatus.Eligible)]
+    [InlineData("ETS + Vaccine", EligibilityStatus.Eligible)]
+    [InlineData("ETS/Vaccine", EligibilityStatus.Eligible)]
+    public void EtsPlus_AcceptsAliasesAndNoPriorMmrv(string vaccineType, EligibilityStatus expected)
+    {
+        EligibilityEvaluationResult result = Evaluate(vaccineType, "2025-03-01", "2026-10-01", History(("BCG", new DateTime(2025, 4, 1))));
+
+        Assert.Equal(expected, result.Status);
+        Assert.Contains("No prior MMRV dose found", result.EvaluationReason);
+    }
+
+    [Theory]
+    [InlineData("2026-04-04", EligibilityStatus.Ineligible)]
+    [InlineData("2026-04-03", EligibilityStatus.Eligible)]
+    public void EtsPlus_RequiresStrictlyMoreThan180DaysSinceLatestMmrv(string priorDose, EligibilityStatus expected)
+    {
+        EligibilityEvaluationResult result = Evaluate("ETS+", "2025-03-01", "2026-10-01", History(
+            ("MMRV", DateTime.Parse(priorDose)), ("MMR", new DateTime(2026, 1, 1))));
+
+        Assert.Equal(expected, result.Status);
+        Assert.Contains($"Previous MMRV = {priorDose}", result.EvaluationReason);
+    }
+
+    [Theory]
+    [InlineData("2025-04-01", EligibilityStatus.Eligible)]
+    [InlineData("2025-04-02", EligibilityStatus.Ineligible)]
+    [InlineData("2024-10-01", EligibilityStatus.Ineligible)]
+    [InlineData("2024-10-02", EligibilityStatus.Eligible)]
+    public void EtsAndEtsPlus_Enforce18To24MonthCalendarBoundaries(string dob, EligibilityStatus expected)
+    {
+        EligibilityEvaluationResult ets = Evaluate("ETS", dob, "2026-10-01", History());
+        EligibilityEvaluationResult etsPlus = Evaluate("ETS+", dob, "2026-10-01", History());
+
+        Assert.Equal(expected, ets.Status);
+        Assert.Equal(expected, etsPlus.Status);
+    }
+
+    [Fact]
+    public void EtsAndEtsPlus_MissingHistoryRemainManualReview()
+    {
+        Assert.Equal(EligibilityStatus.ManualReview, Evaluate("ETS", "2025-03-01", "2026-10-01", null).Status);
+        Assert.Equal(EligibilityStatus.ManualReview, Evaluate("ETS+", "2025-03-01", "2026-10-01", null).Status);
     }
 
     private EligibilityEvaluationResult Evaluate(string vaccineType, string dob, string? clinic, ClientImmunizationHistory? history, DateTime? cohortDate = null, string jurisdiction = "NB") =>

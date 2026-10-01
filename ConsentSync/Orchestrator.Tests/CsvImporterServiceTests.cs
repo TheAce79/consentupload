@@ -78,7 +78,7 @@ public sealed class CsvImporterServiceTests : IDisposable
         ClinicPdfClientRecord record = Assert.Single(CsvImporterService.ReadFromCsv(input));
         Assert.Null(record.ClientId); Assert.Equal(ClientIdStatus.NeedsManualReview, record.ClientIdStatus);
         Assert.Equal("AWE DJONYANG, BOUAGNI JEDIDJA", record.FullName); Assert.Equal("2020-02-03", record.DateOfBirth);
-        Assert.Null(record.Medicare); Assert.Equal("05065881736", record.Phone); Assert.Equal("Other / Autre", record.VaccineType);
+        Assert.Null(record.Medicare); Assert.Equal("05065881736", record.Phone); Assert.Equal("Catchup Appointment", record.VaccineType);
         Assert.Equal("B-1", record.BookingId); Assert.Equal("Clinique Étoile", record.ClinicName); Assert.Equal("Français", record.PreferredLanguage);
         Assert.Equal("2026-10-02", record.ClinicDate);
 

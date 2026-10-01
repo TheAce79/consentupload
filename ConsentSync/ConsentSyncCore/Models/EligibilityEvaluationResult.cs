@@ -5,6 +5,7 @@ public sealed class EligibilityEvaluationResult
     public string ClientId { get; init; } = string.Empty;
     public string FullName { get; init; } = string.Empty;
     public DateTime? DateOfBirth { get; init; }
+    public decimal? AgeMonths { get; init; }
     public string VaccineType { get; init; } = string.Empty;
     public DateTime? ClinicDate { get; init; }
     public EligibilityStatus Status { get; set; }

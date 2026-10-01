@@ -83,6 +83,17 @@ public sealed class CohortReviewServiceTests : IDisposable
     }
 
     [Fact]
+    public void VaccineTypeEdit_SaveReload_PersistsCanonicalValueWithReviewSidecar()
+    {
+        var review = CohortReviewService.Load(SourcePath, ReviewPath);
+        review.Rows[0].Source.VaccineType = "ETS+";
+        review.Save();
+
+        Assert.Equal("ETS+", CsvImporterService.ReadFromCsv(SourcePath)[0].VaccineType);
+        Assert.Equal("ETS+", CohortReviewService.Load(SourcePath, ReviewPath).Rows[0].Source.VaccineType);
+    }
+
+    [Fact]
     public void ChangedSource_BlocksRestoreAndSaveUntilExplicitFreshReview()
     {
         var review = CohortReviewService.Load(SourcePath, ReviewPath);
