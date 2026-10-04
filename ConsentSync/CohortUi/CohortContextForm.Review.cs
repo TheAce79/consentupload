@@ -56,6 +56,9 @@ public partial class CohortContextForm
     private IReadOnlyDictionary<string, ClientImmunizationHistory> _eligibilityHistories = new Dictionary<string, ClientImmunizationHistory>(StringComparer.OrdinalIgnoreCase);
     private bool _updatingEligibilityVaccine;
     private readonly Dictionary<EligibilityHistoryPreviewRow, string> _eligibilityVaccineValuesBeforeEdit = [];
+    private readonly Dictionary<CohortReviewRow, string> _pendingVaccineOverrides = [];
+    private bool _hasUnsavedVaccineOverrides;
+    private bool _bypassEligibilityTabNavigation;
     private static readonly string[] EligibilityVaccineTypes =
     [
         "2 Month Appointment", "4 Month Appointment", "6 Month Appointment", "12 Month Appointment",
@@ -63,6 +66,7 @@ public partial class CohortContextForm
         "Catchup Appointment", "Unknown"
     ];
     private readonly Button _evaluateEligibility = new() { Text = "Evaluate Eligibility", AutoSize = true, Enabled = false };
+    private readonly Button _exportFinalCohortCsv = new() { Text = "Export Final Cohort CSV", AutoSize = true, Enabled = false };
     private readonly TextBox _phisListName = new() { Width = 300 };
     private readonly TextBox _phisCohortId = new() { Width = 140 };
     private readonly TextBox _phisClientListId = new() { Width = 140 };
@@ -123,6 +127,7 @@ public partial class CohortContextForm
         setup.Resize += (_, _) => ResizeSetupDebugLog(setup, setupStack);
         ResizeSetupDebugLog(setup, setupStack);
         _workflowTabs.TabPages.AddRange([setup, _reviewTab, _eligibilityTab]);
+        _workflowTabs.Selecting += WorkflowTabs_Selecting;
         Controls.Add(_workflowTabs);
         _nextCohortButton.Click += btn_NextCohort_Click;
         _workspaceToolbar.Controls.Add(_nextCohortButton);
@@ -235,9 +240,10 @@ public partial class CohortContextForm
         var eligibilityActions = new LavenderFlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true };
         _openCriteriaExplorer.Click += btn_OpenCriteriaExplorer_Click;
         _evaluateEligibility.Click += btn_EvaluateEligibility_Click;
+        _exportFinalCohortCsv.Click += btn_ExportFinalCohortCsv_Click;
         eligibilityActions.Controls.Add(_openCriteriaExplorer);
         eligibilityActions.Controls.Add(_evaluateEligibility);
-        eligibilityActions.Controls.Add(new Button { Text = "Export Final Cohort CSV", AutoSize = true, Enabled = false });
+        eligibilityActions.Controls.Add(_exportFinalCohortCsv);
         eligibility.Controls.Add(eligibilityActions, 0, 1);
         eligibility.Controls.Add(_eligibilityWarning, 0, 2);
         var eligibilityFilters = new LavenderFlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true };
@@ -310,7 +316,7 @@ public partial class CohortContextForm
         _eligibilityGrid.CellFormatting += EligibilityGrid_CellFormatting;
         _eligibilityGrid.CurrentCellDirtyStateChanged += EligibilityGrid_CurrentCellDirtyStateChanged;
         _eligibilityGrid.CellBeginEdit += EligibilityGrid_CellBeginEdit;
-        _eligibilityGrid.CellValueChanged += async (_, e) => await EligibilityGrid_CellValueChangedAsync(e.RowIndex, e.ColumnIndex);
+        _eligibilityGrid.CellValueChanged += (_, e) => EligibilityGrid_CellValueChanged(e.RowIndex, e.ColumnIndex);
         _eligibilityGrid.DataError += (_, e) => e.ThrowException = false;
         LavenderSlateTheme.ApplyGrid(_eligibilityGrid);
         var eligibilityGridCard = new LavenderCardPanel { Dock = DockStyle.Fill, Padding = new Padding(1) };
@@ -433,6 +439,7 @@ public partial class CohortContextForm
         _savePhisDb.Enabled = available;
         _openCriteriaExplorer.Enabled = available;
         _evaluateEligibility.Enabled = available;
+        _exportFinalCohortCsv.Enabled = available;
         if (_saveReview is null) return;
         _saveReview.Enabled = _acceptMatch.Enabled = _toggleExcluded.Enabled = available && _review is not null;
         _retryCacheSync.Enabled = available && _review is not null && _cacheSyncRetryAvailable;
@@ -466,14 +473,20 @@ public partial class CohortContextForm
 
     private async void btn_EvaluateEligibility_Click(object? sender, EventArgs e)
     {
-        if (_formBusy || !TryGetSavedClientListName(out string clientListName)) return;
+        await EvaluateEligibilityAsync();
+    }
 
-        if (!_reviewGrid.EndEdit())
+    private async Task<bool> EvaluateEligibilityAsync()
+    {
+        if (_formBusy || !TryGetSavedClientListName(out string clientListName)) return false;
+
+        if (!_reviewGrid.EndEdit() || !_eligibilityGrid.EndEdit())
         {
             BlockEligibility("Finish or correct the active review cell, then click Save Review before evaluating eligibility.");
-            return;
+            return false;
         }
 
+        Dictionary<CohortReviewRow, string>? sourceVaccineTypes = null;
         try
         {
             var config = ConfigurationService.GetConfiguration();
@@ -483,19 +496,19 @@ public partial class CohortContextForm
             if (!File.Exists(cohortCsvPath))
             {
                 BlockEligibility($"Cannot proceed with eligibility evaluation.\n\nThe saved cohort CSV was not found:\n{cohortCsvPath}\n\nComplete PHIS search and Save Review before evaluating eligibility.");
-                return;
+                return false;
             }
 
             if (!File.Exists(reviewPath))
             {
                 BlockEligibility("Cannot proceed with eligibility evaluation.\n\nSave Review must be completed before evaluating eligibility.");
-                return;
+                return false;
             }
 
             if (_reviewDirty)
             {
                 BlockEligibility("Cannot proceed with eligibility evaluation.\n\nThere are unsaved edits in Data Review. Please click Save Review before evaluating eligibility.");
-                return;
+                return false;
             }
 
             CohortReviewService review = _review ?? CohortReviewService.Load(cohortCsvPath, reviewPath);
@@ -505,14 +518,22 @@ public partial class CohortContextForm
             if (unresolvedRows.Count > 0)
             {
                 BlockEligibility($"Cannot proceed with eligibility evaluation.\n\nThere are {unresolvedRows.Count} client record(s) with unresolved search status (Search Status != 'Found' or missing Client ID).\n\nPlease return to 'Data Review _ Manual Fixes' (Tab 2), resolve or exclude the missing records, and click 'Save Review' before evaluating eligibility.");
-                return;
+                return false;
             }
 
             SetFormEnabled(false);
             _evaluateEligibility.Text = "Evaluating...";
             _eligibilityWarning.Text = string.Empty;
-            ResetEligibilityFilters();
-            _eligibilitySummary.Text = "Total Cohort: 0 | Eligible: 0 | Ineligible: 0 | Manual Review: 0";
+
+            if (_pendingVaccineOverrides.Count > 0)
+            {
+                sourceVaccineTypes = _pendingVaccineOverrides.Keys.ToDictionary(row => row, row => row.Source.VaccineType);
+                foreach ((CohortReviewRow row, string vaccineType) in _pendingVaccineOverrides)
+                    row.Source.VaccineType = vaccineType;
+                await Task.Run(review.Save);
+                _reviewDirty = false;
+            }
+
             _eligibilityMessage.Text = "Parsing GNB2009 Excel history and evaluating administrative eligibility...";
 
             string criteriaDirectory = CohortWorkspaceService.GetCriteriaDirectory(config, clientListName);
@@ -537,16 +558,23 @@ public partial class CohortContextForm
             foreach (string warning in preview.Warnings) LoggerService.LogWarning(warning);
             LoggerService.LogInformation($"GNB2009 eligibility evaluation completed. Histories={histories.Count}; rows={preview.Rows.Count}; diagnostic={debugCsvPath}");
             _eligibilityMessage.Text = $"Eligibility evaluation complete. Parsed {histories.Count} client history section(s). Diagnostic CSV: {debugCsvPath}";
+            _pendingVaccineOverrides.Clear();
+            _hasUnsavedVaccineOverrides = false;
+            UpdateEligibilityPendingState();
+            return true;
         }
         catch (Exception ex)
         {
+            if (sourceVaccineTypes is not null)
+                foreach ((CohortReviewRow row, string vaccineType) in sourceVaccineTypes) row.Source.VaccineType = vaccineType;
             LoggerService.LogError("Eligibility history preview failed.", ex);
             MessageBox.Show(this, $"Eligibility history preview failed.\n\n{ex.Message}", "Evaluate Eligibility", MessageBoxButtons.OK, MessageBoxIcon.Error);
             _eligibilityMessage.Text = "Eligibility history preview failed. Review the log for details.";
+            return false;
         }
         finally
         {
-            _evaluateEligibility.Text = "Evaluate Eligibility";
+            UpdateEligibilityPendingState();
             SetFormEnabled(true);
         }
     }
@@ -556,6 +584,68 @@ public partial class CohortContextForm
         LoggerService.LogWarning(message.Replace(Environment.NewLine, " "));
         MessageBox.Show(this, message, "Data Review Verification Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         _workflowTabs.SelectedTab = _reviewTab;
+    }
+
+    private void UpdateEligibilityPendingState()
+    {
+        _evaluateEligibility.Text = _hasUnsavedVaccineOverrides ? "Evaluate Eligibility (Unsaved)" : "Evaluate Eligibility";
+        _evaluateEligibility.FlatAppearance.BorderSize = _hasUnsavedVaccineOverrides ? 3 : 1;
+        _evaluateEligibility.FlatAppearance.BorderColor = _hasUnsavedVaccineOverrides
+            ? LavenderSlatePalette.Warning
+            : LavenderSlatePalette.Selection;
+    }
+
+    private async void btn_ExportFinalCohortCsv_Click(object? sender, EventArgs e)
+    {
+        if (_formBusy || !TryGetSavedClientListName(out string clientListName)) return;
+
+        if (_hasUnsavedVaccineOverrides)
+        {
+            DialogResult choice = PromptForPendingVaccineOverrides();
+            if (choice != DialogResult.Yes) return;
+            if (!await EvaluateEligibilityAsync()) return;
+        }
+
+        try
+        {
+            string csvPath = CohortWorkspaceService.GetStandardizedOutputCsvPath(ConfigurationService.GetConfiguration(), clientListName);
+            if (!File.Exists(csvPath))
+            {
+                MessageBox.Show(this, $"The cohort CSV was not found:\n{csvPath}", "Export Final Cohort CSV", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var explorer = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+            explorer.ArgumentList.Add($"/select,{csvPath}");
+            Process.Start(explorer);
+            _eligibilityMessage.Text = $"Final cohort CSV: {csvPath}";
+        }
+        catch (Exception ex)
+        {
+            LoggerService.LogError("Could not reveal the final cohort CSV.", ex);
+            MessageBox.Show(this, $"Could not reveal the final cohort CSV.\n\n{ex.Message}", "Export Final Cohort CSV", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private DialogResult PromptForPendingVaccineOverrides() => MessageBox.Show(this,
+        "You have modified vaccine types that have not been re-evaluated or saved to CSV. Would you like to save and evaluate now?",
+        "Unsaved Vaccine Type Changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+
+    private async void WorkflowTabs_Selecting(object? sender, TabControlCancelEventArgs e)
+    {
+        if (_bypassEligibilityTabNavigation || !_hasUnsavedVaccineOverrides ||
+            _workflowTabs.SelectedTab != _eligibilityTab || e.TabPage == _eligibilityTab)
+            return;
+
+        DialogResult choice = PromptForPendingVaccineOverrides();
+        if (choice == DialogResult.No) return;
+        e.Cancel = true;
+        if (choice != DialogResult.Yes) return;
+
+        if (!await EvaluateEligibilityAsync()) return;
+        _bypassEligibilityTabNavigation = true;
+        try { _workflowTabs.SelectedTab = e.TabPage; }
+        finally { _bypassEligibilityTabNavigation = false; }
     }
 
     private static string GetReviewPath(string cohortCsvPath, string clientListName) =>
@@ -718,7 +808,7 @@ public partial class CohortContextForm
             _eligibilityVaccineValuesBeforeEdit[row] = row.VaccineType;
     }
 
-    private async Task EligibilityGrid_CellValueChangedAsync(int rowIndex, int columnIndex)
+    private void EligibilityGrid_CellValueChanged(int rowIndex, int columnIndex)
     {
         if (_updatingEligibilityVaccine || rowIndex < 0 || columnIndex < 0 ||
             _eligibilityGrid.Columns[columnIndex].DataPropertyName != nameof(EligibilityHistoryPreviewRow.VaccineType) ||
@@ -742,30 +832,36 @@ public partial class CohortContextForm
         }
 
         CohortReviewRow reviewRow = matchingRows[0];
-        string previousSourceVaccine = reviewRow.Source.VaccineType;
         decimal? previousAgeMonths = previewRow.AgeMonths;
         EligibilityStatus? previousStatus = previewRow.Status;
         string previousReason = previewRow.EvaluationReason;
         int previousDoseCount = previewRow.DoseCount;
         string? previousLatestDoseDate = previewRow.LatestDoseDate;
 
+        string sourceVaccineType = reviewRow.Source.VaccineType;
         _updatingEligibilityVaccine = true;
-        _eligibilityGrid.Enabled = false;
         try
         {
+            previewRow.VaccineType = updatedVaccine;
             reviewRow.Source.VaccineType = updatedVaccine;
             _eligibilityHistories.TryGetValue(previewRow.ClientId.Trim(), out ClientImmunizationHistory? history);
             EligibilityEvaluationResult result = new EligibilityEvaluationService().EvaluateRecord(
                 reviewRow, history, _activeContext?.CohortDate ?? default, GetEligibilityJurisdiction());
             ApplyEligibilityResult(previewRow, result);
+            reviewRow.Source.VaccineType = sourceVaccineType;
 
-            await Task.Run(_review.Save);
-            _reviewDirty = false;
-            _eligibilityMessage.Text = $"Vaccine Type updated to '{updatedVaccine}' and saved to the cohort CSV.";
+            if (string.Equals(updatedVaccine, sourceVaccineType, StringComparison.OrdinalIgnoreCase))
+                _pendingVaccineOverrides.Remove(reviewRow);
+            else
+                _pendingVaccineOverrides[reviewRow] = updatedVaccine;
+            _hasUnsavedVaccineOverrides = _pendingVaccineOverrides.Count > 0;
+            UpdateEligibilityPendingState();
+            _eligibilityMessage.Text = "Unsaved vaccine type changes. Click 'Evaluate Eligibility' to persist.";
+            _eligibilityGrid.InvalidateRow(rowIndex);
         }
         catch (Exception ex)
         {
-            reviewRow.Source.VaccineType = previousSourceVaccine;
+            reviewRow.Source.VaccineType = sourceVaccineType;
             previewRow.VaccineType = previousPreviewVaccine;
             previewRow.AgeMonths = previousAgeMonths;
             previewRow.Status = previousStatus;
@@ -773,15 +869,11 @@ public partial class CohortContextForm
             previewRow.DoseCount = previousDoseCount;
             previewRow.LatestDoseDate = previousLatestDoseDate;
             LoggerService.LogError("Could not save the edited eligibility vaccine type.", ex);
-            MessageBox.Show(this, $"Vaccine Type could not be saved. The change was reverted.\n\n{ex.Message}", "Vaccine Type", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, $"Vaccine Type could not be evaluated. The change was reverted.\n\n{ex.Message}", "Vaccine Type", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
-            _eligibilityGrid.Enabled = true;
             _updatingEligibilityVaccine = false;
-            PopulateEligibilityFilters();
-            ApplyGridFilters();
-            _eligibilityGrid.Invalidate();
         }
     }
 
@@ -888,6 +980,9 @@ public partial class CohortContextForm
     private void ResetEligibilityPreview()
     {
         ResetEligibilityFilters();
+        _pendingVaccineOverrides.Clear();
+        _hasUnsavedVaccineOverrides = false;
+        UpdateEligibilityPendingState();
         _eligibilityWarning.Text = string.Empty;
         _eligibilitySummary.Text = "Total Cohort: 0 | Eligible: 0 | Ineligible: 0 | Manual Review: 0";
         _eligibilityMessage.Text = "Parse GNB2009 history from 3.Criteria and evaluate administrative eligibility.";
@@ -1453,6 +1548,12 @@ public partial class CohortContextForm
     private bool ConfirmReviewTransition()
     {
         _reviewGrid.EndEdit();
+        if (_hasUnsavedVaccineOverrides)
+        {
+            DialogResult pendingChoice = PromptForPendingVaccineOverrides();
+            if (pendingChoice == DialogResult.Yes) _ = EvaluateEligibilityAsync();
+            return false;
+        }
         if (!_reviewDirty) return true;
         var choice = MessageBox.Show(this, "Save review changes before continuing?\n\nYes: Save   No: Discard   Cancel: Stay here",
             "Unsaved Review Changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
