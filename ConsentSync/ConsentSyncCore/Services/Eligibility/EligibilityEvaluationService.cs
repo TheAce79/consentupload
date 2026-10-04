@@ -63,9 +63,9 @@ public sealed class EligibilityEvaluationService
         if (vaccineType.Contains("12 Month", StringComparison.OrdinalIgnoreCase))
             return AgeRule(result, clinic >= dob.AddYears(1), "the first birthday", dob, clinic);
         if (vaccineType.Contains("6 Month", StringComparison.OrdinalIgnoreCase))
-            return IntervalRule(result, history.GetMaxAgentDate("DTaP", "DPT", "Pneu"), 56, "4-month", clinic);
+            return IntervalRule(result, history.GetMaxAgentDate("DTaP", "DPT", "Pneu"), EligibilityCriteriaCatalog.SixMonthMinimumIntervalDays, "4-month", clinic);
         if (vaccineType.Contains("4 Month", StringComparison.OrdinalIgnoreCase))
-            return IntervalRule(result, history.GetMaxAgentDate("DTaP", "DPT", "Pneu", "Rota"), 28, "2-month", clinic);
+            return IntervalRule(result, history.GetMaxAgentDate("DTaP", "DPT", "Pneu", "Rota"), EligibilityCriteriaCatalog.FourMonthMinimumIntervalDays, "2-month", clinic);
         if (vaccineType.Contains("2 Month", StringComparison.OrdinalIgnoreCase))
             return AgeRule(result, clinic >= dob.AddMonths(2), "2 months", dob, clinic);
         if (vaccineType.Contains("Preschool", StringComparison.OrdinalIgnoreCase))
@@ -111,7 +111,7 @@ public sealed class EligibilityEvaluationService
             return Eligible(result, $"18m Appointment criteria OK. Age = {age}m (>= 18m). No prior MMRV dose found in PHIS history.");
 
         int interval = (clinic - priorDose.Value.Date).Days;
-        return interval > 180
+        return interval > EligibilityCriteriaCatalog.MmrMmrvMinimumIntervalDays
             ? Eligible(result, $"18m Appointment criteria OK. Age = {age}m (>= 18m). Previous MMRV = {priorDose:yyyy-MM-dd}, interval > 6 months.")
             : Ineligible(result, $"18m Appointment dose interval KO. Previous MMRV = {priorDose:yyyy-MM-dd}, Clinic Date = {clinic:yyyy-MM-dd}. Interval <= 6 months.");
     }
@@ -127,7 +127,7 @@ public sealed class EligibilityEvaluationService
             return Eligible(result, $"HTA (ETS+) criteria OK. Age = {age}m (18-23m). No prior MMRV dose found in PHIS history.");
 
         int interval = (clinic - priorDose.Value.Date).Days;
-        return interval > 180
+        return interval > EligibilityCriteriaCatalog.MmrMmrvMinimumIntervalDays
             ? Eligible(result, $"HTA (ETS+) criteria OK. Age = {age}m (18-23m). Previous MMRV = {priorDose:yyyy-MM-dd}, interval > 6 months.")
             : Ineligible(result, $"HTA (ETS+) dose interval KO. Previous MMRV = {priorDose:yyyy-MM-dd}, Clinic Date = {clinic:yyyy-MM-dd}. Interval <= 6 months.");
     }

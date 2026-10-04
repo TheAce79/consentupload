@@ -22,6 +22,42 @@ public partial class CohortContextForm
     private readonly LavenderTabControl _workflowTabs = new() { Dock = DockStyle.Fill };
     private readonly TabPage _reviewTab = new("Data Review & Manual Fixes");
     private readonly TabPage _eligibilityTab = new("Final Output & Eligibility");
+    private readonly TabPage _criteriaExplorerTab = new("Criteria Explorer");
+    private readonly Label _criteriaExplorerTitle = new()
+    {
+        AutoSize = true,
+        Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+        Text = "Public Health Immunization & Healthy Toddler Assessment (HTA) Evaluation Rules"
+    };
+    private readonly Label _criteriaExplorerSubtitle = new()
+    {
+        AutoSize = true,
+        MaximumSize = new Size(1080, 0),
+        Text = "Static system rule definition table used for automated eligibility calculations across all clinic cohorts."
+    };
+    private readonly LavenderDataGridView _criteriaExplorerGrid = new()
+    {
+        Dock = DockStyle.Fill,
+        ReadOnly = true,
+        AutoGenerateColumns = false,
+        AllowUserToAddRows = false,
+        AllowUserToDeleteRows = false,
+        AllowUserToOrderColumns = false,
+        SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+        MultiSelect = false,
+        RowHeadersVisible = false,
+        AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
+        AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None
+    };
+    private readonly RichTextBox _criteriaExplorerMemo = new()
+    {
+        Dock = DockStyle.Fill,
+        ReadOnly = true,
+        BorderStyle = BorderStyle.None,
+        ScrollBars = RichTextBoxScrollBars.Vertical,
+        BackColor = LavenderSlatePalette.Card,
+        ForeColor = LavenderSlatePalette.Slate
+    };
     private readonly LavenderDataGridView _reviewGrid = new()
     {
         Dock = DockStyle.Fill, AutoGenerateColumns = false, AllowUserToAddRows = false,
@@ -126,7 +162,7 @@ public partial class CohortContextForm
         setup.Controls.Add(setupStack);
         setup.Resize += (_, _) => ResizeSetupDebugLog(setup, setupStack);
         ResizeSetupDebugLog(setup, setupStack);
-        _workflowTabs.TabPages.AddRange([setup, _reviewTab, _eligibilityTab]);
+        _workflowTabs.TabPages.AddRange([setup, _reviewTab, _eligibilityTab, _criteriaExplorerTab]);
         _workflowTabs.Selecting += WorkflowTabs_Selecting;
         Controls.Add(_workflowTabs);
         _nextCohortButton.Click += btn_NextCohort_Click;
@@ -326,11 +362,88 @@ public partial class CohortContextForm
         eligibilitySummaryCard.Controls.Add(_eligibilitySummary);
         eligibility.Controls.Add(eligibilitySummaryCard, 0, 5);
         _eligibilityTab.Controls.Add(eligibility);
+        InitializeCriteriaExplorer();
         LavenderSlateTheme.Apply(this);
         LavenderSlateTheme.ApplyButton(btn_CreatePhisCohort, LavenderButtonKind.Primary);
         LavenderSlateTheme.ApplyButton(_savePhisDb, LavenderButtonKind.Primary);
         LavenderSlateTheme.ApplyButton(_evaluateEligibility, LavenderButtonKind.Primary);
         UpdateReviewAvailability();
+    }
+
+    private void InitializeCriteriaExplorer()
+    {
+        _criteriaExplorerGrid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
+        _criteriaExplorerGrid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.True;
+        _criteriaExplorerGrid.Columns.AddRange(
+        [
+            CreateCriteriaColumn(nameof(EligibilityCriterionDefinition.AppointmentMilestone), "Appointment / Milestone", 190),
+            CreateCriteriaColumn(nameof(EligibilityCriterionDefinition.MinAge), "Min Age", 145),
+            CreateCriteriaColumn(nameof(EligibilityCriterionDefinition.MaxAge), "Max Age", 135),
+            CreateCriteriaColumn(nameof(EligibilityCriterionDefinition.RequiredInterval), "Required Interval (MMR / MMRV)", 245),
+            CreateCriteriaColumn(nameof(EligibilityCriterionDefinition.MissingPhisHistoryAction), "Missing PHIS History Action", 270),
+            new DataGridViewTextBoxColumn
+            {
+                DataPropertyName = nameof(EligibilityCriterionDefinition.ClinicalLogicManagementSummary),
+                Name = "ClinicalLogicManagementSummary",
+                HeaderText = "Clinical Logic & Management Summary",
+                ReadOnly = true,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = 320
+            }
+        ]);
+        _criteriaExplorerGrid.DataSource = EligibilityCriteriaCatalog.All;
+        _criteriaExplorerGrid.SelectionChanged += (_, _) => UpdateCriteriaExplorerMemo();
+        LavenderSlateTheme.ApplyGrid(_criteriaExplorerGrid);
+
+        var layout = new LavenderTableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 4,
+            Padding = new Padding(20),
+            BackColor = LavenderSlatePalette.Window
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 65));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 35));
+        _criteriaExplorerSubtitle.Margin = new Padding(0, 4, 0, 12);
+        layout.Controls.Add(_criteriaExplorerTitle, 0, 0);
+        layout.Controls.Add(_criteriaExplorerSubtitle, 0, 1);
+
+        var gridCard = new LavenderCardPanel { Dock = DockStyle.Fill, Padding = new Padding(1), Margin = new Padding(0, 0, 0, 12) };
+        gridCard.Controls.Add(_criteriaExplorerGrid);
+        layout.Controls.Add(gridCard, 0, 2);
+
+        var memoGroup = new LavenderGroupBox { Text = "How this rule is calculated", Dock = DockStyle.Fill, HeaderTop = 16 };
+        memoGroup.Controls.Add(_criteriaExplorerMemo);
+        layout.Controls.Add(memoGroup, 0, 3);
+        _criteriaExplorerTab.Controls.Add(layout);
+
+        if (_criteriaExplorerGrid.Rows.Count > 0)
+        {
+            _criteriaExplorerGrid.CurrentCell = _criteriaExplorerGrid.Rows[0].Cells[0];
+            _criteriaExplorerGrid.Rows[0].Selected = true;
+            UpdateCriteriaExplorerMemo();
+        }
+    }
+
+    private static DataGridViewTextBoxColumn CreateCriteriaColumn(string propertyName, string headerText, int width) => new()
+    {
+        DataPropertyName = propertyName,
+        Name = propertyName,
+        HeaderText = headerText,
+        ReadOnly = true,
+        Width = width,
+        MinimumWidth = width
+    };
+
+    private void UpdateCriteriaExplorerMemo()
+    {
+        _criteriaExplorerMemo.Text = _criteriaExplorerGrid.CurrentRow?.DataBoundItem is EligibilityCriterionDefinition rule
+            ? $"{rule.CalculationExplanation}{Environment.NewLine}{Environment.NewLine}Explication en français :{Environment.NewLine}{rule.FrenchCalculationExplanation}"
+            : string.Empty;
     }
 
     private void ResizeSetupDebugLog(TabPage setup, TableLayoutPanel setupStack)
