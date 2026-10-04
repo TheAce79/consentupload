@@ -315,12 +315,12 @@ public partial class CohortContextForm : Form
 
             var existing = File.Exists(targetCsvPath) ? await Task.Run(() => CsvImporterService.ReadFromCsv(targetCsvPath)) : [];
             PdfRosterParserService.AssignClinicDate(existing, _activeContext.CohortDate);
-            var existingKeys = existing.Select(ClinicScheduleSummary.Key).ToHashSet(StringComparer.Ordinal);
-            var added = records.Where(x => existingKeys.Add(ClinicScheduleSummary.Key(x))).ToList();
-            await Task.Run(() => CsvExporterService.SaveToCsv(existing.Concat(added), targetCsvPath));
+            var mergedRecords = ClinicScheduleSummary.MergeExtractedEtsRecords(existing, records);
+            int addedCount = mergedRecords.Count - existing.Count;
+            await Task.Run(() => CsvExporterService.SaveToCsv(mergedRecords, targetCsvPath));
 
             var prior = await _dbManager!.GetLatestScheduleSnapshotAsync(_activeContext!.CohortContextId, clientListName);
-            var currentSchedule = ClinicScheduleSummary.AttachClientIds(records, existing.Concat(added));
+            var currentSchedule = ClinicScheduleSummary.AttachClientIds(records, mergedRecords);
             var priorSchedule = prior is null ? null : JsonSerializer.Deserialize<List<ClinicScheduleClient>>(prior.ClientSnapshotJson);
             var comparison = ClinicScheduleSummary.Compare(currentSchedule, priorSchedule);
             DateTime? verifiedUpload = null; int? verifiedPhisCount = null;
@@ -339,9 +339,9 @@ public partial class CohortContextForm : Form
             string reportPath = Path.Combine(outputDirectory, $"{clientListName}_Clinic_Schedule_Update_{DateTime.Now:yyyyMMdd_HHmmss_fff}.txt");
             await File.WriteAllTextAsync(reportPath, ClinicScheduleSummary.Format(clientListName, _activeContext.PhisCohortId, _activeContext.PhisClientListId, comparison, prior?.ImportedOn, selectedFiles.Select(path => Path.GetFileName(path) ?? path), verifiedUpload, verifiedPhisCount), new System.Text.UTF8Encoding(false));
             RefreshStandardizedCsvPreview();
-            LoggerService.LogInformation($"✅ Retained {existing.Count} existing record(s), added {added.Count} new client record(s). Schedule report: {reportPath}");
+            LoggerService.LogInformation($"✅ Retained {existing.Count} existing record(s), added {addedCount} new client record(s). Schedule report: {reportPath}");
             MessageBox.Show(this,
-                $"Current schedule: {currentSchedule.Count} client(s).\nNew CSV records added: {added.Count}.\nExisting records retained: {existing.Count}.\n\nAdministrative update:\n{reportPath}",
+                $"Current schedule: {currentSchedule.Count} client(s).\nNew CSV records added: {addedCount}.\nExisting records retained: {existing.Count}.\n\nAdministrative update:\n{reportPath}",
                 "Extraction Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)

@@ -121,6 +121,28 @@ public sealed class CsvImporterServiceTests : IDisposable
     }
 
     [Fact]
+    public void ReadFromCsv_AbleAssessMapsHtaCatalogItemsToEtsCategories()
+    {
+        string input = Path.Combine(_directory, "able-hta.csv");
+        File.WriteAllText(input, "Booking ID,Enrolled Person Name,Date of Birth,Catalog Item,Appointment Type\nB-1,Assessment,2/3/2020, Assessment (HTA) Appointment ,18 Month Appointment\nB-2,Assessment Plus,2/3/2020,18 Month Appointment with Assessment (HTA),Assessment (HTA) Appointment\nB-3,Standard,2/3/2020,18 Month Appointment,Assessment (HTA) Appointment\n", Encoding.UTF8);
+
+        List<ClinicPdfClientRecord> records = CsvImporterService.ReadFromCsv(input);
+
+        Assert.Equal(["ETS", "ETS+", "18 Month Appointment"], records.Select(record => record.VaccineType));
+        Assert.Equal("Assessment (HTA) Appointment", records[0].CatalogItem);
+        Assert.Equal("18 Month Appointment", records[0].AppointmentType);
+    }
+
+    [Fact]
+    public void ReadFromCsv_CanonicalEtsUnknownRoundTrips()
+    {
+        string path = Path.Combine(_directory, "ets-unknown.csv");
+        CsvExporterService.SaveToCsv([new ClinicPdfClientRecord { FullName = "Unknown ETS", DateOfBirth = "2025/03/14", VaccineType = "ETS Unknown" }], path);
+
+        Assert.Equal("ETS Unknown", Assert.Single(CsvImporterService.ReadFromCsv(path)).VaccineType);
+    }
+
+    [Fact]
     public void ReadFromCsv_AcceptsFrenchMixedAndBilingualAbleAssessHeaders()
     {
         string french = Path.Combine(_directory, "french.csv");

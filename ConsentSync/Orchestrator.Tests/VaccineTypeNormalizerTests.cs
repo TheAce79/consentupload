@@ -14,6 +14,7 @@ public sealed class VaccineTypeNormalizerTests
     [InlineData("ETS Plus", "ETS+")]
     [InlineData("ETS + Vaccine", "ETS+")]
     [InlineData("ETS/Vaccine", "ETS+")]
+    [InlineData("ETS Unknown", "ETS Unknown")]
     [InlineData("Catchup Appointment", "Catchup Appointment")]
     [InlineData("2 mois", "2 Month Appointment")]
     [InlineData("2m", "2 Month Appointment")]

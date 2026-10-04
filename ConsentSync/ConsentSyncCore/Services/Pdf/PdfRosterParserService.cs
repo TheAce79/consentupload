@@ -17,6 +17,14 @@ public class PdfRosterParserService
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
     private static readonly Regex MilestoneRegex = new(@"\b\d+\s*(?:mois|m|months?)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex CategoryRegex = new(@"\b(?:autres?|PS|preschool|Mpox|rattrapage|initiale)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex EtsScheduleHeaderRegex = new(@"^\s*ETS\b.*\b(?:inf\.?|infirm)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex EtsPlusRegex = new(@"\bMMRV\b|\bETS\s*-\s*Vaccination\b|\bETS\s*\+(?!\w)|\bETS\s+Plus\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex EtsEvaluationRegex = new(@"\bevaluation\s+only\b|\bassessment\s+only\b|\bETS\s+seulement\b|\bETS\s+uniquement\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex EmailRegex = new(@"\b[^\s@]+@[^\s@]+\.[^\s@]+\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex ContactPhoneRegex = new(@"\b(?:[\p{L}'-]+\s+){0,3}(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]\d{4}\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex ParentheticalRegex = new(@"\([^)]*\)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex AdministrativeCodeRegex = new(@"\b[A-Za-z]{1,3}(?:-[A-Za-z]{1,3})*\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex RoutinePunctuationRegex = new(@"[\s\d*\-/–—,;:.()]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public List<ClinicPdfClientRecord> ExtractRecordsFromPdfFolder(string folder) => !Directory.Exists(folder) ? [] : ExtractRecordsFromPdfFiles(Directory.EnumerateFiles(folder, "*.pdf").OrderBy(x => x, StringComparer.Ordinal));
 
@@ -40,10 +48,13 @@ public class PdfRosterParserService
         {
             try
             {
-                using var document = PdfDocument.Open(path); int pageNumber = 0;
-                foreach (var page in document.GetPages())
+                using var document = PdfDocument.Open(path);
+                var pages = document.GetPages().Select(page => ReconstructLines(page.GetWords()).ToArray()).ToList();
+                bool isEtsClinic = IsEtsClinicSchedule(Path.GetFileName(path), pages.SelectMany(page => page));
+                int pageNumber = 0;
+                foreach (string[] pageLines in pages)
                 {
-                    pageNumber++; var extracted = ExtractRecordsFromLines(ReconstructLines(page.GetWords())); records.AddRange(extracted);
+                    pageNumber++; var extracted = ExtractRecordsFromLines(pageLines, isEtsClinic); records.AddRange(extracted);
                     if (extracted.Count == 0) { var warning = $"{Path.GetFileName(path)}, page {pageNumber} returned no client records."; LastPageWarnings.Add(warning); diagnostics?.Invoke($"Warning: {warning}"); }
                 }
             }
@@ -52,7 +63,8 @@ public class PdfRosterParserService
         return records;
     }
 
-    public static List<ClinicPdfClientRecord> ExtractRecordsFromLines(IEnumerable<string> lines)
+    /// <summary>Extracts a page of roster lines. Set <paramref name="isEtsClinic"/> when its containing PDF is an ETS schedule.</summary>
+    public static List<ClinicPdfClientRecord> ExtractRecordsFromLines(IEnumerable<string> lines, bool isEtsClinic = false)
     {
         var pageLines = lines.Select(x => WhitespaceRegex.Replace(x.Replace('|', ' '), " ").Trim()).Where(x => x.Length > 0).ToArray();
         var records = new List<ClinicPdfClientRecord>();
@@ -67,9 +79,57 @@ public class PdfRosterParserService
             name = WhitespaceRegex.Replace(name, " ").Trim().TrimEnd('(', ',', '-').Trim();
             if (name.Length < 3 || name.Equals("CIP", StringComparison.OrdinalIgnoreCase)) continue;
             var medicare = MedicareRegex.Match(details); var vaccine = MilestoneRegex.Match(details); if (!vaccine.Success) vaccine = CategoryRegex.Match(details);
-            records.Add(new() { FullName = name, DateOfBirth = date.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture), Medicare = medicare.Success ? medicare.Value.Replace(" ", "") : null, VaccineType = VaccineTypeNormalizer.Normalize(vaccine.Success ? WhitespaceRegex.Replace(vaccine.Value, " ") : null) });
+            int continuationIndex = i + 1;
+            var appointmentBlock = new List<string> { details };
+            while (continuationIndex < pageLines.Length && !StartsAppointmentBlock(pageLines[continuationIndex]))
+                appointmentBlock.Add(pageLines[continuationIndex++]);
+            i = continuationIndex - 1;
+
+            records.Add(new()
+            {
+                FullName = name,
+                DateOfBirth = date.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture),
+                Medicare = medicare.Success ? medicare.Value.Replace(" ", "") : null,
+                VaccineType = isEtsClinic
+                    ? ClassifyEtsAppointment(appointmentBlock, dob)
+                    : VaccineTypeNormalizer.Normalize(vaccine.Success ? WhitespaceRegex.Replace(vaccine.Value, " ") : null)
+            });
         }
         return records;
+    }
+
+    /// <summary>Determines whether a PDF is an ETS clinic schedule from its name or schedule header.</summary>
+    public static bool IsEtsClinicSchedule(string? sourceFileName, IEnumerable<string> documentLines)
+    {
+        ArgumentNullException.ThrowIfNull(documentLines);
+        if (!string.IsNullOrWhiteSpace(sourceFileName) && sourceFileName.Contains("ETS_", StringComparison.OrdinalIgnoreCase)) return true;
+        return documentLines.Any(line =>
+        {
+            string header = RemoveAppointmentPrefixes(WhitespaceRegex.Replace(line.Replace('|', ' '), " ").Trim());
+            return !DobRegex.IsMatch(header) && EtsScheduleHeaderRegex.IsMatch(header);
+        });
+    }
+
+    private static string ClassifyEtsAppointment(IEnumerable<string> appointmentBlock, Match dob)
+    {
+        string[] lines = appointmentBlock.ToArray();
+        string block = string.Join(" ", lines);
+        if (EtsPlusRegex.IsMatch(block)) return "ETS+";
+        if (EtsEvaluationRegex.IsMatch(block)) return "ETS";
+
+        string afterDob = lines[0][(dob.Index + dob.Length)..];
+        if (lines.Length > 1) afterDob = string.Join(" ", new[] { afterDob }.Concat(lines.Skip(1)));
+        return string.IsNullOrWhiteSpace(RemoveRoutineRosterMetadata(afterDob)) ? "ETS" : "ETS Unknown";
+    }
+
+    private static string RemoveRoutineRosterMetadata(string text)
+    {
+        string remaining = ParentheticalRegex.Replace(text, " ");
+        remaining = EmailRegex.Replace(remaining, " ");
+        remaining = ContactPhoneRegex.Replace(remaining, " ");
+        remaining = MedicareRegex.Replace(remaining, " ");
+        remaining = AdministrativeCodeRegex.Replace(remaining, " ");
+        return RoutinePunctuationRegex.Replace(remaining, string.Empty);
     }
 
     private static bool StartsAppointmentBlock(string line) => TimeRangePrefixRegex.IsMatch(line) || AppointmentPrefixRegex.IsMatch(line);

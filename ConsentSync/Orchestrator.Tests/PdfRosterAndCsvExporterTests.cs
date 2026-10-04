@@ -140,6 +140,72 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
     }
 
     [Fact]
+    public void ExtractRecordsFromLines_ClassifiesEtsAppointmentBlocksAndContinuationNotes()
+    {
+        List<ClinicPdfClientRecord> records = PdfRosterParserService.ExtractRecordsFromLines([
+            "9:00 AM - 10:30 AM 8h45 Ellen Ryder 2025-03-14 (Anna 902-818-4959) AR A evaluation only",
+            "9:00 AM - 10:30 AM 8h45 SOOD, ARNAV 2024-12-20 (Ritia 506-269-5566) 926128729 - CT - A - ETS seulement",
+            "10:30 AM - 12:00 PM 10h30 Liliana Nomovi 2024-11-13 Maryam 506-953-5921 MaL-E *assessment only*",
+            "10:30 AM - 12:00 PM 10h30 ROBICHAUD, OLIVER JACKSON 2025-01-21 (Kelsey 506-295-8793) 926123464 - A - CT - ETS",
+            "seulement",
+            "1:00 PM - 2:30 PM 1h15 Harsimrat Kaur 2025-01-09 (Mehakpreet 647-648-9751) *A* LP-ETS (MMRV 2nd dose only)",
+            "1:00 PM - 2:30 PM 1h15 WRIGHT, MICHAEL SCOTT 2024-12-18 (Sara 506 889-9919) A-MT- ETS uniquement",
+            "2:30 PM - 3:00 PM 2h30 Blank Comment 2025-01-10 Parent Name 506-555-1212 123456789 - CT - A",
+            "3:00 PM - 3:30 PM 3h00 Needs Review 2025-01-11 parent requested a different service"
+        ], isEtsClinic: true);
+
+        Assert.Equal(["ETS", "ETS", "ETS", "ETS", "ETS+", "ETS", "ETS", "ETS Unknown"], records.Select(record => record.VaccineType));
+        Assert.Equal("Harsimrat Kaur", records[4].FullName);
+    }
+
+    [Theory]
+    [InlineData("MMRV 2nd dose only")]
+    [InlineData("ETS-Vaccination")]
+    [InlineData("ETS+")]
+    [InlineData("ETS Plus")]
+    [InlineData("ETS +")]
+    public void ExtractRecordsFromLines_RecognizesAllEtsPlusIndicators(string indicator)
+    {
+        ClinicPdfClientRecord record = Assert.Single(PdfRosterParserService.ExtractRecordsFromLines([
+            $"8:00 AM - 8:30 AM Client Name 2025-01-01 {indicator}"
+        ], isEtsClinic: true));
+
+        Assert.Equal("ETS+", record.VaccineType);
+    }
+
+    [Fact]
+    public void IsEtsClinicSchedule_DetectsFilenameAndScheduleHeaderWithoutClassifyingClientNotesAsHeader()
+    {
+        Assert.True(PdfRosterParserService.IsEtsClinicSchedule("ETS_CIPMONCTON.pdf", []));
+        Assert.True(PdfRosterParserService.IsEtsClinicSchedule("CIPMONCTON.pdf", ["8:00 AM - 9:00 AM ETS (2 inf.)"]));
+        Assert.False(PdfRosterParserService.IsEtsClinicSchedule("CIPMONCTON.pdf", ["8:00 AM - 8:30 AM Client Name 2025-01-01 ETS seulement"]));
+    }
+
+    [Fact]
+    public void MergeExtractedEtsRecords_UpdatesOnlyVaccineTypeAndAppendsNewClients()
+    {
+        var existing = new ClinicPdfClientRecord
+        {
+            ClientId = "123", FullName = "Ellen Ryder", DateOfBirth = "2025/03/14", VaccineType = "Unknown",
+            ClientIdStatus = ClientIdStatus.Found, Email = "parent@example.test", ErrorDetails = "Keep this"
+        };
+        var newClient = new ClinicPdfClientRecord { FullName = "New Client", DateOfBirth = "2025/01/01", VaccineType = "ETS+" };
+
+        List<ClinicPdfClientRecord> merged = ClinicScheduleSummary.MergeExtractedEtsRecords([existing], [
+            new ClinicPdfClientRecord { FullName = "Ellen Ryder", DateOfBirth = "2025/03/14", VaccineType = "ETS" },
+            newClient
+        ]);
+
+        Assert.Equal(2, merged.Count);
+        Assert.Equal("ETS", existing.VaccineType);
+        Assert.Equal("123", existing.ClientId);
+        Assert.Equal(ClientIdStatus.Found, existing.ClientIdStatus);
+        Assert.Equal("parent@example.test", existing.Email);
+        Assert.Equal("Keep this", existing.ErrorDetails);
+        Assert.Same(newClient, merged[1]);
+    }
+
+    [Fact]
     public void SaveToCsv_WritesVaccineTypeColumnBomAndReplacesExistingOutput()
     {
         string outputPath = Path.Combine(_directory, "roster.csv");

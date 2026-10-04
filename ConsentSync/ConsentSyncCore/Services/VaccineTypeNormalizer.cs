@@ -17,6 +17,7 @@ public static class VaccineTypeNormalizer
 
         string value = rawVaccineType.Trim();
         if (string.Equals(value, Unknown, StringComparison.OrdinalIgnoreCase)) return Unknown;
+        if (string.Equals(value, "ETS Unknown", StringComparison.OrdinalIgnoreCase)) return "ETS Unknown";
         if (string.Equals(value, "Preschool Appointment", StringComparison.OrdinalIgnoreCase)) return "Preschool Appointment";
         if (string.Equals(value, "2 Month Appointment", StringComparison.OrdinalIgnoreCase)) return "2 Month Appointment";
         if (string.Equals(value, "4 Month Appointment", StringComparison.OrdinalIgnoreCase)) return "4 Month Appointment";

@@ -9,6 +9,47 @@ public sealed record ClinicScheduleComparison(bool IsInitial, IReadOnlyList<Clin
 public static class ClinicScheduleSummary
 {
     public static string Key(ClinicPdfClientRecord x) => $"{x.FullName.Trim().ToUpperInvariant()}_{x.DateOfBirth}";
+
+    /// <summary>
+    /// Applies current ETS schedule classifications to existing cohort rows and appends newly scheduled clients.
+    /// Existing identity and review fields are retained.
+    /// </summary>
+    public static List<ClinicPdfClientRecord> MergeExtractedEtsRecords(
+        IEnumerable<ClinicPdfClientRecord> existingRecords,
+        IEnumerable<ClinicPdfClientRecord> extractedRecords)
+    {
+        ArgumentNullException.ThrowIfNull(existingRecords);
+        ArgumentNullException.ThrowIfNull(extractedRecords);
+
+        var merged = existingRecords.ToList();
+        var existingByKey = merged.GroupBy(Key, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        var processedKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (ClinicPdfClientRecord extracted in extractedRecords)
+        {
+            string key = Key(extracted);
+            if (!processedKeys.Add(key)) continue;
+
+            if (existingByKey.TryGetValue(key, out List<ClinicPdfClientRecord>? matches))
+            {
+                if (IsEtsClassification(extracted.VaccineType))
+                    foreach (ClinicPdfClientRecord existing in matches) existing.VaccineType = extracted.VaccineType;
+            }
+            else
+            {
+                merged.Add(extracted);
+            }
+        }
+
+        return merged;
+    }
+
+    private static bool IsEtsClassification(string? vaccineType) =>
+        string.Equals(vaccineType, "ETS", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(vaccineType, "ETS+", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(vaccineType, "ETS Unknown", StringComparison.OrdinalIgnoreCase);
+
     public static ClinicScheduleComparison Compare(IEnumerable<ClinicScheduleClient> current, IEnumerable<ClinicScheduleClient>? prior)
     {
         var now = current.GroupBy(x => x.Key, StringComparer.Ordinal).Select(x => x.First()).OrderBy(x => x.FullName, StringComparer.OrdinalIgnoreCase).ToList();

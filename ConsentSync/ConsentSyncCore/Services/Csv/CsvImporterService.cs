@@ -188,9 +188,16 @@ public static class CsvImporterService
         {
             ClientId = null, FullName = Get(csv, fields, "FullName").Trim(), DateOfBirth = dateOfBirth?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty,
             Medicare = NullIfEmptyOrNaN(Get(csv, fields, "Medicare")), ClientIdStatus = ClientIdStatus.NeedsManualReview, ErrorDetails = string.Empty, BestMatch = string.Empty,
-            Phone = NullIfEmptyOrNaN(Get(csv, fields, "Phone")), Email = NullIfEmpty(Get(csv, fields, "Email")), VaccineType = VaccineTypeNormalizer.Normalize(NullIfEmpty(Get(csv, fields, "CatalogItem")) ?? NullIfEmpty(Get(csv, fields, "AppointmentType"))),
+            Phone = NullIfEmptyOrNaN(Get(csv, fields, "Phone")), Email = NullIfEmpty(Get(csv, fields, "Email")), VaccineType = MapAbleAssessVaccineType(NullIfEmpty(Get(csv, fields, "CatalogItem")) ?? NullIfEmpty(Get(csv, fields, "AppointmentType"))),
             BookingId = NullIfEmpty(Get(csv, fields, "BookingId")), ClinicName = NullIfEmpty(Get(csv, fields, "ClinicName")), ClinicDate = parsedClinicDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), AppointmentType = NullIfEmpty(Get(csv, fields, "AppointmentType")), CatalogItem = NullIfEmpty(Get(csv, fields, "CatalogItem")), Timeslot = NullIfEmpty(Get(csv, fields, "Timeslot")), Comment = NullIfEmpty(Get(csv, fields, "Comment")), SdcId = NullIfEmpty(Get(csv, fields, "SdcId")), PreferredLanguage = NullIfEmpty(Get(csv, fields, "PreferredLanguage"))
         };
+    }
+
+    private static string MapAbleAssessVaccineType(string? value)
+    {
+        if (string.Equals(value?.Trim(), "Assessment (HTA) Appointment", StringComparison.OrdinalIgnoreCase)) return "ETS";
+        if (string.Equals(value?.Trim(), "18 Month Appointment with Assessment (HTA)", StringComparison.OrdinalIgnoreCase)) return "ETS+";
+        return VaccineTypeNormalizer.Normalize(value);
     }
 
     private static DateOnly? ParseAbleAssessDate(string value, string fieldName, string[] dateFormats)
