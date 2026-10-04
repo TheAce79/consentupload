@@ -42,25 +42,24 @@ public sealed class EligibilityEvaluationService
             return ManualReview(result, "Invalid or missing date of birth. Manual review required.");
         if (!clinicDate.HasValue)
             return ManualReview(result, "Invalid or missing clinic date. Manual review required.");
-        if (history is null)
-            return ManualReview(result, "No History Found: client is absent from the GNB2009 Excel history. Manual review required.");
-
         string vaccineType = record.Source.VaccineType?.Trim() ?? string.Empty;
         if (vaccineType.Length == 0 || string.Equals(vaccineType, "Unknown", StringComparison.OrdinalIgnoreCase))
             return ManualReview(result, "Unknown vaccine type. Manual review required.");
 
         DateTime dob = dateOfBirth.Value.Date;
         DateTime clinic = clinicDate.Value.Date;
-        if (IsEtsPlus(vaccineType))
+        if (IsEtsUnknown(vaccineType))
+            return ManualReview(result, "Unrecognized or ambiguous ETS appointment type. Manual review required.");
+        if (IsEtsPlus(vaccineType) || IsHtaEtsPlus(vaccineType))
             return EvaluateEtsPlus(result, history, dob, clinic);
-        if (IsEts(vaccineType))
+        if (IsEts(vaccineType) || IsHtaEts(vaccineType))
             return EvaluateEts(result, dob, clinic);
+        if (IsAmbiguousEts(vaccineType))
+            return ManualReview(result, "Unrecognized or ambiguous ETS appointment type. Manual review required.");
         if (vaccineType.Contains("18 Month", StringComparison.OrdinalIgnoreCase))
-        {
-            if (clinic < dob.AddMonths(18))
-                return Ineligible(result, $"Age criteria KO. Client is under 18 months on clinic date {clinic:yyyy-MM-dd}.");
-            return IntervalRule(result, history.GetMaxAgentDate("MMR", "MMRV"), 180, "MMR1", clinic, "Age criteria OK (>= 18 months). ");
-        }
+            return Evaluate18Month(result, history, dob, clinic);
+        if (history is null)
+            return ManualReview(result, "No History Found: client is absent from the GNB2009 Excel history. Manual review required.");
         if (vaccineType.Contains("12 Month", StringComparison.OrdinalIgnoreCase))
             return AgeRule(result, clinic >= dob.AddYears(1), "the first birthday", dob, clinic);
         if (vaccineType.Contains("6 Month", StringComparison.OrdinalIgnoreCase))
@@ -97,24 +96,40 @@ public sealed class EligibilityEvaluationService
         string age = FormatAgeMonths(result.AgeMonths);
         bool eligible = clinic >= dob.AddMonths(18) && clinic < dob.AddMonths(24);
         return eligible
-            ? Eligible(result, $"ETS Evaluation criteria OK. Client age is {age}m (>= 18m and < 24m).")
-            : Ineligible(result, $"ETS Evaluation age criteria KO. Client age is {age}m (must be >= 18m and < 24m).");
+            ? Eligible(result, $"HTA (ETS) Assessment criteria OK. Client age is {age}m.")
+            : Ineligible(result, $"HTA (ETS) Assessment age criteria KO. Client age is {age}m (must be >= 18m and < 24m).");
     }
 
-    private static EligibilityEvaluationResult EvaluateEtsPlus(EligibilityEvaluationResult result, ClientImmunizationHistory history, DateTime dob, DateTime clinic)
+    private static EligibilityEvaluationResult Evaluate18Month(EligibilityEvaluationResult result, ClientImmunizationHistory? history, DateTime dob, DateTime clinic)
     {
         string age = FormatAgeMonths(result.AgeMonths);
-        if (clinic < dob.AddMonths(18) || clinic >= dob.AddMonths(24))
-            return Ineligible(result, $"ETS+ age criteria KO. Age = {age}m (must be >= 18m and < 24m).");
+        if (clinic < dob.AddMonths(18))
+            return Ineligible(result, $"18m Appointment age criteria KO. Client age is {age}m (must be >= 18m).");
 
         DateTime? priorDose = history.GetMaxAgentDate("MMR", "MMRV");
         if (!priorDose.HasValue)
-            return Eligible(result, $"ETS+ criteria OK. Age = {age}m (18-23m). No prior MMRV dose found in PHIS history.");
+            return Eligible(result, $"18m Appointment criteria OK. Age = {age}m (>= 18m). No prior MMRV dose found in PHIS history.");
 
         int interval = (clinic - priorDose.Value.Date).Days;
         return interval > 180
-            ? Eligible(result, $"ETS+ criteria OK. Age = {age}m (18-23m). Previous MMRV = {priorDose:yyyy-MM-dd}, interval > 6 months.")
-            : Ineligible(result, $"ETS+ dose interval KO. Previous MMRV = {priorDose:yyyy-MM-dd}, Clinic Date = {clinic:yyyy-MM-dd}. Interval is <= 6 months.");
+            ? Eligible(result, $"18m Appointment criteria OK. Age = {age}m (>= 18m). Previous MMRV = {priorDose:yyyy-MM-dd}, interval > 6 months.")
+            : Ineligible(result, $"18m Appointment dose interval KO. Previous MMRV = {priorDose:yyyy-MM-dd}, Clinic Date = {clinic:yyyy-MM-dd}. Interval <= 6 months.");
+    }
+
+    private static EligibilityEvaluationResult EvaluateEtsPlus(EligibilityEvaluationResult result, ClientImmunizationHistory? history, DateTime dob, DateTime clinic)
+    {
+        string age = FormatAgeMonths(result.AgeMonths);
+        if (clinic < dob.AddMonths(18) || clinic >= dob.AddMonths(24))
+            return Ineligible(result, $"HTA (ETS+) age criteria KO. Client age is {age}m (must be >= 18m and < 24m for Healthy Toddler Assessment).");
+
+        DateTime? priorDose = history.GetMaxAgentDate("MMR", "MMRV");
+        if (!priorDose.HasValue)
+            return Eligible(result, $"HTA (ETS+) criteria OK. Age = {age}m (18-23m). No prior MMRV dose found in PHIS history.");
+
+        int interval = (clinic - priorDose.Value.Date).Days;
+        return interval > 180
+            ? Eligible(result, $"HTA (ETS+) criteria OK. Age = {age}m (18-23m). Previous MMRV = {priorDose:yyyy-MM-dd}, interval > 6 months.")
+            : Ineligible(result, $"HTA (ETS+) dose interval KO. Previous MMRV = {priorDose:yyyy-MM-dd}, Clinic Date = {clinic:yyyy-MM-dd}. Interval <= 6 months.");
     }
 
     private static EligibilityEvaluationResult AgeRule(EligibilityEvaluationResult result, bool eligible, string requiredAge, DateTime dob, DateTime clinic) =>
@@ -151,10 +166,19 @@ public sealed class EligibilityEvaluationService
         value.Contains("ETS/", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsEts(string value) =>
-        (string.Equals(value, "ETS", StringComparison.OrdinalIgnoreCase) ||
-         value.StartsWith("ETS ", StringComparison.OrdinalIgnoreCase)) &&
-        !IsEtsPlus(value) &&
-        !value.Contains("Plus", StringComparison.OrdinalIgnoreCase);
+        string.Equals(value, "ETS", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsHtaEtsPlus(string value) =>
+        string.Equals(value, "18 Month Appointment with Assessment (HTA)", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsHtaEts(string value) =>
+        string.Equals(value, "Assessment (HTA) Appointment", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsEtsUnknown(string value) =>
+        string.Equals(value, "ETS Unknown", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsAmbiguousEts(string value) =>
+        value.StartsWith("ETS", StringComparison.OrdinalIgnoreCase);
 
     private static DateTime? ParseDate(string? value)
     {
