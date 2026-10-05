@@ -1396,7 +1396,8 @@ public partial class CohortContextForm
                         : localSaveFailure + $"\n\nThe summary file could not be written: {ex.Message}";
                 }
                 string summaryLocation = localSaveFailure is null ? $"\nSummary file:\n{reportPath}" : $"\n\n{localSaveFailure}";
-                MessageBox.Show(this, report + summaryLocation, localSaveFailure is null ? "PHIS Client List Complete" : "PHIS Client List Uploaded", MessageBoxButtons.OK, localSaveFailure is null ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                string dialog = PhisAdminSummary.FormatDialog(verifiedId, clientListName, upload, clientIds.Count, comparison, currentClients);
+                MessageBox.Show(this, dialog + summaryLocation, localSaveFailure is null ? "PHIS Client List Complete" : "PHIS Client List Uploaded", MessageBoxButtons.OK, localSaveFailure is null ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
                 return;
             }
 

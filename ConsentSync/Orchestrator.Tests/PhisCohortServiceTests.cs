@@ -344,6 +344,27 @@ public sealed class PhisCohortServiceTests
         Assert.Contains("Initial upload", summary);
     }
 
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(5, 0)]
+    [InlineData(6, 1)]
+    [InlineData(36, 31)]
+    public void AdminSummary_DialogLimitsClientsAndReportsRemainder(int clientCount, int remaining)
+    {
+        var clients = Enumerable.Range(1, clientCount)
+            .Select(index => new PhisUploadClient(index.ToString(), $"Client {index}", $"{8 + index / 60:00}:{index % 60:00}"))
+            .Reverse()
+            .ToList();
+
+        string dialog = PhisAdminSummary.FormatDialog(24260, "LIST", new(24189, clientCount), clientCount, new PhisUploadComparison(true, [], []), clients);
+
+        Assert.Contains("Clients (first 5, sorted by Timeslot):", dialog);
+        Assert.Equal(Math.Min(clientCount, 5) * 2, dialog.Split(" | ").Length - 1);
+        if (remaining == 0) Assert.DoesNotContain("remaining client", dialog, StringComparison.OrdinalIgnoreCase);
+        else Assert.Contains($"{remaining} remaining client(s).", dialog);
+        if (clientCount == 0) Assert.Contains("(None)", dialog);
+    }
+
     [Fact]
     public void UploadComparison_IgnoresOrderDuplicatesWhitespaceAndNameOnlyChanges()
     {

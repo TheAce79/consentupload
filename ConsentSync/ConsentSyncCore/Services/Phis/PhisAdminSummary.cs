@@ -4,6 +4,8 @@ using ConsentSyncCore.Services;
 
 public static class PhisAdminSummary
 {
+    private const int DialogClientLimit = 5;
+
     public static string Format(int cohortId, string cohortName, PhisClientListResult list, int exportedCount) =>
         Format(cohortId, cohortName, list, exportedCount, new PhisUploadComparison(true, [], []));
 
@@ -19,10 +21,45 @@ public static class PhisAdminSummary
         FormatClients(clients) +
         FormatChanges(comparison);
 
+    public static string FormatDialog(int cohortId, string cohortName, PhisClientListResult list, int exportedCount, PhisUploadComparison comparison, IEnumerable<PhisUploadClient>? clients = null)
+    {
+        List<PhisUploadClient> rows = GetClients(clients);
+        var text = new System.Text.StringBuilder()
+            .AppendLine("PHIS Cohort / Client List Summary")
+            .AppendLine($"Cohort ID: {cohortId}")
+            .AppendLine($"Cohort Name: {cohortName}")
+            .AppendLine($"Client List Name / ID: {cohortName} / {list.ClientListId}")
+            .AppendLine($"Client IDs exported: {exportedCount}")
+            .AppendLine($"Clients in PHIS list (verified): {list.ClientCount}")
+            .AppendLine("Status: Full exported list uploaded; attached client list verified.")
+            .AppendLine()
+            .AppendLine("Clients (first 5, sorted by Timeslot):");
+        if (rows.Count == 0) text.AppendLine("(None)");
+        else
+        {
+            foreach (PhisUploadClient client in rows.Take(DialogClientLimit))
+                text.AppendLine($"{AppointmentTime.Display(client.Timeslot)} | {client.ClientId} | {client.FullName}");
+            if (rows.Count > DialogClientLimit) text.AppendLine($"{rows.Count - DialogClientLimit} remaining client(s). See the summary file for the full list.");
+        }
+
+        string heading = comparison.IsInitialUpload ? "Initial upload" : "Added since previous successful upload";
+        text.AppendLine().AppendLine($"{heading}: {comparison.Added.Count}");
+        if (!comparison.IsInitialUpload) text.AppendLine($"No longer in current payload: {comparison.Removed.Count}");
+        return text.ToString();
+    }
+
     private static string FormatClients(IEnumerable<PhisUploadClient>? clients)
     {
         if (clients is null) return string.Empty;
-        var rows = clients.Where(client => !string.IsNullOrWhiteSpace(client.ClientId))
+        List<PhisUploadClient> rows = GetClients(clients);
+        return $"{Environment.NewLine}Clients (Sorted by Timeslot):{Environment.NewLine}" +
+               string.Concat(rows.Select(client => $"{AppointmentTime.Display(client.Timeslot)} | {client.ClientId} | {client.FullName}{Environment.NewLine}"));
+    }
+
+    private static List<PhisUploadClient> GetClients(IEnumerable<PhisUploadClient>? clients)
+    {
+        if (clients is null) return [];
+        return clients.Where(client => !string.IsNullOrWhiteSpace(client.ClientId))
             .GroupBy(client => client.ClientId.Trim(), StringComparer.Ordinal)
             .Select(group =>
             {
@@ -34,8 +71,6 @@ public static class PhisAdminSummary
             .OrderBy(client => AppointmentTime.SortKey(client.Timeslot))
             .ThenBy(client => client.ClientId, StringComparer.Ordinal)
             .ToList();
-        return $"{Environment.NewLine}Clients (Sorted by Timeslot):{Environment.NewLine}" +
-               string.Concat(rows.Select(client => $"{AppointmentTime.Display(client.Timeslot)} | {client.ClientId} | {client.FullName}{Environment.NewLine}"));
     }
 
     private static string FormatChanges(PhisUploadComparison comparison)
