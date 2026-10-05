@@ -94,6 +94,19 @@ public sealed class CohortReviewServiceTests : IDisposable
     }
 
     [Fact]
+    public void TimeslotEdit_SaveReloadsAndRejectsInvalidValues()
+    {
+        var review = CohortReviewService.Load(SourcePath, ReviewPath);
+        review.Rows[0].Timeslot = "8:30 AM";
+        Assert.Throws<FormatException>(() => review.Rows[1].Timeslot = "after lunch");
+
+        review.Save();
+
+        Assert.Equal("8:30 AM", CsvImporterService.ReadFromCsv(SourcePath)[0].Timeslot);
+        Assert.Equal("8:30 AM", CohortReviewService.Load(SourcePath, ReviewPath).Rows[0].Timeslot);
+    }
+
+    [Fact]
     public void ChangedSource_BlocksRestoreAndSaveUntilExplicitFreshReview()
     {
         var review = CohortReviewService.Load(SourcePath, ReviewPath);

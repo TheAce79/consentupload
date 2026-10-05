@@ -1,3 +1,5 @@
+using ConsentSyncCore.Services;
+
 namespace ConsentSyncCore.Models;
 
 public sealed class EligibilityHistoryPreviewRow
@@ -5,6 +7,8 @@ public sealed class EligibilityHistoryPreviewRow
     public string ClientId { get; set; } = string.Empty;
     public string FullName { get; set; } = string.Empty;
     public string DateOfBirth { get; set; } = string.Empty;
+    public string? Timeslot { get; set; }
+    public int TimeslotSortKey => AppointmentTime.SortKey(Timeslot);
     public decimal? AgeMonths { get; set; }
     public string VaccineType { get; set; } = string.Empty;
     public EligibilityStatus? Status { get; set; }

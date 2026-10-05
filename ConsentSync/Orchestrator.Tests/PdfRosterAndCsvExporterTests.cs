@@ -95,6 +95,7 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
         ]);
         Assert.Equal(["4 Month Appointment", "Preschool Appointment", "Unknown", "Other / Autre", "Other / Autre", "Preschool Appointment"], records.Select(x => x.VaccineType));
         Assert.Equal("123456789", records[0].Medicare);
+        Assert.Equal(["8:00 AM", "08:30", "09:00", "09:30", "10:00", "10:30"], records.Select(x => x.Timeslot));
     }
 
     [Fact]
@@ -110,9 +111,9 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
         ]);
 
         Assert.Collection(records,
-            record => { Assert.Equal("Rebaab Kaur REhal", record.FullName); Assert.Equal("2022/07/07", record.DateOfBirth); },
-            record => { Assert.Equal("Czion Jay", record.FullName); Assert.Equal("2020/02/26", record.DateOfBirth); },
-            record => { Assert.Equal("Huxley McGillivary", record.FullName); Assert.Equal("2017/12/12", record.DateOfBirth); Assert.Equal("923758213", record.Medicare); });
+            record => { Assert.Equal("Rebaab Kaur REhal", record.FullName); Assert.Equal("2022/07/07", record.DateOfBirth); Assert.Equal("14:00", record.Timeslot); },
+            record => { Assert.Equal("Czion Jay", record.FullName); Assert.Equal("2020/02/26", record.DateOfBirth); Assert.Equal("14:10", record.Timeslot); },
+            record => { Assert.Equal("Huxley McGillivary", record.FullName); Assert.Equal("2017/12/12", record.DateOfBirth); Assert.Equal("923758213", record.Medicare); Assert.Equal("14:30", record.Timeslot); });
     }
 
     [Fact]
@@ -135,8 +136,8 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
         ]);
 
         Assert.Collection(records,
-            record => { Assert.Equal("Czion Jay", record.FullName); Assert.Equal("2020/02/26", record.DateOfBirth); },
-            record => { Assert.Equal("Nova Timmons", record.FullName); Assert.Equal("2026/07/17", record.DateOfBirth); });
+            record => { Assert.Equal("Czion Jay", record.FullName); Assert.Equal("2020/02/26", record.DateOfBirth); Assert.Equal("14:00", record.Timeslot); },
+            record => { Assert.Equal("Nova Timmons", record.FullName); Assert.Equal("2026/07/17", record.DateOfBirth); Assert.Equal("15:00", record.Timeslot); });
     }
 
     [Fact]
@@ -187,12 +188,12 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
         var existing = new ClinicPdfClientRecord
         {
             ClientId = "123", FullName = "Ellen Ryder", DateOfBirth = "2025/03/14", VaccineType = "Unknown",
-            ClientIdStatus = ClientIdStatus.Found, Email = "parent@example.test", ErrorDetails = "Keep this"
+            ClientIdStatus = ClientIdStatus.Found, Email = "parent@example.test", ErrorDetails = "Keep this", Timeslot = "08:00"
         };
         var newClient = new ClinicPdfClientRecord { FullName = "New Client", DateOfBirth = "2025/01/01", VaccineType = "ETS+" };
 
         List<ClinicPdfClientRecord> merged = ClinicScheduleSummary.MergeExtractedEtsRecords([existing], [
-            new ClinicPdfClientRecord { FullName = "Ellen Ryder", DateOfBirth = "2025/03/14", VaccineType = "ETS" },
+            new ClinicPdfClientRecord { FullName = "Ellen Ryder", DateOfBirth = "2025/03/14", VaccineType = "ETS", Timeslot = "08:30" },
             newClient
         ]);
 
@@ -202,6 +203,7 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
         Assert.Equal(ClientIdStatus.Found, existing.ClientIdStatus);
         Assert.Equal("parent@example.test", existing.Email);
         Assert.Equal("Keep this", existing.ErrorDetails);
+        Assert.Equal("08:30", existing.Timeslot);
         Assert.Same(newClient, merged[1]);
     }
 

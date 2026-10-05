@@ -59,6 +59,7 @@ public sealed class Gnb2009ExcelParserServiceTests : IDisposable
     public void BuildPreview_DistinguishesMissingHistoryAndExcelOnlyClients()
     {
         CohortReviewRow activeWithHistory = Row("100", "Active Found", excluded: false);
+        activeWithHistory.Timeslot = "08:30";
         CohortReviewRow activeMissingExcel = Row("200", "Active Missing", excluded: false);
         CohortReviewRow excludedInCsv = Row("300", "Excluded Client", excluded: true);
         Dictionary<string, ClientImmunizationHistory> histories = new(StringComparer.OrdinalIgnoreCase)
@@ -72,6 +73,7 @@ public sealed class Gnb2009ExcelParserServiceTests : IDisposable
             [activeWithHistory, activeMissingExcel, excludedInCsv], histories);
 
         Assert.Contains(preview.Rows, row => row.ClientId == "100" && row.HistoryMatchStatus == "History Found" && row.DoseCount == 2);
+        Assert.Contains(preview.Rows, row => row.ClientId == "100" && row.Timeslot == "08:30" && row.TimeslotSortKey < int.MaxValue);
         Assert.Contains(preview.Rows, row => row.ClientId == "200" && row.HistoryMatchStatus == "No History Found" && row.DoseCount == 0);
         Assert.Contains(preview.Rows, row => row.ClientId == "400" && row.HistoryMatchStatus == "Added in PHIS (Not in Cohort CSV)");
         Assert.DoesNotContain(preview.Rows, row => row.ClientId == "300" && row.HistoryMatchStatus == "Added in PHIS (Not in Cohort CSV)");

@@ -1,6 +1,6 @@
 namespace ConsentSyncCore.Services.Phis;
 
-public sealed record PhisUploadClient(string ClientId, string FullName);
+public sealed record PhisUploadClient(string ClientId, string FullName, string? Timeslot = null);
 public sealed record PhisUploadComparison(bool IsInitialUpload, IReadOnlyList<PhisUploadClient> Added, IReadOnlyList<PhisUploadClient> Removed)
 {
     public bool HasMembershipChanges => Added.Count > 0 || Removed.Count > 0;

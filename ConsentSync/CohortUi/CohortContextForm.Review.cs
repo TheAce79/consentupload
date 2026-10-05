@@ -66,7 +66,7 @@ public partial class CohortContextForm
     };
     private readonly BindingSource _reviewBindingSource = new();
     private SortableBindingList<CohortReviewRow>? _reviewRows;
-    private string _reviewSortProperty = nameof(CohortReviewRow.FullName);
+    private string _reviewSortProperty = nameof(CohortReviewRow.TimeslotSortKey);
     private ListSortDirection _reviewSortDirection = ListSortDirection.Ascending;
     private List<CohortReviewRow> _selectedReviewRowsBeforeSort = [];
     private CohortReviewRow? _currentReviewRowBeforeSort;
@@ -198,7 +198,7 @@ public partial class CohortContextForm
         foreach (var (property, title) in new (string, string)[]
         {
             ("RowNumber", "Row"), ("ClientId", "Client ID"), ("FullName", "Full Name"),
-            ("DateOfBirth", "Date of Birth"), ("Medicare", "Medicare"), ("SearchStatus", "Search Status"),
+            ("DateOfBirth", "Date of Birth"), ("Timeslot", "Timeslot / Heure du RDV"), ("Medicare", "Medicare"), ("SearchStatus", "Search Status"),
             ("Unresolved", "Unresolved"), ("DuplicateId", "Duplicate ID"), ("Excluded", "Excluded"),
             ("ErrorDetails", "Search Details"), ("BestMatch", "Best Match"),
             ("FirstName", "First Name"), ("LastName", "Last Name"), ("MiddleName", "Middle Name"),
@@ -208,7 +208,8 @@ public partial class CohortContextForm
             _reviewGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 DataPropertyName = property, Name = property, HeaderText = title,
-                ReadOnly = property is not ("ClientId" or "FullName" or "DateOfBirth" or "Medicare"), SortMode = DataGridViewColumnSortMode.Automatic
+                ReadOnly = property is not ("ClientId" or "FullName" or "DateOfBirth" or "Timeslot" or "Medicare"),
+                SortMode = property == "Timeslot" ? DataGridViewColumnSortMode.Programmatic : DataGridViewColumnSortMode.Automatic
             });
         }
         LavenderSlateTheme.ApplyGrid(_reviewGrid);
@@ -220,6 +221,7 @@ public partial class CohortContextForm
         _reviewGrid.ContextMenuStrip = _reviewContextMenu;
         _reviewGrid.MouseDown += ReviewGrid_MouseDown;
         _reviewGrid.Sorted += ReviewGrid_Sorted;
+        _reviewGrid.ColumnHeaderMouseClick += ReviewGrid_ColumnHeaderMouseClick;
         _reviewGrid.CellFormatting += ReviewGrid_CellFormatting;
         FormClosed += (_, _) => _reviewContextMenu.Dispose();
         _reviewGrid.CellValueChanged += (_, e) =>
@@ -232,7 +234,7 @@ public partial class CohortContextForm
         _reviewGrid.DataError += (_, e) =>
         {
             e.ThrowException = false;
-            _reviewMessage.Text = "The value could not be applied. Enter Client ID, Full Name, Date of Birth, and Medicare as text.";
+            _reviewMessage.Text = "The value could not be applied. Enter Client ID, Full Name, Date of Birth, Timeslot, and Medicare as text.";
         };
         var actionCard = new LavenderCardPanel { AutoSize = true, Dock = DockStyle.Fill };
         actionCard.Controls.Add(toolbar);
@@ -297,6 +299,7 @@ public partial class CohortContextForm
             (nameof(EligibilityHistoryPreviewRow.ClientId), "Client ID"),
             (nameof(EligibilityHistoryPreviewRow.FullName), "Full Name"),
             (nameof(EligibilityHistoryPreviewRow.DateOfBirth), "Date of Birth"),
+            (nameof(EligibilityHistoryPreviewRow.Timeslot), "Timeslot / Heure du RDV"),
             (nameof(EligibilityHistoryPreviewRow.AgeMonths), "Age (Months)"),
             (nameof(EligibilityHistoryPreviewRow.VaccineType), "Vaccine Type"),
             (nameof(EligibilityHistoryPreviewRow.Status), "Status"),
@@ -318,7 +321,9 @@ public partial class CohortContextForm
                 : new DataGridViewTextBoxColumn
                 {
                     DataPropertyName = property, Name = property == nameof(EligibilityHistoryPreviewRow.AgeMonths) ? "col_AgeMonths" : property, HeaderText = title, ReadOnly = true,
-                    SortMode = DataGridViewColumnSortMode.Automatic
+                    SortMode = property == nameof(EligibilityHistoryPreviewRow.Timeslot)
+                        ? DataGridViewColumnSortMode.Programmatic
+                        : DataGridViewColumnSortMode.Automatic
                 };
             if (column is DataGridViewComboBoxColumn vaccineColumn)
                 vaccineColumn.Items.AddRange(EligibilityVaccineTypes);
@@ -350,6 +355,7 @@ public partial class CohortContextForm
         }
         _eligibilityGrid.DataSource = _eligibilityBindingSource;
         _eligibilityGrid.CellFormatting += EligibilityGrid_CellFormatting;
+        _eligibilityGrid.ColumnHeaderMouseClick += EligibilityGrid_ColumnHeaderMouseClick;
         _eligibilityGrid.CurrentCellDirtyStateChanged += EligibilityGrid_CurrentCellDirtyStateChanged;
         _eligibilityGrid.CellBeginEdit += EligibilityGrid_CellBeginEdit;
         _eligibilityGrid.CellValueChanged += (_, e) => EligibilityGrid_CellValueChanged(e.RowIndex, e.ColumnIndex);
@@ -847,6 +853,29 @@ public partial class CohortContextForm
         RestoreReviewGridSelection();
     }
 
+    private void ReviewGrid_ColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (e.ColumnIndex < 0 || _reviewGrid.Columns[e.ColumnIndex].DataPropertyName != nameof(CohortReviewRow.Timeslot)) return;
+        _reviewSortDirection = _reviewSortProperty == nameof(CohortReviewRow.TimeslotSortKey) && _reviewSortDirection == ListSortDirection.Ascending
+            ? ListSortDirection.Descending
+            : ListSortDirection.Ascending;
+        _reviewSortProperty = nameof(CohortReviewRow.TimeslotSortKey);
+        RefreshReviewGrid();
+        _reviewGrid.Columns[e.ColumnIndex].HeaderCell.SortGlyphDirection = _reviewSortDirection == ListSortDirection.Ascending
+            ? SortOrder.Ascending
+            : SortOrder.Descending;
+    }
+
+    private void EligibilityGrid_ColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (e.ColumnIndex < 0 || _eligibilityGrid.Columns[e.ColumnIndex].DataPropertyName != nameof(EligibilityHistoryPreviewRow.Timeslot)) return;
+        DataGridViewColumn column = _eligibilityGrid.Columns[e.ColumnIndex];
+        bool ascending = column.HeaderCell.SortGlyphDirection != SortOrder.Ascending;
+        _eligibilityBindingSource.Sort = $"{nameof(EligibilityHistoryPreviewRow.TimeslotSortKey)} {(ascending ? "ASC" : "DESC")}";
+        foreach (DataGridViewColumn gridColumn in _eligibilityGrid.Columns) gridColumn.HeaderCell.SortGlyphDirection = SortOrder.None;
+        column.HeaderCell.SortGlyphDirection = ascending ? SortOrder.Ascending : SortOrder.Descending;
+    }
+
     private void ReviewGrid_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
     {
         if (e.RowIndex >= 0 && _reviewGrid.Columns[e.ColumnIndex].DataPropertyName == nameof(CohortReviewRow.RowNumber))
@@ -1115,7 +1144,7 @@ public partial class CohortContextForm
                           (allStatuses || StatusMatches(row.Status, selectedStatus)))
             .ToList();
         _eligibilityBindingSource.DataSource = new SortableBindingList<EligibilityHistoryPreviewRow>(filtered);
-        _eligibilityBindingSource.Sort = $"{nameof(EligibilityHistoryPreviewRow.FullName)} ASC";
+        _eligibilityBindingSource.Sort = $"{nameof(EligibilityHistoryPreviewRow.TimeslotSortKey)} ASC";
         UpdateEligibilitySummary(filtered);
     }
 
@@ -1259,8 +1288,14 @@ public partial class CohortContextForm
 
         var currentClients = resolvedRows
             .GroupBy(row => row.ClientId.Trim(), StringComparer.Ordinal)
-            .Select(group => new PhisUploadClient(group.Key,
-                group.Select(row => row.FullName?.Trim()).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty))
+            .Select(group =>
+            {
+                CohortReviewRow? earliest = group.Where(row => AppointmentTime.TryParse(row.Timeslot, out _))
+                    .OrderBy(row => AppointmentTime.SortKey(row.Timeslot)).FirstOrDefault();
+                return new PhisUploadClient(group.Key,
+                    group.Select(row => row.FullName?.Trim()).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty,
+                    earliest?.Timeslot);
+            })
             .ToList();
         PhisUploadSnapshotEntity? previousSnapshot = null;
         if (_activeContext.PhisCohortId is int savedCohortId)
@@ -1333,7 +1368,7 @@ public partial class CohortContextForm
                     System.Text.Json.JsonSerializer.Serialize(_activeContext))!;
                 updated.PhisClientListId = upload.ClientListId;
                 string reportPath = Path.Combine(Path.GetDirectoryName(targetPath)!, $"{clientListName}_PHIS_Admin_Summary_{DateTime.Now:yyyyMMdd_HHmmss_fff}.txt");
-                string report = PhisAdminSummary.Format(verifiedId, clientListName, upload, clientIds.Count, comparison);
+                string report = PhisAdminSummary.Format(verifiedId, clientListName, upload, clientIds.Count, comparison, currentClients);
                 string? localSaveFailure = null;
                 try
                 {

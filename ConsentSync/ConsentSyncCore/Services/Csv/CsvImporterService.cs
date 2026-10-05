@@ -26,13 +26,13 @@ public static class CsvImporterService
     private static readonly IReadOnlyDictionary<string, string[]> AbleAssessHeaders = new Dictionary<string, string[]>
     {
         ["BookingId"] = ["Booking ID", "BookingID", "ID de réservation", "No de réservation", "ID réservation"],
-        ["ClinicName"] = ["Clinic Name"], ["ClinicDate"] = ["Clinic Date", "Date de la clinique"],
-        ["AppointmentType"] = ["Appointment Type", "Type de rendez-vous"], ["CatalogItem"] = ["Catalog Item", "Article du catalogue"],
-        ["FullName"] = ["Enrolled Person Name", "Nom de la personne inscrite", "Nom"],
+        ["ClinicName"] = ["Clinic Name", "Nom de la clinique"], ["ClinicDate"] = ["Clinic Date", "Date de la clinique"],
+        ["AppointmentType"] = ["Appointment Type", "Type de rendez-vous"], ["CatalogItem"] = ["Catalog Item", "Article de catalogue", "Article du catalogue"],
+        ["FullName"] = ["Enrolled Person Name", "Client", "Nom de la personne inscrite", "Nom"],
         ["Medicare"] = ["Medicare Number", "Numéro d'assurance-maladie", "Assurance-maladie"],
         ["Email"] = ["Email", "Courriel", "Adresse courriel"], ["DateOfBirth"] = ["Date of Birth", "Date de naissance"],
-        ["Phone"] = ["Phone", "Téléphone", "No de téléphone"], ["Timeslot"] = ["Timeslot", "Plage horaire", "Heure"],
-        ["Comment"] = ["Comment"], ["SdcId"] = ["SDC Id"], ["PreferredLanguage"] = ["Preferred Language", "Langue préférée"]
+        ["Phone"] = ["Phone", "Téléphone", "No de téléphone"], ["Timeslot"] = ["Timeslot", "Plage horaire", "Heure", "Heure du RDV"],
+        ["Comment"] = ["Comment", "Commentaire"], ["SdcId"] = ["SDC Id", "ID de CDS"], ["PreferredLanguage"] = ["Preferred Language", "Langue préférée"]
     };
 
     public static List<ClinicPdfClientRecord> ReadFromCsv(string csvFilePath, string? ableAssessDateFormat = null)
@@ -56,7 +56,7 @@ public static class CsvImporterService
         if (source == InputSourceType.PdfRoster) ValidateCanonicalHeaders(fieldIndexes);
         else ValidateAbleAssessHeaders(fieldIndexes);
         string[] ableAssessDateFormats = source == InputSourceType.AbleAssess
-            ? GetAbleAssessDateFormats(ableAssessDateFormat)
+            ? GetAbleAssessDateFormats(ableAssessDateFormat, headers[fieldIndexes["DateOfBirth"]])
             : [];
 
         var records = new List<ClinicPdfClientRecord>();
@@ -170,9 +170,11 @@ public static class CsvImporterService
     public static bool IsSupportedAbleAssessDateFormat(string? format) =>
         !string.IsNullOrWhiteSpace(format) && SupportedAbleAssessDateFormats.Contains(format.Trim(), StringComparer.Ordinal);
 
-    private static string[] GetAbleAssessDateFormats(string? preferredFormat)
+    private static string[] GetAbleAssessDateFormats(string? preferredFormat, string dateOfBirthHeader)
     {
-        string format = string.IsNullOrWhiteSpace(preferredFormat) ? "M/d/yyyy" : preferredFormat.Trim();
+        string format = string.IsNullOrWhiteSpace(preferredFormat)
+            ? (NormalizeHeader(dateOfBirthHeader).Contains("Date de naissance", StringComparison.OrdinalIgnoreCase) ? "d/M/yyyy" : "M/d/yyyy")
+            : preferredFormat.Trim();
         if (!IsSupportedAbleAssessDateFormat(format))
             throw new FormatException($"Unsupported AbleAssess date format '{format}'. Use one of: {string.Join(", ", SupportedAbleAssessDateFormats)}.");
         return [format, .. SupportedAbleAssessDateFormats.Where(candidate => !string.Equals(candidate, format, StringComparison.Ordinal))];
@@ -188,16 +190,28 @@ public static class CsvImporterService
         {
             ClientId = null, FullName = Get(csv, fields, "FullName").Trim(), DateOfBirth = dateOfBirth?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty,
             Medicare = NullIfEmptyOrNaN(Get(csv, fields, "Medicare")), ClientIdStatus = ClientIdStatus.NeedsManualReview, ErrorDetails = string.Empty, BestMatch = string.Empty,
-            Phone = NullIfEmptyOrNaN(Get(csv, fields, "Phone")), Email = NullIfEmpty(Get(csv, fields, "Email")), VaccineType = MapAbleAssessVaccineType(NullIfEmpty(Get(csv, fields, "CatalogItem")) ?? NullIfEmpty(Get(csv, fields, "AppointmentType"))),
+            Phone = NullIfEmptyOrNaN(Get(csv, fields, "Phone")), Email = NullIfEmpty(Get(csv, fields, "Email")), VaccineType = NormalizeCatalogItem(NullIfEmpty(Get(csv, fields, "CatalogItem")) ?? NullIfEmpty(Get(csv, fields, "AppointmentType"))),
             BookingId = NullIfEmpty(Get(csv, fields, "BookingId")), ClinicName = NullIfEmpty(Get(csv, fields, "ClinicName")), ClinicDate = parsedClinicDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), AppointmentType = NullIfEmpty(Get(csv, fields, "AppointmentType")), CatalogItem = NullIfEmpty(Get(csv, fields, "CatalogItem")), Timeslot = NullIfEmpty(Get(csv, fields, "Timeslot")), Comment = NullIfEmpty(Get(csv, fields, "Comment")), SdcId = NullIfEmpty(Get(csv, fields, "SdcId")), PreferredLanguage = NullIfEmpty(Get(csv, fields, "PreferredLanguage"))
         };
     }
 
-    private static string MapAbleAssessVaccineType(string? value)
+    public static string NormalizeCatalogItem(string? rawCatalogItem)
     {
-        if (string.Equals(value?.Trim(), "Assessment (HTA) Appointment", StringComparison.OrdinalIgnoreCase)) return "ETS";
-        if (string.Equals(value?.Trim(), "18 Month Appointment with Assessment (HTA)", StringComparison.OrdinalIgnoreCase)) return "ETS+";
-        return VaccineTypeNormalizer.Normalize(value);
+        if (string.IsNullOrWhiteSpace(rawCatalogItem)) return "Unknown";
+
+        string catalog = rawCatalogItem.Trim().ToLowerInvariant();
+        if (catalog.Contains("18") && (catalog.Contains("hta") || catalog.Contains("ets")) &&
+            (catalog.Contains("with") || catalog.Contains("w/") || catalog.Contains("avec"))) return "ETS+";
+        if ((catalog.Contains("assessment") || catalog.Contains("évaluation") || catalog.Contains("evaluation")) &&
+            (catalog.Contains("hta") || catalog.Contains("ets")) && !catalog.Contains("18")) return "ETS";
+        if (catalog.Contains("18") && (catalog.Contains("month") || catalog.Contains("mois") || catalog.Contains("appt"))) return "18 Month Appointment";
+        if (catalog.StartsWith("12 ") || catalog.Contains("12 month") || catalog.Contains("12 mois")) return "12 Month Appointment";
+        if (catalog.StartsWith("6 ") || catalog.Contains("6 month") || catalog.Contains("6 mois")) return "6 Month Appointment";
+        if (catalog.StartsWith("4 ") || catalog.Contains("4 month") || catalog.Contains("4 mois")) return "4 Month Appointment";
+        if (catalog.StartsWith("2 ") || catalog.Contains("2 month") || catalog.Contains("2 mois")) return "2 Month Appointment";
+        if (catalog.Contains("preschool") || catalog.Contains("préscolaire") || catalog.StartsWith("ps ")) return "Preschool Appointment";
+        if (catalog.Contains("catch") || catalog.Contains("rattrapage") || catalog.Contains("newcomer") || catalog.Contains("adolescent")) return "Other / Autre";
+        return VaccineTypeNormalizer.Normalize(rawCatalogItem);
     }
 
     private static DateOnly? ParseAbleAssessDate(string value, string fieldName, string[] dateFormats)

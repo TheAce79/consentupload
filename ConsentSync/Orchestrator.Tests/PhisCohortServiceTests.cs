@@ -325,6 +325,26 @@ public sealed class PhisCohortServiceTests
     }
 
     [Fact]
+    public void AdminSummary_ListsUniqueClientsInChronologicalTimeslotOrder()
+    {
+        var clients = new[]
+        {
+            new PhisUploadClient("2", "Second", "10:00"), new PhisUploadClient("1", "First", "8:30 AM"),
+            new PhisUploadClient("2", "Second", "09:05"), new PhisUploadClient("3", "Unscheduled")
+        };
+
+        string summary = PhisAdminSummary.Format(24260, "LIST", new(24189, 3), 3, new PhisUploadComparison(true, [], []), clients);
+
+        int first = summary.IndexOf("08:30 AM | 1 | First", StringComparison.Ordinal);
+        int second = summary.IndexOf("09:05 AM | 2 | Second", StringComparison.Ordinal);
+        int unscheduled = summary.IndexOf("Unscheduled | 3 | Unscheduled", StringComparison.Ordinal);
+        Assert.Contains("Clients (Sorted by Timeslot):", summary);
+        Assert.True(first >= 0 && second > first && unscheduled > second);
+        Assert.Equal(1, summary.Split(" | 2 | Second").Length - 1);
+        Assert.Contains("Initial upload", summary);
+    }
+
+    [Fact]
     public void UploadComparison_IgnoresOrderDuplicatesWhitespaceAndNameOnlyChanges()
     {
         var prior = new[] { new PhisUploadClient(" 1 ", "Old name"), new PhisUploadClient("2", "Two") };

@@ -33,6 +33,8 @@ public static class ClinicScheduleSummary
 
             if (existingByKey.TryGetValue(key, out List<ClinicPdfClientRecord>? matches))
             {
+                if (!string.IsNullOrWhiteSpace(extracted.Timeslot))
+                    foreach (ClinicPdfClientRecord existing in matches) existing.Timeslot = extracted.Timeslot;
                 if (IsEtsClassification(extracted.VaccineType))
                     foreach (ClinicPdfClientRecord existing in matches) existing.VaccineType = extracted.VaccineType;
             }

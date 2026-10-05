@@ -78,9 +78,9 @@ public sealed class CsvImporterServiceTests : IDisposable
         ClinicPdfClientRecord record = Assert.Single(CsvImporterService.ReadFromCsv(input));
         Assert.Null(record.ClientId); Assert.Equal(ClientIdStatus.NeedsManualReview, record.ClientIdStatus);
         Assert.Equal("AWE DJONYANG, BOUAGNI JEDIDJA", record.FullName); Assert.Equal("2020-02-03", record.DateOfBirth);
-        Assert.Null(record.Medicare); Assert.Equal("05065881736", record.Phone); Assert.Equal("Catchup Appointment", record.VaccineType);
+        Assert.Null(record.Medicare); Assert.Equal("05065881736", record.Phone); Assert.Equal("Other / Autre", record.VaccineType);
         Assert.Equal("B-1", record.BookingId); Assert.Equal("Clinique Étoile", record.ClinicName); Assert.Equal("Français", record.PreferredLanguage);
-        Assert.Equal("2026-10-02", record.ClinicDate);
+        Assert.Equal("2026-10-02", record.ClinicDate); Assert.Equal("09:00", record.Timeslot);
 
         record.ClientId = "001"; record.ClientIdStatus = ClientIdStatus.Found;
         string output = Path.Combine(_directory, "able-out.csv");
@@ -133,6 +133,25 @@ public sealed class CsvImporterServiceTests : IDisposable
         Assert.Equal("18 Month Appointment", records[0].AppointmentType);
     }
 
+    [Theory]
+    [InlineData("18 Month Appointment with Assessment (HTA)", "ETS+")]
+    [InlineData("Rendez-vous de 18 mois avec évaluation (ETS)", "ETS+")]
+    [InlineData("18 mois appt w/ HTA", "ETS+")]
+    [InlineData("Assessment (HTA) appt", "ETS")]
+    [InlineData("Rendez-vous de Évaluation (ETS)", "ETS")]
+    [InlineData("18 mois appt", "18 Month Appointment")]
+    [InlineData("Rendez-vous de 2 mois", "2 Month Appointment")]
+    [InlineData("Rendez-vous de 4 mois", "4 Month Appointment")]
+    [InlineData("Rendez-vous de 6 mois", "6 Month Appointment")]
+    [InlineData("Rendez-vous de 12 mois", "12 Month Appointment")]
+    [InlineData("Rendez-vous préscolaire", "Preschool Appointment")]
+    [InlineData("Catch up appt", "Other / Autre")]
+    [InlineData("Rendez-vous rattrapage", "Other / Autre")]
+    [InlineData("Newcomer appt", "Other / Autre")]
+    [InlineData("Adolescent appt", "Other / Autre")]
+    public void NormalizeCatalogItem_MapsAbleAssessCatalogVariations(string source, string expected) =>
+        Assert.Equal(expected, CsvImporterService.NormalizeCatalogItem(source));
+
     [Fact]
     public void ReadFromCsv_CanonicalEtsUnknownRoundTrips()
     {
@@ -149,13 +168,26 @@ public sealed class CsvImporterServiceTests : IDisposable
         File.WriteAllText(french, " ID de réservation ,Nom de la personne inscrite,Date de naissance,Numéro d’assurance-maladie,Courriel,Téléphone,Article du catalogue,Date de la clinique,Plage horaire,Langue préférée\nFR-1, Nom Français ,03/04/2020,001234567, ,NaN,Rendez-vous 4 mois,18/11/2026,8:30:00,Français\n", Encoding.UTF8);
         ClinicPdfClientRecord frenchRecord = Assert.Single(CsvImporterService.ReadFromCsv(french));
         Assert.Equal("FR-1", frenchRecord.BookingId); Assert.Equal("Nom Français", frenchRecord.FullName);
-        Assert.Equal("2020-03-04", frenchRecord.DateOfBirth); Assert.Equal("001234567", frenchRecord.Medicare);
+        Assert.Equal("2020-04-03", frenchRecord.DateOfBirth); Assert.Equal("001234567", frenchRecord.Medicare);
         Assert.Null(frenchRecord.Email); Assert.Null(frenchRecord.Phone); Assert.Equal("2026-11-18", frenchRecord.ClinicDate);
 
         string bilingual = Path.Combine(_directory, "bilingual.csv");
         File.WriteAllText(bilingual, "ID de réservation / Booking ID,Nom / Enrolled Person Name,Date of Birth / Date de naissance,Appointment Type / Type de rendez-vous\nBI-1,Person,2020-02-03,Appointment\n", Encoding.UTF8);
         ClinicPdfClientRecord bilingualRecord = Assert.Single(CsvImporterService.ReadFromCsv(bilingual));
         Assert.Equal("BI-1", bilingualRecord.BookingId); Assert.Equal("2020-02-03", bilingualRecord.DateOfBirth); Assert.Equal("Other / Autre", bilingualRecord.VaccineType);
+    }
+
+    [Fact]
+    public void ReadFromCsv_AcceptsVerifiedFrenchHeadersAndPreservesMetadata()
+    {
+        string french = Path.Combine(_directory, "verified-french.csv");
+        File.WriteAllText(french, "ID de réservation,Nom de la clinique,Date de la clinique,Type de rendez-vous,Article de catalogue,Client,Assurance-maladie,Date de naissance,Heure du RDV,Commentaire,ID de CDS,Langue préférée\nFR-1,Clinique,05/06/2026,18 mois appt w/ HTA,18 mois appt w/ HTA,Client Français,001234567,03/04/2020,08:30,Note,CDS-1,Français\n", Encoding.UTF8);
+
+        ClinicPdfClientRecord record = Assert.Single(CsvImporterService.ReadFromCsv(french));
+
+        Assert.Equal("2020-04-03", record.DateOfBirth); Assert.Equal("2026-06-05", record.ClinicDate);
+        Assert.Equal("ETS+", record.VaccineType); Assert.Equal("Clinique", record.ClinicName); Assert.Equal("08:30", record.Timeslot);
+        Assert.Equal("Note", record.Comment); Assert.Equal("CDS-1", record.SdcId); Assert.Equal("Français", record.PreferredLanguage);
     }
 
     [Fact]
@@ -186,6 +218,15 @@ public sealed class CsvImporterServiceTests : IDisposable
         Assert.Equal("2020-04-03", configuredRecord.DateOfBirth);
         Assert.Equal("2026-06-05", configuredRecord.ClinicDate);
         Assert.False(CsvImporterService.IsSupportedAbleAssessDateFormat("MM-dd-yyyy"));
+    }
+
+    [Fact]
+    public void ReadFromCsv_AbleAssessExplicitDateFormatOverridesHeaderLanguage()
+    {
+        string input = Path.Combine(_directory, "french-override.csv");
+        File.WriteAllText(input, "Booking ID,Client,Date de naissance\nB-1,Name,03/04/2020\n", Encoding.UTF8);
+
+        Assert.Equal("2020-03-04", Assert.Single(CsvImporterService.ReadFromCsv(input, "M/d/yyyy")).DateOfBirth);
     }
 
     public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }

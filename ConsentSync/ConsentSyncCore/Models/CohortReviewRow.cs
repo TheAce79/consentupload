@@ -1,3 +1,5 @@
+using ConsentSyncCore.Services;
+
 namespace ConsentSyncCore.Models;
 
 public sealed class CohortReviewRow
@@ -37,6 +39,18 @@ public sealed class CohortReviewRow
     public string? MiddleName => Source.MiddleName;
     public string? Phone => Source.Phone;
     public string? Email => Source.Email;
+    public string? Timeslot
+    {
+        get => Source.Timeslot;
+        set
+        {
+            string? normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (!string.IsNullOrWhiteSpace(normalized) && !AppointmentTime.TryParse(normalized, out _))
+                throw new FormatException("Timeslot must be a valid time such as 8:30 AM, 08:30, or 08:30:00.");
+            Source.Timeslot = normalized;
+        }
+    }
+    public int TimeslotSortKey => AppointmentTime.SortKey(Timeslot);
     public string? ErrorDetails => ClientIdOverride switch
     {
         null => Source.ErrorDetails,

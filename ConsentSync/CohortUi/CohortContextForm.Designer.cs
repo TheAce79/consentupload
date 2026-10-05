@@ -238,7 +238,7 @@ partial class CohortContextForm
         txt_AbleAssessDateFormat.Name = "txt_AbleAssessDateFormat";
         txt_AbleAssessDateFormat.Size = new Size(116, 27);
         txt_AbleAssessDateFormat.TabIndex = 9;
-        txt_AbleAssessDateFormat.Text = "M/d/yyyy";
+        txt_AbleAssessDateFormat.Text = "";
         //
         // lbl_AbleAssessDateFormat
         //
@@ -247,7 +247,7 @@ partial class CohortContextForm
         lbl_AbleAssessDateFormat.Name = "lbl_AbleAssessDateFormat";
         lbl_AbleAssessDateFormat.Size = new Size(72, 20);
         lbl_AbleAssessDateFormat.TabIndex = 8;
-        lbl_AbleAssessDateFormat.Text = "Date format";
+        lbl_AbleAssessDateFormat.Text = "Date format (Auto)";
         // 
         // txt_Type
         // 

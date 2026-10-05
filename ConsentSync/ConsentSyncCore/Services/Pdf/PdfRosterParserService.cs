@@ -13,7 +13,9 @@ public class PdfRosterParserService
     private static readonly Regex DobRegex = new(@"\b(?<dob>\d{4}-\d{2}-\d{2})\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex MedicareRegex = new(@"\b(?:\d{9}|\d{3}\s?\d{3}\s?\d{3})\b", RegexOptions.Compiled);
     private static readonly Regex TimeRangePrefixRegex = new(@"^\s*(?:\d{1,2}:\d{2}\s*(?:AM|PM)?\s*(?:[-–—]\s*|\s+)\d{1,2}:\d{2}\s*(?:AM|PM)?|\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2})\b\s*", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    private static readonly Regex AppointmentPrefixRegex = new(@"^\s*[\u2605]?\s*\d{1,2}h\d{2}\s*(?:\d+\s*/\s*\d+)?\s*(?:[-–—]\s*)?", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex TimeRangeStartRegex = new(@"^\s*(?<start>\d{1,2}:\d{2}\s*(?:AM|PM)?)", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex StandaloneTimeRangeRegex = new(@"^\s*(?<start>\d{1,2}:\d{2}\s*(?:AM|PM)?)\s*[-–—]\s*\d{1,2}:\d{2}\s*(?:AM|PM)?\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex AppointmentPrefixRegex = new(@"^\s*[\u2605]?\s*(?<time>\d{1,2}h\d{2})\s*(?:\d+\s*/\s*\d+)?\s*(?:[-–—]\s*)?", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
     private static readonly Regex MilestoneRegex = new(@"\b\d+\s*(?:mois|m|months?)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex CategoryRegex = new(@"\b(?:autres?|PS|preschool|Mpox|rattrapage|initiale)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -68,9 +70,18 @@ public class PdfRosterParserService
     {
         var pageLines = lines.Select(x => WhitespaceRegex.Replace(x.Replace('|', ' '), " ").Trim()).Where(x => x.Length > 0).ToArray();
         var records = new List<ClinicPdfClientRecord>();
+        string? pendingSectionTimeslot = null;
         for (var i = 0; i < pageLines.Length; i++)
         {
+            Match sectionHeader = StandaloneTimeRangeRegex.Match(pageLines[i]);
+            if (sectionHeader.Success && !DobRegex.IsMatch(pageLines[i]))
+            {
+                pendingSectionTimeslot = sectionHeader.Groups["start"].Value.Trim();
+                continue;
+            }
             if (!StartsAppointmentBlock(pageLines[i])) continue;
+            string? timeslot = pendingSectionTimeslot ?? ExtractTimeslot(pageLines[i]);
+            pendingSectionTimeslot = null;
             var details = RemoveAppointmentPrefixes(pageLines[i]);
             if (string.IsNullOrWhiteSpace(details) && i + 1 < pageLines.Length && !StartsAppointmentBlock(pageLines[i + 1])) details = pageLines[++i];
             var dob = DobRegex.Match(details);
@@ -90,6 +101,7 @@ public class PdfRosterParserService
                 FullName = name,
                 DateOfBirth = date.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture),
                 Medicare = medicare.Success ? medicare.Value.Replace(" ", "") : null,
+                Timeslot = timeslot,
                 VaccineType = isEtsClinic
                     ? ClassifyEtsAppointment(appointmentBlock, dob)
                     : VaccineTypeNormalizer.Normalize(vaccine.Success ? WhitespaceRegex.Replace(vaccine.Value, " ") : null)
@@ -133,6 +145,12 @@ public class PdfRosterParserService
     }
 
     private static bool StartsAppointmentBlock(string line) => TimeRangePrefixRegex.IsMatch(line) || AppointmentPrefixRegex.IsMatch(line);
+    private static string? ExtractTimeslot(string line)
+    {
+        if (TimeRangePrefixRegex.IsMatch(line)) return TimeRangeStartRegex.Match(line).Groups["start"].Value.Trim();
+        Match appointment = AppointmentPrefixRegex.Match(line);
+        return appointment.Success ? appointment.Groups["time"].Value.Trim() : null;
+    }
     private static string RemoveAppointmentPrefixes(string line) => AppointmentPrefixRegex.Replace(TimeRangePrefixRegex.Replace(line, ""), "").Trim();
     private static IEnumerable<string> ReconstructLines(IEnumerable<Word> words)
     {
