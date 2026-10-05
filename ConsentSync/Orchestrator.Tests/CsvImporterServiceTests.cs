@@ -185,7 +185,7 @@ public sealed class CsvImporterServiceTests : IDisposable
 
         ClinicPdfClientRecord record = Assert.Single(CsvImporterService.ReadFromCsv(french));
 
-        Assert.Equal("2020-04-03", record.DateOfBirth); Assert.Equal("2026-06-05", record.ClinicDate);
+        Assert.Equal("2020-04-03", record.DateOfBirth); Assert.Equal("2026-05-06", record.ClinicDate);
         Assert.Equal("ETS+", record.VaccineType); Assert.Equal("Clinique", record.ClinicName); Assert.Equal("08:30", record.Timeslot);
         Assert.Equal("Note", record.Comment); Assert.Equal("CDS-1", record.SdcId); Assert.Equal("Français", record.PreferredLanguage);
     }
@@ -227,6 +227,18 @@ public sealed class CsvImporterServiceTests : IDisposable
         File.WriteAllText(input, "Booking ID,Client,Date de naissance\nB-1,Name,03/04/2020\n", Encoding.UTF8);
 
         Assert.Equal("2020-03-04", Assert.Single(CsvImporterService.ReadFromCsv(input, "M/d/yyyy")).DateOfBirth);
+    }
+
+    [Fact]
+    public void ReadFromCsv_FrenchAbleAssessUsesDayFirstBirthDatesAndMonthFirstClinicDates()
+    {
+        string input = Path.Combine(_directory, "french-mixed-dates.csv");
+        File.WriteAllText(input, "ID de réservation,Client,Date de naissance,Date de la clinique\nFR-1,Personne,27/12/2025,11/02/2026\nFR-2,Ambiguë,03/04/2020,05/06/2026\n", Encoding.UTF8);
+
+        List<ClinicPdfClientRecord> records = CsvImporterService.ReadFromCsv(input);
+
+        Assert.Equal("2025-12-27", records[0].DateOfBirth); Assert.Equal("2026-11-02", records[0].ClinicDate);
+        Assert.Equal("2020-04-03", records[1].DateOfBirth); Assert.Equal("2026-05-06", records[1].ClinicDate);
     }
 
     public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }

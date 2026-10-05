@@ -55,14 +55,17 @@ public static class CsvImporterService
         InputSourceType source = isCanonical ? InputSourceType.PdfRoster : DetectSource(fieldIndexes);
         if (source == InputSourceType.PdfRoster) ValidateCanonicalHeaders(fieldIndexes);
         else ValidateAbleAssessHeaders(fieldIndexes);
-        string[] ableAssessDateFormats = source == InputSourceType.AbleAssess
-            ? GetAbleAssessDateFormats(ableAssessDateFormat, headers[fieldIndexes["DateOfBirth"]])
+        string[] dateOfBirthFormats = source == InputSourceType.AbleAssess
+            ? GetAbleAssessDateFormats(ableAssessDateFormat, headers[fieldIndexes["DateOfBirth"]], isDateOfBirth: true)
+            : [];
+        string[] clinicDateFormats = source == InputSourceType.AbleAssess
+            ? GetAbleAssessDateFormats(ableAssessDateFormat, fieldIndexes.TryGetValue("ClinicDate", out int clinicDateIndex) ? headers[clinicDateIndex] : null, isDateOfBirth: false)
             : [];
 
         var records = new List<ClinicPdfClientRecord>();
         while (csv.Read())
         {
-            try { records.Add(source == InputSourceType.AbleAssess ? ReadAbleAssess(csv, fieldIndexes, ableAssessDateFormats) : ReadCanonical(csv, fieldIndexes)); }
+            try { records.Add(source == InputSourceType.AbleAssess ? ReadAbleAssess(csv, fieldIndexes, dateOfBirthFormats, clinicDateFormats) : ReadCanonical(csv, fieldIndexes)); }
             catch (Exception ex) when (ex is not FormatException || !ex.Message.Contains("row", StringComparison.OrdinalIgnoreCase))
             { throw new FormatException($"CSV row {csv.Parser.Row}: {ex.Message}", ex); }
         }
@@ -170,22 +173,22 @@ public static class CsvImporterService
     public static bool IsSupportedAbleAssessDateFormat(string? format) =>
         !string.IsNullOrWhiteSpace(format) && SupportedAbleAssessDateFormats.Contains(format.Trim(), StringComparer.Ordinal);
 
-    private static string[] GetAbleAssessDateFormats(string? preferredFormat, string dateOfBirthHeader)
+    private static string[] GetAbleAssessDateFormats(string? preferredFormat, string? header, bool isDateOfBirth)
     {
         string format = string.IsNullOrWhiteSpace(preferredFormat)
-            ? (NormalizeHeader(dateOfBirthHeader).Contains("Date de naissance", StringComparison.OrdinalIgnoreCase) ? "d/M/yyyy" : "M/d/yyyy")
+            ? (isDateOfBirth && NormalizeHeader(header ?? string.Empty).Contains("Date de naissance", StringComparison.OrdinalIgnoreCase) ? "d/M/yyyy" : "M/d/yyyy")
             : preferredFormat.Trim();
         if (!IsSupportedAbleAssessDateFormat(format))
             throw new FormatException($"Unsupported AbleAssess date format '{format}'. Use one of: {string.Join(", ", SupportedAbleAssessDateFormats)}.");
         return [format, .. SupportedAbleAssessDateFormats.Where(candidate => !string.Equals(candidate, format, StringComparison.Ordinal))];
     }
 
-    private static ClinicPdfClientRecord ReadAbleAssess(CsvReader csv, IReadOnlyDictionary<string, int> fields, string[] dateFormats)
+    private static ClinicPdfClientRecord ReadAbleAssess(CsvReader csv, IReadOnlyDictionary<string, int> fields, string[] dateOfBirthFormats, string[] clinicDateFormats)
     {
         string dob = Get(csv, fields, "DateOfBirth");
-        DateOnly? dateOfBirth = ParseAbleAssessDate(dob, "Date of Birth", dateFormats);
+        DateOnly? dateOfBirth = ParseAbleAssessDate(dob, "Date of Birth", dateOfBirthFormats);
         string clinicDate = Get(csv, fields, "ClinicDate");
-        DateOnly? parsedClinicDate = ParseAbleAssessDate(clinicDate, "Clinic Date", dateFormats);
+        DateOnly? parsedClinicDate = ParseAbleAssessDate(clinicDate, "Clinic Date", clinicDateFormats);
         return new ClinicPdfClientRecord
         {
             ClientId = null, FullName = Get(csv, fields, "FullName").Trim(), DateOfBirth = dateOfBirth?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty,
