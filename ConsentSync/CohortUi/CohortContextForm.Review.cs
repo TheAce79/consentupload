@@ -191,7 +191,7 @@ public partial class CohortContextForm
         _retryCacheSync = MakeButton("Retry Cache Sync", () => _ = RetryCacheSyncAsync());
         _retryCacheSync.Enabled = false;
         toolbar.Controls.AddRange([_acceptMatch, _toggleExcluded, _saveReview, _retryCacheSync, _reviewFilter]);
-        _reviewFilter.Items.AddRange(["All rows", "Attention required", "Duplicate IDs", "Excluded rows"]);
+        _reviewFilter.Items.AddRange(["All rows", "Included rows", "Attention required", "Duplicate IDs", "Excluded rows"]);
         _reviewFilter.SelectedIndex = 0;
         _reviewFilter.SelectedIndexChanged += (_, _) => { _reviewGrid.EndEdit(); RefreshReviewGrid(); };
 
@@ -787,8 +787,14 @@ public partial class CohortContextForm
             }
             _review = CohortReviewService.Load(source, saved, startFresh);
             _ = PreloadCacheForReviewAsync(_review.Rows);
-            _reviewDirty = startFresh;
-            _reviewMessage.Text = startFresh ? "Fresh review started. Save Review will replace any previous saved review." : "Edit Client ID, Full Name, Date of Birth, or Medicare, or explicitly accept a suggested match.";
+            _reviewDirty = startFresh || _review.ArchivedReviewPath is not null;
+            _reviewMessage.Text = startFresh
+                ? "Fresh review started. Save Review will replace any previous saved review."
+                : _review.ArchivedReviewPath is not null
+                    ? $"Previous review was archived to { _review.ArchivedReviewPath }. {_review.RecoveryReason} This fresh review must be saved before eligibility evaluation."
+                    : "Edit Client ID, Full Name, Date of Birth, or Medicare, or explicitly accept a suggested match.";
+            if (_review.ArchivedReviewPath is not null)
+                LoggerService.LogWarning($"Saved cohort review was archived: {_review.ArchivedReviewPath}. {_review.RecoveryReason}");
         }
         catch (Exception ex)
         {
@@ -817,9 +823,10 @@ public partial class CohortContextForm
             IEnumerable<CohortReviewRow> rows = _review?.Rows ?? [];
             rows = _reviewFilter.SelectedIndex switch
             {
-                1 => rows.Where(r => r.RequiresAttention),
-                2 => rows.Where(r => r.DuplicateId),
-                3 => rows.Where(r => r.Excluded),
+                1 => rows.Where(r => !r.Excluded),
+                2 => rows.Where(r => r.RequiresAttention),
+                3 => rows.Where(r => r.DuplicateId),
+                4 => rows.Where(r => r.Excluded),
                 _ => rows
             };
             _reviewRows = new SortableBindingList<CohortReviewRow>(rows);

@@ -11,6 +11,8 @@ public sealed class CohortReviewService
     public string SourcePath { get; }
     public string ReviewPath { get; }
     public string SourceFingerprint { get; private set; }
+    public string? ArchivedReviewPath { get; private set; }
+    public string? RecoveryReason { get; private set; }
     public List<CohortReviewRow> Rows { get; }
     private List<PhisClientCacheEntity>? _lastCacheSyncCandidates;
 
@@ -30,9 +32,29 @@ public sealed class CohortReviewService
         ReviewDocument? saved = null;
         if (!startFresh && File.Exists(reviewPath))
         {
-            saved = JsonSerializer.Deserialize<ReviewDocument>(File.ReadAllText(reviewPath));
-            if (saved is null || !IsCompatibleReviewDocument(saved, review) || saved.SourceFingerprint != review.SourceFingerprint)
-                throw new InvalidDataException("Saved review does not match this source CSV or has an unsupported format. Start a fresh review explicitly to replace it.");
+            string contents = File.ReadAllText(reviewPath);
+            try
+            {
+                saved = JsonSerializer.Deserialize<ReviewDocument>(contents);
+            }
+            catch (JsonException)
+            {
+                ArchiveIncompatibleReview(review, "The saved review contains invalid JSON.");
+            }
+
+            if (saved is not null)
+            {
+                string? incompatibility = GetIncompatibilityReason(saved, review);
+                if (incompatibility is not null)
+                {
+                    ArchiveIncompatibleReview(review, incompatibility);
+                    saved = null;
+                }
+            }
+            else if (review.ArchivedReviewPath is null)
+            {
+                ArchiveIncompatibleReview(review, "The saved review is empty or has an unsupported format.");
+            }
         }
 
         string preMigrationFingerprint = review.SourceFingerprint;
@@ -56,6 +78,25 @@ public sealed class CohortReviewService
     private static bool IsCompatibleReviewDocument(ReviewDocument? saved, CohortReviewService review) =>
         saved is not null && saved.Version == 1 && saved.Rows is not null && saved.Rows.Count == review.Rows.Count &&
         !saved.Rows.Where((row, index) => row is null || row.RowNumber != index + 1).Any();
+
+    private static string? GetIncompatibilityReason(ReviewDocument saved, CohortReviewService review)
+    {
+        if (saved.Version != 1) return $"The saved review uses unsupported version {saved.Version}.";
+        if (!IsCompatibleReviewDocument(saved, review)) return "The saved review rows do not match the current CSV.";
+        if (!string.Equals(saved.SourceFingerprint, review.SourceFingerprint, StringComparison.Ordinal))
+            return "The saved review belongs to a different version of the source CSV.";
+        return null;
+    }
+
+    private static void ArchiveIncompatibleReview(CohortReviewService review, string reason)
+    {
+        string directory = Path.GetDirectoryName(review.ReviewPath) ?? throw new ArgumentException("The review path must include a directory.", nameof(review));
+        string archivePath = Path.Combine(directory,
+            $"{Path.GetFileName(review.ReviewPath)}.{DateTime.UtcNow:yyyyMMddHHmmssfff}.{Guid.NewGuid():N}.bak");
+        File.Move(review.ReviewPath, archivePath);
+        review.ArchivedReviewPath = archivePath;
+        review.RecoveryReason = reason;
+    }
 
     private static void ApplySavedReview(CohortReviewService review, ReviewDocument saved)
     {

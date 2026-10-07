@@ -107,19 +107,19 @@ public sealed class CohortReviewServiceTests : IDisposable
     }
 
     [Fact]
-    public void ChangedSource_BlocksRestoreAndSaveUntilExplicitFreshReview()
+    public void ChangedSource_ArchivesSavedReviewAndStartsFreshWhileExistingReviewStillCannotSave()
     {
         var review = CohortReviewService.Load(SourcePath, ReviewPath);
         review.Rows[0].Excluded = true;
         review.Save();
         string saved = File.ReadAllText(ReviewPath);
         File.AppendAllText(SourcePath, Environment.NewLine);
-        Assert.Throws<InvalidDataException>(() => CohortReviewService.Load(SourcePath, ReviewPath));
         Assert.Throws<InvalidDataException>(() => review.Save());
-        Assert.Equal(saved, File.ReadAllText(ReviewPath));
-        var fresh = CohortReviewService.Load(SourcePath, ReviewPath, startFresh: true);
+        var fresh = CohortReviewService.Load(SourcePath, ReviewPath);
         Assert.False(fresh.Rows[0].Excluded);
-        Assert.Equal(saved, File.ReadAllText(ReviewPath));
+        Assert.False(File.Exists(ReviewPath));
+        Assert.Equal(saved, File.ReadAllText(fresh.ArchivedReviewPath!));
+        Assert.Contains("different version", fresh.RecoveryReason!);
         fresh.Save();
         Assert.False(CohortReviewService.Load(SourcePath, ReviewPath).Rows[0].Excluded);
     }
@@ -289,14 +289,74 @@ public sealed class CohortReviewServiceTests : IDisposable
     }
 
     [Fact]
-    public void InvalidRowOrder_IsRejectedWithoutOverwritingSavedWork()
+    public void InvalidRowOrder_IsArchivedAndStartsFresh()
     {
         var review = CohortReviewService.Load(SourcePath, ReviewPath);
         review.Save();
         string invalid = File.ReadAllText(ReviewPath).Replace("\"RowNumber\": 1", "\"RowNumber\": 9");
         File.WriteAllText(ReviewPath, invalid);
-        Assert.Throws<InvalidDataException>(() => CohortReviewService.Load(SourcePath, ReviewPath));
-        Assert.Equal(invalid, File.ReadAllText(ReviewPath));
+        var recovered = CohortReviewService.Load(SourcePath, ReviewPath);
+        Assert.False(File.Exists(ReviewPath));
+        Assert.Equal(invalid, File.ReadAllText(recovered.ArchivedReviewPath!));
+        Assert.Contains("rows do not match", recovered.RecoveryReason!);
+        Assert.All(recovered.Rows, row => Assert.False(row.Excluded));
+    }
+
+    [Fact]
+    public void UnsupportedVersion_IsArchivedAndStartsFresh()
+    {
+        string contents = JsonSerializer.Serialize(new CohortReviewService.ReviewDocument
+        {
+            Version = 2,
+            SourceFingerprint = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(SourcePath))),
+            Rows = [new() { RowNumber = 1, Excluded = true }, new() { RowNumber = 2 }]
+        });
+        File.WriteAllText(ReviewPath, contents);
+
+        var recovered = CohortReviewService.Load(SourcePath, ReviewPath);
+
+        Assert.Equal(contents, File.ReadAllText(recovered.ArchivedReviewPath!));
+        Assert.Contains("unsupported version", recovered.RecoveryReason!);
+        Assert.All(recovered.Rows, row => Assert.False(row.Excluded));
+    }
+
+    [Fact]
+    public void MalformedReview_IsArchivedAndStartsFresh()
+    {
+        const string contents = "{ this is not JSON";
+        File.WriteAllText(ReviewPath, contents);
+
+        var recovered = CohortReviewService.Load(SourcePath, ReviewPath);
+
+        Assert.Equal(contents, File.ReadAllText(recovered.ArchivedReviewPath!));
+        Assert.Contains("invalid JSON", recovered.RecoveryReason!);
+        Assert.All(recovered.Rows, row => Assert.False(row.Excluded));
+    }
+
+    [Fact]
+    public void IncompatibleReviews_AreArchivedToUniquePaths()
+    {
+        File.WriteAllText(ReviewPath, "not JSON");
+        string first = CohortReviewService.Load(SourcePath, ReviewPath).ArchivedReviewPath!;
+        File.WriteAllText(ReviewPath, "still not JSON");
+        string second = CohortReviewService.Load(SourcePath, ReviewPath).ArchivedReviewPath!;
+
+        Assert.NotEqual(first, second);
+        Assert.True(File.Exists(first));
+        Assert.True(File.Exists(second));
+    }
+
+    [Fact]
+    public void ArchiveFailure_LeavesSavedReviewInPlace()
+    {
+        const string contents = "not JSON";
+        File.WriteAllText(ReviewPath, contents);
+        using var lockHandle = File.Open(ReviewPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        Assert.Throws<IOException>(() => CohortReviewService.Load(SourcePath, ReviewPath));
+
+        Assert.True(File.Exists(ReviewPath));
+        Assert.Equal(contents, File.ReadAllText(ReviewPath));
     }
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
