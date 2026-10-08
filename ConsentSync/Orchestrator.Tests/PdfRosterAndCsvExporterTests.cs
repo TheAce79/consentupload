@@ -227,6 +227,33 @@ public sealed class PdfRosterAndCsvExporterTests : IDisposable
     }
 
     [Fact]
+    public void ClinicalCohortExport_WritesRecipientSchemaAndFormatsValues()
+    {
+        string outputPath = Path.Combine(_directory, "clinical.csv");
+
+        ClinicalCohortCsvExporterService.SaveToCsv([
+            new ClinicalCohortExportRow("123", "DOE, JANE", "2026-10-13", "2020/02/03", "08:30", "12 Month Appointment",
+                EligibilityStatus.Ineligible, "Dose interval < 180 days, review required."),
+            new ClinicalCohortExportRow("456", "PHIS only", null, null, null, null, null, null)
+        ], outputPath);
+
+        string[] lines = File.ReadAllLines(outputPath, Encoding.UTF8);
+        Assert.Equal("\"Client_ID\",\"Full Name\",\"Clinic Date\",\"Date of birth\",\"Time Slot\",\"Vaccine type\",\"Status\",\"Evaluation Reason\"", lines[0]);
+        Assert.Equal("\"123\",\"DOE, JANE\",\"2026/10/13\",\"2020/02/03\",\"8:30 AM\",\"12 Month Appointment\",\"Ineligible\",\"Dose interval < 180 days, review required.\"", lines[1]);
+        Assert.Equal("\"456\",\"PHIS only\",\"\",\"\",\"\",\"\",\"\",\"\"", lines[2]);
+    }
+
+    [Fact]
+    public void ClinicalCohortExport_WritesHeaderWhenNoRowsAreVisible()
+    {
+        string outputPath = Path.Combine(_directory, "clinical-empty.csv");
+
+        ClinicalCohortCsvExporterService.SaveToCsv([], outputPath);
+
+        Assert.Single(File.ReadAllLines(outputPath, Encoding.UTF8));
+    }
+
+    [Fact]
     public void SaveToCsv_AlwaysWritesClinicDateAndRoundTripsBothCanonicalHeaders()
     {
         string outputPath = Path.Combine(_directory, "clinic-date.csv");

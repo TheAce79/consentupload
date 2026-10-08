@@ -14,6 +14,7 @@ using ConsentSyncCore.Services.Phis;
 using ConsentSyncCore.Services;
 using IWebDriver = OpenQA.Selenium.IWebDriver;
 using ConsentSync.Ui;
+using Microsoft.Extensions.Configuration;
 
 namespace CohortUi;
 
@@ -93,6 +94,7 @@ public partial class CohortContextForm
     private List<CohortReviewRow> _eligibilityCohortRows = [];
     private IReadOnlyDictionary<string, ClientImmunizationHistory> _eligibilityHistories = new Dictionary<string, ClientImmunizationHistory>(StringComparer.OrdinalIgnoreCase);
     private bool _updatingEligibilityVaccine;
+    private bool _hasEligibilityEvaluation;
     private readonly Dictionary<EligibilityHistoryPreviewRow, string> _eligibilityVaccineValuesBeforeEdit = [];
     private readonly Dictionary<CohortReviewRow, string> _pendingVaccineOverrides = [];
     private bool _hasUnsavedVaccineOverrides;
@@ -682,6 +684,7 @@ public partial class CohortContextForm
             _eligibilityPreviewRows = preview.Rows.ToList();
             _eligibilityCohortRows = review.Rows.Where(row => !row.Excluded).ToList();
             _eligibilityHistories = histories;
+            _hasEligibilityEvaluation = true;
             PopulateEligibilityFilters();
             ApplyGridFilters();
             _eligibilityWarning.Text = preview.Warnings.Count == 0 ? string.Empty : string.Join(Environment.NewLine, preview.Warnings);
@@ -729,37 +732,104 @@ public partial class CohortContextForm
     {
         if (_formBusy || !TryGetSavedClientListName(out string clientListName)) return;
 
+        if (!_eligibilityGrid.EndEdit())
+        {
+            MessageBox.Show(this, "Finish or correct the active eligibility cell before exporting.", "Export Final Cohort CSV", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!_hasEligibilityEvaluation)
+        {
+            DialogResult choice = MessageBox.Show(this,
+                "Eligibility has not been evaluated. Would you like to evaluate it now before exporting?",
+                "Evaluate Eligibility", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (choice != DialogResult.Yes || !await EvaluateEligibilityAsync()) return;
+        }
+
         if (_hasUnsavedVaccineOverrides)
         {
+            var filters = CaptureEligibilityFilters();
             DialogResult choice = PromptForPendingVaccineOverrides();
             if (choice != DialogResult.Yes) return;
             if (!await EvaluateEligibilityAsync()) return;
+            RestoreEligibilityFilters(filters);
         }
 
         try
         {
-            string csvPath = CohortWorkspaceService.GetStandardizedOutputCsvPath(ConfigurationService.GetConfiguration(), clientListName);
-            if (!File.Exists(csvPath))
-            {
-                MessageBox.Show(this, $"The cohort CSV was not found:\n{csvPath}", "Export Final Cohort CSV", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            var explorer = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
-            explorer.ArgumentList.Add($"/select,{csvPath}");
-            Process.Start(explorer);
-            _eligibilityMessage.Text = $"Final cohort CSV: {csvPath}";
+            List<EligibilityHistoryPreviewRow> visibleRows = _eligibilityGrid.Rows.Cast<DataGridViewRow>()
+                .Where(row => row.Visible)
+                .Select(row => row.DataBoundItem)
+                .OfType<EligibilityHistoryPreviewRow>()
+                .ToList();
+            string csvPath = GetClinicalCohortExportPath(ConfigurationService.GetConfiguration(), clientListName);
+            ClinicalCohortCsvExporterService.SaveToCsv(CreateClinicalCohortExportRows(visibleRows), csvPath);
+            LoggerService.LogInformation($"Exported {visibleRows.Count} filtered clinical cohort row(s): {csvPath}");
+            _eligibilityMessage.Text = $"Clinical cohort export ({visibleRows.Count} row(s)): {csvPath}";
         }
         catch (Exception ex)
         {
-            LoggerService.LogError("Could not reveal the final cohort CSV.", ex);
-            MessageBox.Show(this, $"Could not reveal the final cohort CSV.\n\n{ex.Message}", "Export Final Cohort CSV", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            LoggerService.LogError("Could not export the clinical cohort CSV.", ex);
+            MessageBox.Show(this, $"Could not export the clinical cohort CSV.\n\n{ex.Message}", "Export Final Cohort CSV", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    private string GetClinicalCohortExportPath(IConfiguration config, string clientListName)
+    {
+        string outputDirectory = Path.GetDirectoryName(CohortWorkspaceService.GetStandardizedOutputCsvPath(config, clientListName))
+            ?? throw new InvalidOperationException("The cohort output directory could not be resolved.");
+        string status = cmb_FilterStatus.SelectedItem?.ToString() ?? "[All Statuses]";
+        string suffix = status switch
+        {
+            "Ineligible" => "_Ineligible",
+            "Manual Review" => "_ManualReview",
+            "Eligible" => "_Eligible",
+            _ => string.Empty
+        };
+        return Path.Combine(outputDirectory, $"{clientListName}{suffix}_Clinical_Cohort.csv");
+    }
+
+    private IEnumerable<ClinicalCohortExportRow> CreateClinicalCohortExportRows(IEnumerable<EligibilityHistoryPreviewRow> previewRows)
+    {
+        var reviewRowsByClientId = _eligibilityCohortRows
+            .Where(row => !string.IsNullOrWhiteSpace(row.ClientId))
+            .GroupBy(row => row.ClientId.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        return previewRows.Select(row =>
+        {
+            reviewRowsByClientId.TryGetValue(row.ClientId.Trim(), out CohortReviewRow? reviewRow);
+            string? clinicDate = reviewRow?.Source.ClinicDate;
+            if (reviewRow is not null && string.IsNullOrWhiteSpace(clinicDate) && _activeContext is not null)
+                clinicDate = _activeContext.CohortDate.ToString("yyyy/MM/dd", System.Globalization.CultureInfo.InvariantCulture);
+            return new ClinicalCohortExportRow(row.ClientId, row.FullName, clinicDate, row.DateOfBirth, row.Timeslot,
+                row.VaccineType, row.Status, row.EvaluationReason);
+        });
     }
 
     private DialogResult PromptForPendingVaccineOverrides() => MessageBox.Show(this,
         "You have modified vaccine types that have not been re-evaluated or saved to CSV. Would you like to save and evaluate now?",
         "Unsaved Vaccine Type Changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+
+    private (string VaccineType, string Status, string Timeslot) CaptureEligibilityFilters() =>
+        (cmb_FilterVaccineType.SelectedItem?.ToString() ?? "[All Vaccine Types]",
+         cmb_FilterStatus.SelectedItem?.ToString() ?? "[All Statuses]",
+         cmb_FilterTimeslot.SelectedItem?.ToString() ?? AllTimeslotsFilter);
+
+    private void RestoreEligibilityFilters((string VaccineType, string Status, string Timeslot) filters)
+    {
+        _bindingEligibilityFilters = true;
+        try
+        {
+            cmb_FilterVaccineType.SelectedItem = cmb_FilterVaccineType.Items.Contains(filters.VaccineType) ? filters.VaccineType : "[All Vaccine Types]";
+            cmb_FilterStatus.SelectedItem = cmb_FilterStatus.Items.Contains(filters.Status) ? filters.Status : "[All Statuses]";
+            cmb_FilterTimeslot.SelectedItem = cmb_FilterTimeslot.Items.Contains(filters.Timeslot) ? filters.Timeslot : AllTimeslotsFilter;
+        }
+        finally
+        {
+            _bindingEligibilityFilters = false;
+        }
+        ApplyGridFilters();
+    }
 
     private async void WorkflowTabs_Selecting(object? sender, TabControlCancelEventArgs e)
     {
@@ -1146,6 +1216,7 @@ public partial class CohortContextForm
     private void ResetEligibilityPreview()
     {
         ResetEligibilityFilters();
+        _hasEligibilityEvaluation = false;
         _pendingVaccineOverrides.Clear();
         _hasUnsavedVaccineOverrides = false;
         UpdateEligibilityPendingState();
