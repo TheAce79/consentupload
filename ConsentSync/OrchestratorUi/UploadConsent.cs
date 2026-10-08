@@ -18,6 +18,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Globalization;
+using System.Diagnostics;
 using static Orchestrator.BulkPdfExtraction;
 using static Orchestrator.Phase1.Phase1Orchestrator;
 using static Orchestrator.Phase3.Phase3Orchestrator;
@@ -944,6 +945,46 @@ namespace OrchestratorUi
             folderBrowserDialog1.UseDescriptionForTitle = true;
             if (folderBrowserDialog1.ShowDialog() == DialogResult.OK)
                 txt_BaseDir.Text = folderBrowserDialog1.SelectedPath;
+        }
+
+        private void btn_OpenSchoolWorkspace_Click(object sender, EventArgs e)
+            => OpenSchoolWorkspace();
+
+        private void btn_OpenCsvWorkspace_Click(object sender, EventArgs e)
+            => OpenSchoolWorkspace("Csv");
+
+        private void btn_OpenProcessedCsvWorkspace_Click(object sender, EventArgs e)
+            => OpenSchoolWorkspace("Csv", "2_Output Csv", "1 Processed Csv");
+
+        private void btn_OpenPhisUploadWorkspace_Click(object sender, EventArgs e)
+            => OpenSchoolWorkspace("Phis", "1_To_Upload");
+
+        private void OpenSchoolWorkspace(params string[] relativePath)
+        {
+            string baseDirectory = txt_BaseDir.Text.Trim();
+            string schoolName = txt_SchoolName.Text.Trim();
+            string grade = cb_Grade.SelectedItem?.ToString()?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(baseDirectory) || string.IsNullOrWhiteSpace(schoolName) || string.IsNullOrWhiteSpace(grade))
+            {
+                MessageBox.Show(this, "Enter a Base Directory, School Name, and Grade before opening the workspace.",
+                    "School Workspace", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                string schoolWorkspace = Path.GetFullPath(Path.Combine(baseDirectory, schoolName, $"Grade {grade}"));
+                foreach (string segment in relativePath) schoolWorkspace = Path.Combine(schoolWorkspace, segment);
+                Directory.CreateDirectory(schoolWorkspace);
+                Process.Start(new ProcessStartInfo { FileName = schoolWorkspace, UseShellExecute = true });
+                LoggerService.LogInformation($"Opened school workspace: {schoolWorkspace}");
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogError("Could not open the school workspace.", ex);
+                MessageBox.Show(this, $"Could not open the school workspace.\n\n{ex.Message}",
+                    "School Workspace", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
 

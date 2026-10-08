@@ -310,13 +310,20 @@ namespace Orchestrator.Phase3
 
             // E: Check if document already exists
             LoggerService.LogInformation($"\n🔍 STEP E: Checking for existing document '{record.DocumentTitle}'...");
-            if (await _phisSearchService.CheckIfDocumentExistsAsync(record.DocumentTitle))
+            PhisDocumentLookupResult existingDocument =
+                await _phisSearchService.CheckIfDocumentExistsDetailedAsync(record.DocumentTitle);
+            if (existingDocument.Status == PhisDocumentLookupStatus.Found)
             {
                 LoggerService.LogInformation("   ✅ Document already exists — marking Success");
                 record.VerifStatus = UploadVerificationStatus.Success;
                 record.FailureReason = string.Empty;
                 await _phisSearchService.NavigateBackToSearchPagesAsync();
                 return true;
+            }
+            if (existingDocument.Status == PhisDocumentLookupStatus.Error)
+            {
+                SetFailure(record, existingDocument.ErrorMessage ?? "Could not inspect the PHIS document list reliably");
+                return false;
             }
             LoggerService.LogInformation("   ℹ️  Document not found — upload required");
 
@@ -340,9 +347,14 @@ namespace Orchestrator.Phase3
                 return false;
             }
 
-            if (!await _phisSearchService.UploadDocumentAsync(pdfPath, record.DocumentTitle, record.Description))
+            PhisDocumentUploadResult uploadResult = await _phisSearchService.UploadDocumentAsync(
+                pdfPath,
+                record.DocumentTitle,
+                record.Description,
+                isContextDocument: false);
+            if (!uploadResult.IsConfirmed)
             {
-                SetFailure(record, "Document upload failed (PHIS returned an error)");
+                SetFailure(record, uploadResult.Detail ?? "Document upload could not be confirmed in PHIS");
                 try { await _phisSearchService.NavigateBackToSearchPagesAsync(); } catch { }
                 return false;
             }
@@ -393,7 +405,9 @@ namespace Orchestrator.Phase3
             LoggerService.LogInformation("   ✅ On Context Documents page");
 
             // ── D: Check if document already exists ───────────────────────────
-            if (await _phisSearchService.CheckIfContextDocumentExistsAsync(record.DocumentTitle))
+            PhisDocumentLookupResult existingDocument =
+                await _phisSearchService.CheckIfContextDocumentExistsDetailedAsync(record.DocumentTitle);
+            if (existingDocument.Status == PhisDocumentLookupStatus.Found)
             {
                 LoggerService.LogInformation(
                     "   ✅ Document already exists on PHIS — marking Success");
@@ -401,6 +415,11 @@ namespace Orchestrator.Phase3
                 record.FailureReason = string.Empty;
                 await _phisSearchService.NavigateBackToSearchPagesAsync();
                 return true;
+            }
+            if (existingDocument.Status == PhisDocumentLookupStatus.Error)
+            {
+                SetFailure(record, existingDocument.ErrorMessage ?? "Could not inspect the PHIS document list reliably");
+                return false;
             }
 
             // ── E: Click Add New ──────────────────────────────────────────────
@@ -415,12 +434,13 @@ namespace Orchestrator.Phase3
             // UploadDocumentAsync targets addNewDocumentForm — same form IDs
             // used by both Context Documents and Consent Directives upload.
             LoggerService.LogInformation("\n📎 STEP F: Uploading FileRose document...");
-            bool success = await _phisSearchService.UploadDocumentAsync(
+            PhisDocumentUploadResult uploadResult = await _phisSearchService.UploadDocumentAsync(
                 pdfPath,
                 record.DocumentTitle,
-                record.Description);
+                record.Description,
+                isContextDocument: true);
 
-            if (success)
+            if (uploadResult.IsConfirmed)
             {
                 record.VerifStatus = UploadVerificationStatus.Success;
                 record.FailureReason = string.Empty;
@@ -431,11 +451,11 @@ namespace Orchestrator.Phase3
             }
             else
             {
-                SetFailure(record, "FileRose upload failed (PHIS returned an error)");
+                SetFailure(record, uploadResult.Detail ?? "FileRose upload could not be confirmed in PHIS");
             }
 
             await _phisSearchService.NavigateBackToSearchPagesAsync();
-            return success;
+            return uploadResult.IsConfirmed;
         }
 
         // ── Shared helpers ────────────────────────────────────────────────────

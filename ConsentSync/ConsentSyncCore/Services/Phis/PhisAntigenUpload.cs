@@ -9,6 +9,36 @@ using System.Threading.Tasks;
 
 namespace ConsentSyncCore.Services.Phis
 {
+    public enum PhisDocumentUploadStatus
+    {
+        Confirmed,
+        RetryableFailure,
+        SubmittedButUnconfirmed
+    }
+
+    public sealed class PhisDocumentUploadResult
+    {
+        public PhisDocumentUploadStatus Status { get; }
+        public string? Detail { get; }
+        public bool IsConfirmed => Status == PhisDocumentUploadStatus.Confirmed;
+        public bool CanRetry => Status == PhisDocumentUploadStatus.RetryableFailure;
+
+        private PhisDocumentUploadResult(PhisDocumentUploadStatus status, string? detail = null)
+        {
+            Status = status;
+            Detail = detail;
+        }
+
+        public static PhisDocumentUploadResult Confirmed() =>
+            new(PhisDocumentUploadStatus.Confirmed);
+
+        public static PhisDocumentUploadResult RetryableFailure(string detail) =>
+            new(PhisDocumentUploadStatus.RetryableFailure, detail);
+
+        public static PhisDocumentUploadResult SubmittedButUnconfirmed(string detail) =>
+            new(PhisDocumentUploadStatus.SubmittedButUnconfirmed, detail);
+    }
+
     public partial class PhisSearchService
     {
 
@@ -348,7 +378,11 @@ namespace ConsentSyncCore.Services.Phis
         }
 
 
-        public async Task<bool> UploadDocumentAsync(string pdfPath, string documentTitle, string description)
+        public async Task<PhisDocumentUploadResult> UploadDocumentAsync(
+            string pdfPath,
+            string documentTitle,
+            string description,
+            bool isContextDocument)
         {
             const int maxAttempts = 2;
 
@@ -373,28 +407,30 @@ namespace ConsentSyncCore.Services.Phis
                     catch (Exception ex)
                     {
                         LoggerService.LogWarning($"   ⚠️  Could not navigate to fresh page: {ex.Message}");
-                        return false;
+                        return PhisDocumentUploadResult.RetryableFailure(
+                            $"Could not reset the PHIS upload page: {ex.Message}");
                     }
                 }
 
-                bool result = await TryUploadOnceAsync(pdfPath, documentTitle, description, attempt, maxAttempts);
+                PhisDocumentUploadResult result = await TryUploadOnceAsync(
+                    pdfPath, documentTitle, description, isContextDocument, attempt, maxAttempts);
 
-                if (result)
-                    return true;
+                if (result.IsConfirmed || !result.CanRetry)
+                    return result;
 
                 if (attempt == maxAttempts)
                 {
                     LoggerService.LogWarning(
                         $"   ❌ All {maxAttempts} upload attempt(s) failed for '{documentTitle}'.\n" +
-                        "      VerifStatus stays NotProcessed — re-run Phase 3 to continue.");
-                    return false;
+                        "      Phase 3 will record the failure and retain the PDF.");
+                    return result;
                 }
 
                 // Small cooldown before retry
                 await Task.Delay(1500);
             }
 
-            return false;
+            return PhisDocumentUploadResult.RetryableFailure("Document upload did not start.");
         }
 
 
@@ -402,11 +438,12 @@ namespace ConsentSyncCore.Services.Phis
         /// <summary>
         /// Single upload attempt. Called by UploadDocumentAsync — do not call directly.
         /// </summary>
-        private async Task<bool> TryUploadOnceAsync(
-             string pdfPath, string documentTitle, string description,
+        private async Task<PhisDocumentUploadResult> TryUploadOnceAsync(
+             string pdfPath, string documentTitle, string description, bool isContextDocument,
              int attempt, int maxAttempts)
         {
             string attemptLabel = maxAttempts > 1 ? $" (attempt {attempt}/{maxAttempts})" : string.Empty;
+            bool submitClicked = false;
 
             try
             {
@@ -419,7 +456,7 @@ namespace ConsentSyncCore.Services.Phis
                 if (!File.Exists(pdfPath))
                 {
                     LoggerService.LogWarning($"   ❌ PDF file not found: {pdfPath}");
-                    return false;
+                    return PhisDocumentUploadResult.RetryableFailure("PDF file was not found.");
                 }
 
                 // ✅ ENHANCEMENT 3: Detect file lock (e.g. archiving still in progress)
@@ -432,7 +469,7 @@ namespace ConsentSyncCore.Services.Phis
                     LoggerService.LogWarning(
                         $"   ❌ PDF is locked by another process: {Path.GetFileName(pdfPath)}\n" +
                         "      Skipping — record stays NotProcessed for retry.");
-                    return false;
+                    return PhisDocumentUploadResult.RetryableFailure("PDF is locked by another process.");
                 }
 
                 // ✅ ENHANCEMENT 1: Verify session is alive before touching the form
@@ -440,7 +477,7 @@ namespace ConsentSyncCore.Services.Phis
                 {
                     LoggerService.LogWarning(
                         $"   ❌ PHIS session expired before upload{attemptLabel} — stopping.");
-                    return false;
+                    return PhisDocumentUploadResult.RetryableFailure("PHIS session expired before upload.");
                 }
 
                 IJavaScriptExecutor js = (IJavaScriptExecutor)_driver;
@@ -502,7 +539,7 @@ namespace ConsentSyncCore.Services.Phis
                         LoggerService.LogWarning(
                             $"   ❌ Server rejected file upload{attemptLabel} — PHIS error: {errorText}\n" +
                             "      Stale PrimeFaces component detected (invalid java.util.List).");
-                        return false;
+                        return PhisDocumentUploadResult.RetryableFailure($"PHIS rejected the file upload: {errorText}");
                     }
 
                     LoggerService.LogWarning(
@@ -564,64 +601,68 @@ namespace ConsentSyncCore.Services.Phis
                 var submitButton = _driver.FindElement(By.Id(submitBtnId));
                 js.ExecuteScript("disableFileUpload();");
                 js.ExecuteScript("arguments[0].click();", submitButton);
+                submitClicked = true;
                 LoggerService.LogInformation($"   ✅ Submit button clicked");
 
-                // ── STEP 7: Verify success ────────────────────────────────────
+                // ── STEP 7: Verify the exact submitted title in the correct list ─
                 await Task.Delay(_phisConfig.PageLoadDelayMs * 2);
 
-                try
+                PhisDocumentUploadResult confirmation = await ConfirmSubmittedDocumentAsync(
+                    documentTitle, isContextDocument);
+                if (confirmation.IsConfirmed)
                 {
-                    _wait.Until(d =>
-                    {
-                        var listLinks = d.FindElements(By.XPath("//a[contains(@id,'viewtitleLink')]"));
-                        if (listLinks.Count > 0) return true;
-
-                        var errorMessages = d.FindElements(
-                            By.CssSelector(".errorMessage, .sysMessages .errorMessage"));
-                        return errorMessages.Count == 0 && d.Title.Contains("Panorama");
-                    });
-
-                    LoggerService.LogInformation($"   ✅ Document submitted successfully{attemptLabel}!");
+                    LoggerService.LogInformation($"   ✅ Document submitted and confirmed in PHIS{attemptLabel}!");
                     _sessionManager.UpdateActivity();
-                    return true;
                 }
-                catch (WebDriverTimeoutException)
-                {
-                    var errors = _driver.FindElements(By.CssSelector(".errorMessage"));
-                    if (errors.Count > 0)
-                    {
-                        var errorText = string.Join("; ",
-                            errors.Select(e => e.Text.Trim()).Where(t => !string.IsNullOrEmpty(t)));
-                        LoggerService.LogWarning($"   ❌ Submit failed{attemptLabel} – page errors: {errorText}");
-                        return false;
-                    }
 
-                    // ✅ ENHANCEMENT 4: Submit verification timed out but no error shown.
-                    //    PHIS sometimes accepts silently without redirecting (partial page update).
-                    //    Confirm by checking the document list directly.
-                    LoggerService.LogWarning(
-                        $"   ⚠️  Submit verification timed out{attemptLabel} — checking document list to confirm...");
-
-                    bool confirmedViaList = await CheckIfDocumentExistsAsync(documentTitle);
-                    if (confirmedViaList)
-                    {
-                        LoggerService.LogInformation(
-                            $"   ✅ Document confirmed in PHIS document list — upload successful.");
-                        _sessionManager.UpdateActivity();
-                        return true;
-                    }
-
-                    LoggerService.LogWarning(
-                        "   ⚠️  Document NOT found in list after timeout — treating as failure for safety.");
-                    return false;
-                }
+                return confirmation;
             }
             catch (Exception ex)
             {
                 LoggerService.LogWarning($"   ❌ Upload error{attemptLabel}: {ex.Message}");
                 LoggerService.LogWarning($"      Stack: {ex.StackTrace}");
-                return false;
+                return submitClicked
+                    ? PhisDocumentUploadResult.SubmittedButUnconfirmed(
+                        $"Submit was clicked, but PHIS could not confirm the document: {ex.Message}")
+                    : PhisDocumentUploadResult.RetryableFailure($"Upload error: {ex.Message}");
             }
+        }
+
+        private async Task<PhisDocumentUploadResult> ConfirmSubmittedDocumentAsync(
+            string documentTitle,
+            bool isContextDocument)
+        {
+            PhisDocumentLookupResult? lastLookup = null;
+
+            // PHIS can take a short time to refresh the document list after Submit.
+            // These checks never submit again; they only decide whether archiving is safe.
+            for (int inspection = 1; inspection <= 2; inspection++)
+            {
+                lastLookup = isContextDocument
+                    ? await CheckIfContextDocumentExistsDetailedAsync(documentTitle)
+                    : await CheckIfDocumentExistsDetailedAsync(documentTitle);
+
+                if (lastLookup.Status == PhisDocumentLookupStatus.Found)
+                    return PhisDocumentUploadResult.Confirmed();
+
+                if (inspection == 1)
+                    await Task.Delay(_phisConfig.PageLoadDelayMs);
+            }
+
+            if (lastLookup?.Status == PhisDocumentLookupStatus.NotFound)
+            {
+                LoggerService.LogWarning(
+                    $"   ⚠️  Submitted title '{documentTitle}' was not found in the PHIS document list.");
+                return PhisDocumentUploadResult.SubmittedButUnconfirmed(
+                    "Submit was clicked, but the submitted document title was not found in the PHIS document list. " +
+                    "The PDF was retained for inspection; use Verify Documents on PHIS before retrying.");
+            }
+
+            string reason = lastLookup?.ErrorMessage ?? "The PHIS document list could not be inspected reliably.";
+            LoggerService.LogWarning($"   ⚠️  PHIS document-list confirmation failed: {reason}");
+            return PhisDocumentUploadResult.SubmittedButUnconfirmed(
+                $"Submit was clicked, but PHIS document-list confirmation was unreliable: {reason} " +
+                "The PDF was retained for inspection; use Verify Documents on PHIS before retrying.");
         }
 
 

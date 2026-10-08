@@ -171,9 +171,6 @@ Generate Upload CSV, or to add them later.</value>
   <data name="txt_ExpectedFileRoseCount.ToolTip" xml:space="preserve">
     <value>Enter the number of physical FileRose forms identified in the original school batch. Each scanned FileRose PDF page represents one physical FileRose form; multiple pages in one PDF are separate forms merged before upload.</value>
   </data>
-  <data name="btn_VerifyDocumentsOnPhis.ToolTip" xml:space="preserve">
-    <value>Confirms that eligible Verification_Upload.csv document titles are currently present on PHIS. This read-only verification does not upload, archive, or modify CSV files.</value>
-  </data>
   <metadata name="folderBrowserDialog1.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>133, 17</value>
   </metadata>
