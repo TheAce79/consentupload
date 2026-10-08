@@ -52,8 +52,22 @@ public static class PhisAdminSummary
     {
         if (clients is null) return string.Empty;
         List<PhisUploadClient> rows = GetClients(clients);
-        return $"{Environment.NewLine}Clients (Sorted by Timeslot):{Environment.NewLine}" +
-               string.Concat(rows.Select(client => $"{AppointmentTime.Display(client.Timeslot)} | {client.ClientId} | {client.FullName}{Environment.NewLine}"));
+        var text = new System.Text.StringBuilder()
+            .Append(Environment.NewLine)
+            .AppendLine("Clients (Sorted by Timeslot):");
+        bool firstUnscheduled = true;
+        foreach (PhisUploadClient client in rows)
+        {
+            if (firstUnscheduled && !AppointmentTime.TryParse(client.Timeslot, out _))
+            {
+                text.AppendLine();
+                firstUnscheduled = false;
+            }
+
+            text.AppendLine($"{AppointmentTime.Display(client.Timeslot)} | {client.ClientId} | {client.FullName}");
+        }
+
+        return text.ToString();
     }
 
     private static List<PhisUploadClient> GetClients(IEnumerable<PhisUploadClient>? clients)
@@ -76,8 +90,8 @@ public static class PhisAdminSummary
     private static string FormatChanges(PhisUploadComparison comparison)
     {
         string heading = comparison.IsInitialUpload ? "Initial upload — no previous snapshot available" : "Added since previous successful upload";
-        string added = $"{heading}: {comparison.Added.Count}{Environment.NewLine}" + string.Concat(comparison.Added.Select(x => $"{x.ClientId} | {x.FullName}{Environment.NewLine}"));
+        string added = $"{Environment.NewLine}{heading}: {comparison.Added.Count}{Environment.NewLine}" + string.Concat(comparison.Added.Select(x => $"{x.ClientId} | {x.FullName}{Environment.NewLine}"));
         if (comparison.IsInitialUpload) return added;
-        return added + $"No longer in current payload: {comparison.Removed.Count}{Environment.NewLine}" + string.Concat(comparison.Removed.Select(x => $"{x.ClientId} | {x.FullName}{Environment.NewLine}"));
+        return added + $"{Environment.NewLine}No longer in current payload: {comparison.Removed.Count}{Environment.NewLine}" + string.Concat(comparison.Removed.Select(x => $"{x.ClientId} | {x.FullName}{Environment.NewLine}"));
     }
 }

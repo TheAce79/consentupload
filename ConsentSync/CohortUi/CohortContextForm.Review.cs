@@ -72,6 +72,7 @@ public partial class CohortContextForm
     private CohortReviewRow? _currentReviewRowBeforeSort;
     private string? _currentReviewColumnBeforeSort;
     private readonly ComboBox _reviewFilter = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
+    private readonly ComboBox _reviewTimeslotFilter = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, Enabled = false };
     private readonly Label _reviewSummary = new() { AutoSize = true, Padding = new Padding(4) };
     private readonly Label _reviewMessage = new() { AutoSize = true, Padding = new Padding(4), MaximumSize = new Size(950, 0) };
     private readonly Label _eligibilityMessage = new() { AutoSize = true, MaximumSize = new Size(1040, 0), Text = "Parse GNB2009 history from 3.Criteria and evaluate administrative eligibility." };
@@ -79,6 +80,7 @@ public partial class CohortContextForm
     private readonly Label _eligibilitySummary = new() { AutoSize = true, Padding = new Padding(4), Text = "Total Cohort: 0 | Eligible: 0 | Ineligible: 0 | Manual Review: 0" };
     private readonly ComboBox cmb_FilterVaccineType = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220, Enabled = false };
     private readonly ComboBox cmb_FilterStatus = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160, Enabled = false };
+    private readonly ComboBox cmb_FilterTimeslot = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, Enabled = false };
     private readonly Button btn_ClearFilters = new() { Text = "Clear Filters", AutoSize = true, Enabled = false };
     private readonly LavenderDataGridView _eligibilityGrid = new()
     {
@@ -127,6 +129,9 @@ public partial class CohortContextForm
     private bool _formBusy;
     private bool _contextRowSelectedByClick;
     private bool _cacheSyncRetryAvailable;
+    private const string AllTimeslotsFilter = "[All Timeslots]";
+    private const string UnscheduledTimeslotsFilter = "[Unscheduled / Blank Only]";
+    private const string ScheduledTimeslotsFilter = "[Scheduled Only]";
 
     private void InitializeWorkflowTabs()
     {
@@ -190,10 +195,12 @@ public partial class CohortContextForm
         _saveReview = MakeButton("Save Review", () => _ = SaveReviewAsync());
         _retryCacheSync = MakeButton("Retry Cache Sync", () => _ = RetryCacheSyncAsync());
         _retryCacheSync.Enabled = false;
-        toolbar.Controls.AddRange([_acceptMatch, _toggleExcluded, _saveReview, _retryCacheSync, _reviewFilter]);
+        toolbar.Controls.AddRange([_acceptMatch, _toggleExcluded, _saveReview, _retryCacheSync, _reviewFilter,
+            new Label { Text = "Timeslot", AutoSize = true, Padding = new Padding(12, 7, 4, 0) }, _reviewTimeslotFilter]);
         _reviewFilter.Items.AddRange(["All rows", "Included rows", "Attention required", "Duplicate IDs", "Excluded rows"]);
         _reviewFilter.SelectedIndex = 0;
         _reviewFilter.SelectedIndexChanged += (_, _) => { _reviewGrid.EndEdit(); RefreshReviewGrid(); };
+        _reviewTimeslotFilter.SelectedIndexChanged += (_, _) => { if (!_bindingReview) { _reviewGrid.EndEdit(); RefreshReviewGrid(); } };
 
         foreach (var (property, title) in new (string, string)[]
         {
@@ -289,9 +296,12 @@ public partial class CohortContextForm
         eligibilityFilters.Controls.Add(cmb_FilterVaccineType);
         eligibilityFilters.Controls.Add(new Label { Text = "Status", AutoSize = true, Padding = new Padding(12, 7, 4, 0) });
         eligibilityFilters.Controls.Add(cmb_FilterStatus);
+        eligibilityFilters.Controls.Add(new Label { Text = "Timeslot", AutoSize = true, Padding = new Padding(12, 7, 4, 0) });
+        eligibilityFilters.Controls.Add(cmb_FilterTimeslot);
         eligibilityFilters.Controls.Add(btn_ClearFilters);
         cmb_FilterVaccineType.SelectedIndexChanged += (_, _) => ApplyGridFilters();
         cmb_FilterStatus.SelectedIndexChanged += (_, _) => ApplyGridFilters();
+        cmb_FilterTimeslot.SelectedIndexChanged += (_, _) => ApplyGridFilters();
         btn_ClearFilters.Click += (_, _) => ClearEligibilityFilters();
         eligibility.Controls.Add(eligibilityFilters, 0, 3);
         foreach (var (property, title) in new (string, string)[]
@@ -487,6 +497,7 @@ public partial class CohortContextForm
         _reviewMessage.Text = string.Empty;
         _reviewSummary.Text = string.Empty;
         _reviewFilter.SelectedIndex = 0;
+        ResetTimeslotFilter(_reviewTimeslotFilter);
         _reviewGrid.DataSource = null;
         _reviewBindingSource.DataSource = null;
         _reviewRows = null;
@@ -821,6 +832,8 @@ public partial class CohortContextForm
         {
             _review?.RefreshDuplicates();
             IEnumerable<CohortReviewRow> rows = _review?.Rows ?? [];
+            PopulateTimeslotFilter(_reviewTimeslotFilter, rows.Select(row => row.Timeslot));
+            string selectedTimeslot = _reviewTimeslotFilter.SelectedItem?.ToString() ?? AllTimeslotsFilter;
             rows = _reviewFilter.SelectedIndex switch
             {
                 1 => rows.Where(r => !r.Excluded),
@@ -829,6 +842,7 @@ public partial class CohortContextForm
                 4 => rows.Where(r => r.Excluded),
                 _ => rows
             };
+            rows = rows.Where(row => TimeslotMatches(row.Timeslot, selectedTimeslot));
             _reviewRows = new SortableBindingList<CohortReviewRow>(rows);
             _reviewBindingSource.DataSource = _reviewRows;
             _reviewGrid.DataSource = _reviewBindingSource;
@@ -837,7 +851,7 @@ public partial class CohortContextForm
             {
                 if (gridRow.DataBoundItem is not CohortReviewRow row) continue;
                 gridRow.DefaultCellStyle.ForeColor = row.Excluded ? LavenderSlatePalette.MutedText : row.RequiresAttention ? LavenderSlatePalette.Error : LavenderSlatePalette.Slate;
-                gridRow.DefaultCellStyle.BackColor = Color.Empty;
+                gridRow.DefaultCellStyle.BackColor = AppointmentTime.TryParse(row.Timeslot, out _) ? Color.Empty : Color.FromArgb(0xFF, 0xF9, 0xDB);
                 gridRow.DefaultCellStyle.SelectionBackColor = LavenderSlatePalette.Selection;
                 gridRow.DefaultCellStyle.SelectionForeColor = LavenderSlatePalette.Card;
             }
@@ -1078,6 +1092,7 @@ public partial class CohortContextForm
             cmb_FilterStatus.Items.Clear();
             cmb_FilterStatus.Items.AddRange(["[All Statuses]", "Eligible", "Ineligible", "Manual Review"]);
             cmb_FilterStatus.SelectedIndex = 0;
+            PopulateTimeslotFilter(cmb_FilterTimeslot, _eligibilityPreviewRows.Select(row => row.Timeslot));
             cmb_FilterVaccineType.Enabled = true;
             cmb_FilterStatus.Enabled = true;
             btn_ClearFilters.Enabled = true;
@@ -1096,6 +1111,7 @@ public partial class CohortContextForm
         {
             cmb_FilterVaccineType.SelectedIndex = 0;
             cmb_FilterStatus.SelectedIndex = 0;
+            cmb_FilterTimeslot.SelectedIndex = 0;
         }
         finally
         {
@@ -1116,6 +1132,7 @@ public partial class CohortContextForm
             _eligibilityBindingSource.DataSource = null;
             cmb_FilterVaccineType.Items.Clear();
             cmb_FilterStatus.Items.Clear();
+            ResetTimeslotFilter(cmb_FilterTimeslot);
             cmb_FilterVaccineType.Enabled = false;
             cmb_FilterStatus.Enabled = false;
             btn_ClearFilters.Enabled = false;
@@ -1143,12 +1160,14 @@ public partial class CohortContextForm
 
         string selectedVaccine = cmb_FilterVaccineType.SelectedItem?.ToString() ?? "[All Vaccine Types]";
         string selectedStatus = cmb_FilterStatus.SelectedItem?.ToString() ?? "[All Statuses]";
+        string selectedTimeslot = cmb_FilterTimeslot.SelectedItem?.ToString() ?? AllTimeslotsFilter;
         bool allVaccines = string.Equals(selectedVaccine, "[All Vaccine Types]", StringComparison.Ordinal);
         bool allStatuses = string.Equals(selectedStatus, "[All Statuses]", StringComparison.Ordinal);
 
         List<EligibilityHistoryPreviewRow> filtered = _eligibilityPreviewRows
             .Where(row => (allVaccines || string.Equals(row.VaccineType, selectedVaccine, StringComparison.OrdinalIgnoreCase)) &&
-                          (allStatuses || StatusMatches(row.Status, selectedStatus)))
+                          (allStatuses || StatusMatches(row.Status, selectedStatus)) &&
+                          TimeslotMatches(row.Timeslot, selectedTimeslot))
             .ToList();
         _eligibilityBindingSource.DataSource = new SortableBindingList<EligibilityHistoryPreviewRow>(filtered);
         _eligibilityBindingSource.Sort = $"{nameof(EligibilityHistoryPreviewRow.TimeslotSortKey)} ASC";
@@ -1162,6 +1181,48 @@ public partial class CohortContextForm
         "Manual Review" => status == EligibilityStatus.ManualReview,
         _ => false
     };
+
+    private static void PopulateTimeslotFilter(ComboBox filter, IEnumerable<string?> timeslots)
+    {
+        string selected = filter.SelectedItem?.ToString() ?? AllTimeslotsFilter;
+        List<string> options = timeslots
+            .Select(value => AppointmentTime.TryParse(value, out TimeOnly time) ? time : (TimeOnly?)null)
+            .Where(time => time.HasValue)
+            .Select(time => time!.Value)
+            .Distinct()
+            .OrderBy(time => time)
+            .Select(time => time.ToString("hh:mm tt", System.Globalization.CultureInfo.InvariantCulture))
+            .ToList();
+
+        filter.BeginUpdate();
+        try
+        {
+            filter.Items.Clear();
+            filter.Items.AddRange([AllTimeslotsFilter, UnscheduledTimeslotsFilter, ScheduledTimeslotsFilter]);
+            filter.Items.AddRange(options.Cast<object>().ToArray());
+            filter.SelectedItem = filter.Items.Contains(selected) ? selected : AllTimeslotsFilter;
+            filter.Enabled = true;
+        }
+        finally
+        {
+            filter.EndUpdate();
+        }
+    }
+
+    private static void ResetTimeslotFilter(ComboBox filter)
+    {
+        filter.Items.Clear();
+        filter.Enabled = false;
+    }
+
+    private static bool TimeslotMatches(string? timeslot, string selectedFilter)
+    {
+        if (string.Equals(selectedFilter, AllTimeslotsFilter, StringComparison.Ordinal)) return true;
+        bool scheduled = AppointmentTime.TryParse(timeslot, out TimeOnly value);
+        if (string.Equals(selectedFilter, UnscheduledTimeslotsFilter, StringComparison.Ordinal)) return !scheduled;
+        if (string.Equals(selectedFilter, ScheduledTimeslotsFilter, StringComparison.Ordinal)) return scheduled;
+        return scheduled && AppointmentTime.TryParse(selectedFilter, out TimeOnly selectedTime) && value == selectedTime;
+    }
 
     private void UpdateEligibilitySummary(IEnumerable<EligibilityHistoryPreviewRow> previewRows)
     {

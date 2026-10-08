@@ -322,6 +322,8 @@ public sealed class PhisCohortServiceTests
         Assert.Contains("Client IDs exported: 25", existing);
         Assert.Contains("Clients in PHIS list (verified): 22", existing);
         Assert.Contains("Full exported list uploaded", existing);
+        Assert.Contains($"{Environment.NewLine}{Environment.NewLine}Added since previous successful upload: 1", existing);
+        Assert.Contains($"101 | Ada Lovelace{Environment.NewLine}{Environment.NewLine}No longer in current payload: 1", existing);
     }
 
     [Fact]
@@ -342,6 +344,25 @@ public sealed class PhisCohortServiceTests
         Assert.True(first >= 0 && second > first && unscheduled > second);
         Assert.Equal(1, summary.Split(" | 2 | Second").Length - 1);
         Assert.Contains("Initial upload", summary);
+        Assert.Contains($"09:05 AM | 2 | Second{Environment.NewLine}{Environment.NewLine}Unscheduled | 3 | Unscheduled", summary);
+        Assert.Contains($"Unscheduled | 3 | Unscheduled{Environment.NewLine}{Environment.NewLine}Initial upload", summary);
+    }
+
+    [Fact]
+    public void AdminSummary_SpacesUnscheduledAndZeroCountAuditSections()
+    {
+        var clients = new[]
+        {
+            new PhisUploadClient("2", "Second unscheduled"),
+            new PhisUploadClient("1", "First unscheduled")
+        };
+
+        string summary = PhisAdminSummary.Format(24260, "LIST", new(24189, 2), 2,
+            new PhisUploadComparison(false, [], []), clients);
+
+        Assert.Contains($"Clients (Sorted by Timeslot):{Environment.NewLine}{Environment.NewLine}Unscheduled | 1 | First unscheduled{Environment.NewLine}Unscheduled | 2 | Second unscheduled", summary);
+        Assert.Contains($"Unscheduled | 2 | Second unscheduled{Environment.NewLine}{Environment.NewLine}Added since previous successful upload: 0", summary);
+        Assert.Contains($"Added since previous successful upload: 0{Environment.NewLine}{Environment.NewLine}No longer in current payload: 0", summary);
     }
 
     [Theory]
