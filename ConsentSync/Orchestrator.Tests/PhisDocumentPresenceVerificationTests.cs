@@ -117,6 +117,22 @@ public sealed class PhisDocumentPresenceVerificationTests
     }
 
     [Fact]
+    public async Task Verify_treats_an_unconfirmed_empty_list_as_a_verification_error()
+    {
+        var gateway = new FakeGateway();
+        gateway.LookupResults["Unconfirmed"] = PhisDocumentLookupResult.EmptyUnconfirmed("List was blank.");
+        var plan = new PhisDocumentPresenceVerificationPlan
+        {
+            Targets = [new PhisDocumentPresenceTarget { ClientId = "001", DocumentTitle = "Unconfirmed", PhisAntigen = "HPV" }]
+        };
+
+        PhisDocumentPresenceVerificationResult result = await new PhisDocumentPresenceVerificationService(gateway).VerifyAsync(plan);
+
+        Assert.Equal(1, result.VerificationErrors);
+        Assert.False(result.AllExpectedDocumentsPresent);
+    }
+
+    [Fact]
     public void Commit_replaces_only_the_final_exact_presence_section()
     {
         string root = CreateRoot();
@@ -141,12 +157,13 @@ public sealed class PhisDocumentPresenceVerificationTests
     {
         public List<string> Calls { get; } = [];
         public HashSet<string> MissingTitles { get; } = [];
+        public Dictionary<string, PhisDocumentLookupResult> LookupResults { get; } = [];
         public bool EnsureSessionValid() { Calls.Add("Ensure"); return true; }
         public Task<bool> SetClientContextAsync(string clientId) { Calls.Add("Context:" + clientId); return Task.FromResult(true); }
         public Task<bool> OpenConsentDocumentListAsync(string phisAntigen) { Calls.Add("Consent:" + phisAntigen); return Task.FromResult(true); }
         public Task<bool> OpenFileRoseDocumentListAsync() { Calls.Add("FileRose"); return Task.FromResult(true); }
-        public Task<PhisDocumentLookupResult> FindConsentDocumentAsync(string documentTitle) { Calls.Add("FindConsent:" + documentTitle); return Task.FromResult(MissingTitles.Contains(documentTitle) ? PhisDocumentLookupResult.NotFound() : PhisDocumentLookupResult.Found(documentTitle)); }
-        public Task<PhisDocumentLookupResult> FindFileRoseDocumentAsync(string documentTitle) { Calls.Add("FindFileRose:" + documentTitle); return Task.FromResult(MissingTitles.Contains(documentTitle) ? PhisDocumentLookupResult.NotFound() : PhisDocumentLookupResult.Found(documentTitle)); }
+        public Task<PhisDocumentLookupResult> FindConsentDocumentAsync(string documentTitle) { Calls.Add("FindConsent:" + documentTitle); return Task.FromResult(LookupResults.TryGetValue(documentTitle, out var result) ? result : MissingTitles.Contains(documentTitle) ? PhisDocumentLookupResult.NotFound() : PhisDocumentLookupResult.Found(documentTitle)); }
+        public Task<PhisDocumentLookupResult> FindFileRoseDocumentAsync(string documentTitle) { Calls.Add("FindFileRose:" + documentTitle); return Task.FromResult(LookupResults.TryGetValue(documentTitle, out var result) ? result : MissingTitles.Contains(documentTitle) ? PhisDocumentLookupResult.NotFound() : PhisDocumentLookupResult.Found(documentTitle)); }
         public Task<bool> ReturnToSearchAsync() { Calls.Add("Return"); return Task.FromResult(true); }
     }
 }

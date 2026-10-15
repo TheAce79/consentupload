@@ -1776,6 +1776,7 @@ namespace OrchestratorUi
 
         private async void bt_Upload_Click(object sender, EventArgs e)
         {
+            Phase3Result? completedResult = null;
             bt_Upload.Enabled = false;
             bt_Upload.Text = "⏳ Uploading…";
 
@@ -1846,13 +1847,16 @@ namespace OrchestratorUi
                 });
 
                 Phase3Result phase3Result = await RunPhase3WithSessionResetAsync(config, progress);
+                completedResult = phase3Result;
 
                 LoggerService.LogInformation("\n" + new string('═', 60));
                 LoggerService.LogInformation("📊 UPLOAD SUMMARY");
                 LoggerService.LogInformation(new string('═', 60));
-                LoggerService.LogInformation($"   📋 Total records      : {phase3Result.TotalRecords}");
+                LoggerService.LogInformation($"   📋 Selected records   : {phase3Result.TotalRecords}");
+                LoggerService.LogInformation($"   📋 Attempted records  : {phase3Result.AttemptedRecords}");
                 LoggerService.LogInformation($"   ✅ Successful uploads : {phase3Result.SuccessfulUploads}");
-                LoggerService.LogInformation($"   ❌ Errors             : {phase3Result.TotalRecords - phase3Result.SuccessfulUploads}");
+                LoggerService.LogInformation($"   ⏭️  Already existed    : {phase3Result.AlreadyExistingDocuments}");
+                LoggerService.LogInformation($"   ❌ Errors             : {phase3Result.FailedUploads}");
                 if (phase3Result.BatchLimitReached)
                     LoggerService.LogWarning("   ⏸️  Batch limit reached — run again to continue.");
                 LoggerService.LogInformation(new string('═', 60));
@@ -1863,7 +1867,9 @@ namespace OrchestratorUi
                         this,
                         $"⏸️  Batch limit reached — upload paused.\n\n" +
                         $"  ✅ Uploaded this batch : {phase3Result.SuccessfulUploads}\n" +
-                        $"  📋 Total records      : {phase3Result.TotalRecords}\n\n" +
+                        $"  ⏭️  Already existed    : {phase3Result.AlreadyExistingDocuments}\n" +
+                        $"  ❌ Failed              : {phase3Result.FailedUploads}\n" +
+                        $"  📋 Attempted           : {phase3Result.AttemptedRecords}\n\n" +
                         "Progress has been saved. Click Upload again to continue.\n\n" +
                         "Do you want to run the next batch now?",
                         "Batch Complete — More Records Remain",
@@ -1888,13 +1894,23 @@ namespace OrchestratorUi
                         "  • The Upload CSV has rows with VerifStatus = 0 (NotProcessed)",
                         "Already Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
+                else if (phase3Result.NoRecordsFound)
+                {
+                    MessageBox.Show(
+                        this,
+                        "ℹ️  No records were found in the Upload CSV.\n\n" +
+                        "Run Pre-Phase 3 to generate upload records, then try again.",
+                        "No Upload Records", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
                 else if (phase3Result.IsSuccessful)
                 {
                     MessageBox.Show(
                         this,
-                        $"✅ All documents uploaded successfully to PHIS.\n\n" +
+                        $"✅ Upload processing completed.\n\n" +
                         $"  ✅ Uploaded this run : {phase3Result.SuccessfulUploads}\n" +
-                        $"  📋 Attempted        : {phase3Result.TotalRecords}\n\n" +
+                        $"  ⏭️  Already existed  : {phase3Result.AlreadyExistingDocuments}\n" +
+                        $"  📋 Attempted         : {phase3Result.AttemptedRecords}\n" +
+                        $"  ❌ Failed            : {phase3Result.FailedUploads}\n\n" +
                         "The upload process is complete.",
                         "Upload Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
@@ -1904,7 +1920,9 @@ namespace OrchestratorUi
                         this,
                         $"⚠️  Upload completed with errors.\n\n" +
                         $"  ✅ Uploaded  : {phase3Result.SuccessfulUploads}\n" +
-                        $"  ❌ Failed    : {phase3Result.TotalRecords - phase3Result.SuccessfulUploads}\n\n" +
+                        $"  ⏭️  Already existed : {phase3Result.AlreadyExistingDocuments}\n" +
+                        $"  📋 Attempted : {phase3Result.AttemptedRecords}\n" +
+                        $"  ❌ Failed    : {phase3Result.FailedUploads}\n\n" +
                         "Check the log panel for details on failed records.",
                         "Upload Completed with Errors",
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -1935,7 +1953,12 @@ namespace OrchestratorUi
 
                 this.InvokeIfRequired(() =>
                 {
-                    if (pb_Phase3.Value > 0 && pb_Phase3.Value == pb_Phase3.Maximum)
+                    if (completedResult?.HasErrors == true)
+                    {
+                        lbl_Phase3Progress.Text = $"⚠️ Upload completed with {completedResult.FailedUploads} error(s)";
+                        lbl_Phase3Progress.ForeColor = LavenderSlatePalette.Warning;
+                    }
+                    else if (pb_Phase3.Value > 0 && pb_Phase3.Value == pb_Phase3.Maximum)
                     {
                         lbl_Phase3Progress.Text = $"✅ Batch complete — {pb_Phase3.Maximum} / {pb_Phase3.Maximum}";
                         lbl_Phase3Progress.ForeColor = LavenderSlatePalette.Success;

@@ -6,6 +6,7 @@ public enum PhisDocumentLookupStatus
 {
     Found,
     NotFound,
+    EmptyUnconfirmed,
     Error
 }
 
@@ -17,6 +18,7 @@ public sealed class PhisDocumentLookupResult
 
     public static PhisDocumentLookupResult Found(string title) => new() { Status = PhisDocumentLookupStatus.Found, MatchedTitle = title };
     public static PhisDocumentLookupResult NotFound() => new() { Status = PhisDocumentLookupStatus.NotFound };
+    public static PhisDocumentLookupResult EmptyUnconfirmed(string message) => new() { Status = PhisDocumentLookupStatus.EmptyUnconfirmed, ErrorMessage = message };
     public static PhisDocumentLookupResult Error(string message) => new() { Status = PhisDocumentLookupStatus.Error, ErrorMessage = message };
 }
 
@@ -52,7 +54,7 @@ public partial class PhisSearchService
             if (links.Count == 0)
                 return IsConfirmedEmptyDocumentList(tables[0])
                     ? PhisDocumentLookupResult.NotFound()
-                    : PhisDocumentLookupResult.Error("The PHIS document list was empty but its empty state could not be confirmed.");
+                    : PhisDocumentLookupResult.EmptyUnconfirmed("The PHIS document list was empty but its empty state could not be confirmed.");
 
             string expected = isContextRoute
                 ? NormalizeContextPresenceTitle(documentTitle)
@@ -103,6 +105,7 @@ public partial class PhisSearchService
         catch { return false; }
         return text.Contains("No records", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("No documents", StringComparison.OrdinalIgnoreCase) ||
+               System.Text.RegularExpressions.Regex.IsMatch(text, @"\bTotal\s*:\s*0\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase) ||
                table.FindElements(By.CssSelector("tr")).Count == 0;
     }
 

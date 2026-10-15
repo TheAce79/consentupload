@@ -15,6 +15,7 @@ namespace Orchestrator.Phase3
 {
     public class Phase3Orchestrator
     {
+        private enum Phase3RecordOutcome { Uploaded, AlreadyExists, Failed }
 
         // ── Progress record ───────────────────────────────────────────────────
         public record Phase3Progress(
@@ -79,6 +80,7 @@ namespace Orchestrator.Phase3
                 if (uploadRecords.Count == 0)
                 {
                     LoggerService.LogInformation("\n⚠️  No records found — run Pre-Phase 3 first.");
+                    result.NoRecordsFound = true;
                     return result;
                 }
 
@@ -138,9 +140,6 @@ namespace Orchestrator.Phase3
                 LoggerService.LogInformation(
                     $"\n📋 Step 4: Processing {recordsToProcess.Count} documents...\n");
 
-                int successCount = 0;
-                int skipCount = 0;
-                int failureCount = 0;
                 int processedCount = 0;
 
                 try
@@ -148,6 +147,7 @@ namespace Orchestrator.Phase3
                     foreach (var record in recordsToProcess)
                     {
                         processedCount++;
+                        result.AttemptedRecords++;
 
                         LoggerService.LogInformation($"\n{new string('═', 70)}");
                         LoggerService.LogInformation(
@@ -160,36 +160,26 @@ namespace Orchestrator.Phase3
                         LoggerService.LogInformation($"VerifStatus: {record.VerifStatus}");
                         LoggerService.LogInformation($"{new string('─', 70)}");
 
-                        bool success = false;
+                        Phase3RecordOutcome outcome = Phase3RecordOutcome.Failed;
                         try
                         {
-                            success = record.IsFeuilleRose
+                            outcome = record.IsFeuilleRose
                                 ? await ProcessFileRoseUploadAsync(record)
                                 : await ProcessConsentUploadAsync(record);
 
-                            if (success)
+                            switch (outcome)
                             {
-                                successCount++;
-                                result.SuccessfulUploads++;
-                            }
-                            else if (record.VerifStatus == UploadVerificationStatus.Success)
-                            {
-                                // ✅ BUG 4 FIX: "Already existed on PHIS" is a skip, NOT an upload.
-                                //    Old code incremented result.SuccessfulUploads here, inflating
-                                //    the count and causing the UI to report false totals.
-                                skipCount++;
-                                // Do NOT increment result.SuccessfulUploads — it only counts fresh uploads.
-                            }
-                            else
-                            {
-                                failureCount++;
+                                case Phase3RecordOutcome.Uploaded: result.SuccessfulUploads++; break;
+                                case Phase3RecordOutcome.AlreadyExists: result.AlreadyExistingDocuments++; break;
+                                default: result.FailedUploads++; result.HasErrors = true; break;
                             }
                         }
                         catch (Exception ex)
                         {
                             LoggerService.LogError($"\n❌ ERROR processing {record.DocumentTitle}: {ex.Message}");
                             SetFailure(record, $"Unhandled exception: {ex.Message}");
-                            failureCount++;
+                            result.FailedUploads++;
+                            result.HasErrors = true;
                             result.ErrorMessages.Add(
                                 $"{record.ClientID} - {record.Description}: {ex.Message}");
                             try { await _phisSearchService.NavigateBackToSearchPagesAsync(); } catch { }
@@ -203,7 +193,7 @@ namespace Orchestrator.Phase3
                             StudentName: $"{record.FirstName} {record.LastName}",
                             DocumentTitle: record.DocumentTitle,
                             IsFeuilleRose: record.IsFeuilleRose,
-                            IsSuccess: success));
+                            IsSuccess: outcome != Phase3RecordOutcome.Failed));
 
                         // ── Persist after every document ──────────────────────
                         SaveUploadCsv(uploadRecords);
@@ -240,8 +230,7 @@ namespace Orchestrator.Phase3
                     result.BatchLimitReached = true;
                 }
 
-                DisplaySummary(result, successCount, skipCount, failureCount,
-                    uploadRecords.Count, alreadyVerified);
+                DisplaySummary(result, uploadRecords.Count, alreadyVerified);
 
                 return result;
             }
@@ -261,13 +250,13 @@ namespace Orchestrator.Phase3
 
         // ── Consent upload (existing logic, extracted to own method) ──────────
 
-        private async Task<bool> ProcessConsentUploadAsync(UploadRecord record)
+        private async Task<Phase3RecordOutcome> ProcessConsentUploadAsync(UploadRecord record)
         {
             // Validate antigen
             if (string.IsNullOrWhiteSpace(record.PhisAntigen))
             {
                 SetFailure(record, "PhisAntigen is empty — cannot select consent directive");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
 
             // A: Search & set client in context
@@ -275,7 +264,7 @@ namespace Orchestrator.Phase3
             if (!await _phisSearchService.SearchByClientIdAndSetInContextAsync(record.ClientID))
             {
                 SetFailure(record, "Could not set client in context");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
             LoggerService.LogInformation("   ✅ Client in context");
 
@@ -286,7 +275,7 @@ namespace Orchestrator.Phase3
             if (!navigated)
             {
                 SetFailure(record, "Could not navigate to Immunization Service");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
             LoggerService.LogInformation("   ✅ On Immunization Service page");
 
@@ -295,7 +284,7 @@ namespace Orchestrator.Phase3
             if (!await _phisSearchService.SelectConsentDirectiveByAntigenAsync(record.PhisAntigen))
             {
                 SetFailure(record, $"Could not select consent directive for '{record.PhisAntigen}'");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
             LoggerService.LogInformation("   ✅ Consent directive selected");
 
@@ -304,7 +293,7 @@ namespace Orchestrator.Phase3
             if (!await _phisSearchService.ClickDocumentsButtonAsync())
             {
                 SetFailure(record, "Could not open Documents page");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
             LoggerService.LogInformation("   ✅ Documents page opened");
 
@@ -318,21 +307,23 @@ namespace Orchestrator.Phase3
                 record.VerifStatus = UploadVerificationStatus.Success;
                 record.FailureReason = string.Empty;
                 await _phisSearchService.NavigateBackToSearchPagesAsync();
-                return true;
+                return Phase3RecordOutcome.AlreadyExists;
             }
-            if (existingDocument.Status == PhisDocumentLookupStatus.Error)
+            if (existingDocument.Status is not (PhisDocumentLookupStatus.NotFound or PhisDocumentLookupStatus.EmptyUnconfirmed))
             {
                 SetFailure(record, existingDocument.ErrorMessage ?? "Could not inspect the PHIS document list reliably");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
-            LoggerService.LogInformation("   ℹ️  Document not found — upload required");
+            LoggerService.LogInformation(existingDocument.Status == PhisDocumentLookupStatus.EmptyUnconfirmed
+                ? "   ⚠️  No document links found; empty state could not be confirmed. Attempting upload."
+                : "   ℹ️  Document not found — upload required");
 
             // F: Click Add New
             LoggerService.LogInformation("\n📤 STEP F: Opening upload page...");
             if (!await _phisSearchService.ClickAddNewDocumentButtonAsync())
             {
                 SetFailure(record, "Could not open upload page");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
             LoggerService.LogInformation("   ✅ Upload page opened");
 
@@ -344,7 +335,7 @@ namespace Orchestrator.Phase3
             if (!File.Exists(pdfPath))
             {
                 SetFailure(record, $"PDF not found at: {pdfPath}");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
 
             PhisDocumentUploadResult uploadResult = await _phisSearchService.UploadDocumentAsync(
@@ -356,7 +347,7 @@ namespace Orchestrator.Phase3
             {
                 SetFailure(record, uploadResult.Detail ?? "Document upload could not be confirmed in PHIS");
                 try { await _phisSearchService.NavigateBackToSearchPagesAsync(); } catch { }
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
 
             LoggerService.LogInformation("   ✅ Document uploaded successfully!");
@@ -367,18 +358,18 @@ namespace Orchestrator.Phase3
 
             record.FailureReason = string.Empty;
             await _phisSearchService.NavigateBackToSearchPagesAsync();
-            return true;
+            return Phase3RecordOutcome.Uploaded;
         }
 
 
-        private async Task<bool> ProcessFileRoseUploadAsync(UploadRecord record)
+        private async Task<Phase3RecordOutcome> ProcessFileRoseUploadAsync(UploadRecord record)
         {
             // ── A: Search & set client in context ────────────────────────────
             LoggerService.LogInformation("\n🔍 STEP A: Setting client in context...");
             if (!await _phisSearchService.SearchByClientIdAndSetInContextAsync(record.ClientID))
             {
                 SetFailure(record, "Could not set client in context");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
             LoggerService.LogInformation("   ✅ Client in context");
 
@@ -392,7 +383,7 @@ namespace Orchestrator.Phase3
             if (!File.Exists(pdfPath))
             {
                 SetFailure(record, $"FileRose PDF not found at: {pdfPath}");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
             LoggerService.LogInformation("   ✅ PDF found on disk");
 
@@ -400,7 +391,7 @@ namespace Orchestrator.Phase3
             if (!await _phisSearchService.NavigateToContextDocumentsAsync())
             {
                 SetFailure(record, "Could not navigate to Context Documents page");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
             LoggerService.LogInformation("   ✅ On Context Documents page");
 
@@ -414,19 +405,21 @@ namespace Orchestrator.Phase3
                 record.VerifStatus = UploadVerificationStatus.Success;
                 record.FailureReason = string.Empty;
                 await _phisSearchService.NavigateBackToSearchPagesAsync();
-                return true;
+                return Phase3RecordOutcome.AlreadyExists;
             }
-            if (existingDocument.Status == PhisDocumentLookupStatus.Error)
+            if (existingDocument.Status is not (PhisDocumentLookupStatus.NotFound or PhisDocumentLookupStatus.EmptyUnconfirmed))
             {
                 SetFailure(record, existingDocument.ErrorMessage ?? "Could not inspect the PHIS document list reliably");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
+            if (existingDocument.Status == PhisDocumentLookupStatus.EmptyUnconfirmed)
+                LoggerService.LogInformation("   ⚠️  No document links found; empty state could not be confirmed. Attempting upload.");
 
             // ── E: Click Add New ──────────────────────────────────────────────
             if (!await _phisSearchService.ClickContextDocumentAddNewAsync())
             {
                 SetFailure(record, "Could not open Add New Document upload form");
-                return false;
+                return Phase3RecordOutcome.Failed;
             }
             LoggerService.LogInformation("   ✅ Upload form opened");
 
@@ -455,7 +448,7 @@ namespace Orchestrator.Phase3
             }
 
             await _phisSearchService.NavigateBackToSearchPagesAsync();
-            return uploadResult.IsConfirmed;
+            return uploadResult.IsConfirmed ? Phase3RecordOutcome.Uploaded : Phase3RecordOutcome.Failed;
         }
 
         // ── Shared helpers ────────────────────────────────────────────────────
@@ -801,18 +794,17 @@ namespace Orchestrator.Phase3
 
 
 
-        private void DisplaySummary(Phase3Result result, int successCount, int skipCount,
-            int failureCount, int totalRecords, int alreadyVerified)
+        private void DisplaySummary(Phase3Result result, int totalRecords, int alreadyVerified)
         {
             LoggerService.LogInformation("\n" + new string('═', 70));
             LoggerService.LogInformation("📊 PHASE 3 COMPLETE");
             LoggerService.LogInformation(new string('═', 70));
             LoggerService.LogInformation($"Total records in CSV : {totalRecords}");
             LoggerService.LogInformation($"Already verified     : {alreadyVerified}");
-            LoggerService.LogInformation($"Processed this run   : {successCount + skipCount + failureCount}");
-            LoggerService.LogInformation($"   ✅ Uploaded        : {successCount}");
-            LoggerService.LogInformation($"   ⏭️  Already existed : {skipCount}");
-            LoggerService.LogInformation($"   ❌ Failed          : {failureCount}");
+            LoggerService.LogInformation($"Processed this run   : {result.AttemptedRecords}");
+            LoggerService.LogInformation($"   ✅ Uploaded        : {result.SuccessfulUploads}");
+            LoggerService.LogInformation($"   ⏭️  Already existed : {result.AlreadyExistingDocuments}");
+            LoggerService.LogInformation($"   ❌ Failed          : {result.FailedUploads}");
 
             if (result.ErrorMessages.Count > 0)
             {
@@ -822,7 +814,7 @@ namespace Orchestrator.Phase3
             }
 
             LoggerService.LogInformation(
-                $"\n💡 To retry failed rows: set VerifStatus = 0 in the CSV and re-run Phase 3.");
+                $"\n💡 Failed rows remain eligible for retry; re-run Phase 3 after resolving the failure.");
             LoggerService.LogInformation(
                 $"   CSV: {_phase3Config.Input.UploadCsvPath}\\{_phase3Config.Input.UploadCsvFileName}");
         }
