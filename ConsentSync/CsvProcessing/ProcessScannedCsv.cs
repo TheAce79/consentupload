@@ -213,8 +213,14 @@ namespace CsvProcessing
                 // ── The Merge/Duplicate Check ──
                 string currentIdentityKey = $"{safeLast}_{safeFirst}_{safeDob}".ToLowerInvariant();
 
-                // Skip if Name+DOB exists
-                if (fullyExtracted && existingIdentityKeys.Contains(currentIdentityKey)) continue;
+                // Skip only when a complete Name+DOB identity already exists.
+                // Filename-based scans intentionally have no identity fields, so blank
+                // values must not match prior filename-based scan records.
+                if (!string.IsNullOrWhiteSpace(safeLast) &&
+                    !string.IsNullOrWhiteSpace(safeFirst) &&
+                    !string.IsNullOrWhiteSpace(safeDob) &&
+                    existingIdentityKeys.Contains(currentIdentityKey))
+                    continue;
 
                 // Skip if ClientId is already defined in the file
                 if (!string.IsNullOrEmpty(clientId) && existingClientIds.Contains(clientId.ToLowerInvariant())) continue;
