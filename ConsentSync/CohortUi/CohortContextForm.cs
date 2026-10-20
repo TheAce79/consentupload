@@ -426,35 +426,79 @@ public partial class CohortContextForm : Form
 
         if (!ValidatePhase2ClinicDates(records, _activeContext.CohortDate)) return;
 
+        string inputFingerprint = CohortSearchCheckpoint.Fingerprint(inputCsvPath);
+        string checkpointPath = CohortSearchCheckpoint.GetPath(outputCsvPath);
+        CohortSearchCheckpoint? checkpoint = CohortSearchCheckpoint.TryLoadCompatible(checkpointPath, inputFingerprint, clientListName, out string? checkpointProblem);
+        if (checkpointProblem is not null)
+        {
+            DialogResult choice = MessageBox.Show(this,
+                $"{checkpointProblem}\n\nStart a fresh PHIS search? Choosing No keeps the existing progress files unchanged.",
+                "PHIS Progress", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (choice != DialogResult.Yes) return;
+        }
+        if (checkpoint is not null)
+        {
+            records = checkpoint.Records;
+            // A saved review writes its manual corrections into the output CSV. Prefer it on resume.
+            if (File.Exists(outputCsvPath))
+            {
+                try
+                {
+                    List<ConsentSyncCore.Models.ClinicPdfClientRecord> savedOutput = CsvImporterService.ReadFromCsv(outputCsvPath);
+                    if (savedOutput.Count == records.Count) records = savedOutput;
+                }
+                catch (Exception ex) { LoggerService.LogWarning($"Saved cohort output could not be used for PHIS resume; checkpoint state will be used. {ex.Message}"); }
+            }
+            LoggerService.LogInformation($"Resuming compatible PHIS progress: {records.Count(record => record.ClientIdStatus != ConsentSyncCore.Models.ClientIdStatus.NotProcessed)} completed record(s).");
+        }
+
+        if (checkpoint is null)
+        {
+            try
+            {
+                await _dbManager!.PreloadCacheForDatesAsync(records.Select(record => record.DateOfBirth));
+                int cacheHits = await ResolveCachedClientIdsAsync(records);
+                LoggerService.LogInformation($"Cohort cache preload completed for {records.Select(record => record.DateOfBirth).Distinct().Count()} roster DOB value(s). Cache hits: {cacheHits}; PHIS required: {records.Count - cacheHits}.");
+            }
+            catch (Exception ex)
+            {
+                LoggerService.LogWarning($"Cohort cache preload failed; PHIS search will continue for all records. {ex.Message}");
+            }
+        }
+
+        var activeCheckpoint = new CohortSearchCheckpoint { InputFingerprint = inputFingerprint, CohortIdentity = clientListName, Records = records };
         try
         {
-            await _dbManager!.PreloadCacheForDatesAsync(records.Select(record => record.DateOfBirth));
-            int cacheHits = await ResolveCachedClientIdsAsync(records);
-            LoggerService.LogInformation($"Cohort cache preload completed for {records.Select(record => record.DateOfBirth).Distinct().Count()} roster DOB value(s). Cache hits: {cacheHits}; PHIS required: {records.Count - cacheHits}.");
+            CohortSearchCheckpoint.SaveAtomically(checkpointPath, activeCheckpoint);
+            if (checkpoint is null || !File.Exists(outputCsvPath)) CsvExporterService.SaveToCsv(records, outputCsvPath);
         }
         catch (Exception ex)
         {
-            LoggerService.LogWarning($"Cohort cache preload failed; PHIS search will continue for all records. {ex.Message}");
+            LoggerService.LogError("Could not initialize durable PHIS progress.", ex);
+            MessageBox.Show(this, $"PHIS search was not started because progress could not be saved.\n\n{ex.Message}", "PHIS Progress", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
         }
 
         _isPhase2Running = true;
         SetFormEnabled(false);
         btn_SearchPhis.Text = "Searching PHIS...";
-        pb_Phase2.Minimum = 0; pb_Phase2.Maximum = records.Count; pb_Phase2.Value = 0;
-        lbl_Phase2Progress.Text = $"0 / {records.Count}";
+        int completedBeforeSearch = records.Count(record => record.ClientIdStatus != ConsentSyncCore.Models.ClientIdStatus.NotProcessed);
+        pb_Phase2.Minimum = 0; pb_Phase2.Maximum = records.Count; pb_Phase2.Value = completedBeforeSearch;
+        lbl_Phase2Progress.Text = $"{completedBeforeSearch} / {records.Count}";
         lbl_Phase2Status.Text = "Opening PHIS session...";
         LoggerService.LogInformation($"\n═══ Phase 2 — PHIS client ID resolution started ═══\n   Records: {records.Count}\n   Input CSV: {inputCsvPath}\n   Output CSV: {outputCsvPath}");
         var progress = new Progress<Phase2Progress>(p =>
         {
-            pb_Phase2.Maximum = p.Total;
-            pb_Phase2.Value = Math.Min(p.Current, p.Total);
-            lbl_Phase2Progress.Text = $"{p.Current} / {p.Total}";
+            pb_Phase2.Maximum = records.Count;
+            int current = Math.Min(completedBeforeSearch + p.Current, records.Count);
+            pb_Phase2.Value = current;
+            lbl_Phase2Progress.Text = $"{current} / {records.Count}";
             lbl_Phase2Status.Text = $"Searching {p.DateOfBirth} — {p.StudentName}";
         });
 
         try
         {
-            List<ConsentSyncCore.Models.ClinicPdfClientRecord> remaining = records.Where(record => record.ClientIdStatus != ConsentSyncCore.Models.ClientIdStatus.Found || string.IsNullOrWhiteSpace(record.ClientId)).ToList();
+            List<ConsentSyncCore.Models.ClinicPdfClientRecord> remaining = records.Where(record => record.ClientIdStatus == ConsentSyncCore.Models.ClientIdStatus.NotProcessed).ToList();
             List<ConsentSyncCore.Models.ClinicPdfClientRecord> updated = remaining.Count == 0 ? records : await Task.Run(async () =>
             {
                 IWebDriver driver = new ChromeDriverFactory(config).CreateDriver();
@@ -464,24 +508,36 @@ public partial class CohortContextForm : Form
                     if (!session.Login()) throw new InvalidOperationException("PHIS login was not completed.");
                     LoggerService.LogInformation("✅ PHIS session opened for Phase 2.");
                     var service = new PhisSearchService(driver, config, new PhisResultExtractor(config), session);
-                    await new CohortPhisSearchRunner(service).ExecuteSearchAsync(remaining, progress);
+                    await new CohortPhisSearchRunner(service).ExecuteSearchAsync(remaining, progress, _ =>
+                    {
+                        CohortSearchCheckpoint.SaveAtomically(checkpointPath, activeCheckpoint);
+                        string? priorOutputFingerprint = File.Exists(outputCsvPath) ? CohortSearchCheckpoint.Fingerprint(outputCsvPath) : null;
+                        CsvExporterService.SaveToCsv(records, outputCsvPath);
+                        if (priorOutputFingerprint is not null)
+                            CohortReviewService.RefreshSavedReviewFingerprintAfterAutomatedUpdate(GetReviewPath(outputCsvPath, clientListName), priorOutputFingerprint, outputCsvPath);
+                        return Task.CompletedTask;
+                    });
                     return records;
                 }
                 finally { driver.Dispose(); }
             });
+            CohortSearchCheckpoint.SaveAtomically(checkpointPath, activeCheckpoint);
             CsvExporterService.SaveToCsv(updated, outputCsvPath);
             LoadActiveReview();
             _workflowTabs.SelectedTab = _reviewTab;
             int manualReviewCount = updated.Count(record => record.ClientIdStatus == ConsentSyncCore.Models.ClientIdStatus.NeedsManualReview);
+            int unfinishedCount = updated.Count(record => record.ClientIdStatus == ConsentSyncCore.Models.ClientIdStatus.NotProcessed);
             LoggerService.LogInformation($"✅ Phase 2 complete. Enriched CSV saved: {outputCsvPath}");
             MessageBox.Show(this,
-                $"PHIS search complete.\n\nTotal records: {updated.Count}\nRecords needing manual review: {manualReviewCount}\n\nEnriched CSV saved to:\n{outputCsvPath}",
+                $"PHIS search complete.\n\nTotal records: {updated.Count}\nRecords needing manual review: {manualReviewCount}\nUnfinished records: {unfinishedCount}\n\nEnriched CSV saved to:\n{outputCsvPath}",
                 "Search Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
-            LoggerService.LogError("Phase 2 PHIS search stopped. The existing output CSV was preserved.", ex);
-            MessageBox.Show(this, $"PHIS search stopped. The existing output CSV was preserved.\n\n{ex.Message}\n\nCheck the Debug Log for details.", "Search Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            LoggerService.LogError("Phase 2 PHIS search stopped after saving completed progress.", ex);
+            if (File.Exists(outputCsvPath)) { LoadActiveReview(); _workflowTabs.SelectedTab = _reviewTab; }
+            int completed = records.Count(record => record.ClientIdStatus != ConsentSyncCore.Models.ClientIdStatus.NotProcessed);
+            MessageBox.Show(this, $"PHIS search stopped after saving {completed} of {records.Count} record(s).\n\nRestart Search PHIS to resume unfinished rows.\n\n{ex.Message}\n\nCheck the Debug Log for details.", "Search Paused", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
         {

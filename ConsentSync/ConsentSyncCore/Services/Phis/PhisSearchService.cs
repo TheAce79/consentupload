@@ -2274,19 +2274,25 @@ namespace ConsentSyncCore.Services.Phis
                     // Check for results table
                     var tbody = d.FindElement(By.Id("form:dataTable:dataTable_data"));
                     var rows = tbody.FindElements(By.XPath(".//tr[@role='row']"));
-                    return rows.Count > 0;
+                    if (rows.Count > 0) return true;
+                    // PHIS keeps an empty table in the DOM for both a valid empty search and
+                    // validation failures. In either case, an on-screen outcome means the AJAX
+                    // request has completed; do not wait for rows that will never be added.
+                    return HasSearchOutcomeMessage(d);
                 }
                 catch
                 {
-                    // Check for "no results" message
-                    var messages = d.FindElements(By.CssSelector(".ui-messages-info, .ui-messages-warn"));
-                    return messages.Count > 0;
+                    return HasSearchOutcomeMessage(d);
                 }
             });
 
             _lastResultsCompletenessVerified = await EnsureAllResultsPerPageSelectedAsync();
             await Task.Delay(500); // Extra stability delay
         }
+
+        private static bool HasSearchOutcomeMessage(IWebDriver driver) =>
+            driver.FindElements(By.CssSelector(".ui-messages-info, .ui-messages-warn, .ui-messages-error"))
+                .Any(message => message.Displayed && !string.IsNullOrWhiteSpace(message.Text));
 
         private async Task<bool> EnsureAllResultsPerPageSelectedAsync()
         {

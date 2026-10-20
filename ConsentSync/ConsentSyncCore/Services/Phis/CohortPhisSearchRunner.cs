@@ -9,14 +9,19 @@ public sealed class CohortPhisSearchRunner
 {
     private readonly IPhisClientSearch _searchService;
     private readonly double _threshold;
+    private readonly Func<DateOnly> _today;
 
-    public CohortPhisSearchRunner(IPhisClientSearch searchService, double? threshold = null)
+    public CohortPhisSearchRunner(IPhisClientSearch searchService, double? threshold = null, Func<DateOnly>? today = null)
     {
         _searchService = searchService ?? throw new ArgumentNullException(nameof(searchService));
         _threshold = threshold ?? ConfigurationService.GetFuzzyMatchingConfig().SingleResultThreshold;
+        _today = today ?? (() => DateOnly.FromDateTime(DateTime.Today));
     }
 
-    public async Task<List<ClinicPdfClientRecord>> ExecuteSearchAsync(List<ClinicPdfClientRecord> records, IProgress<Phase2Progress>? progress = null)
+    public async Task<List<ClinicPdfClientRecord>> ExecuteSearchAsync(
+        List<ClinicPdfClientRecord> records,
+        IProgress<Phase2Progress>? progress = null,
+        Func<ClinicPdfClientRecord, Task>? onRecordCompleted = null)
     {
         ArgumentNullException.ThrowIfNull(records);
         for (int i = 0; i < records.Count; i++)
@@ -26,9 +31,17 @@ public sealed class CohortPhisSearchRunner
             string recordLabel = $"Record {i + 1}/{records.Count} ({DisplayName(record)}, DOB {record.DateOfBirth})";
             LoggerService.LogInformation($"\n🔎 Phase 2 {recordLabel}");
             progress?.Report(new Phase2Progress(i + 1, records.Count, record.DateOfBirth, DisplayName(record)));
+            try
+            {
             if (!DateOnly.TryParseExact(record.DateOfBirth, ["yyyy/MM/dd", "yyyy-MM-dd"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
             {
                 MarkFailed(record, "InvalidDateOfBirth");
+                LogOutcome(recordLabel, record);
+                continue;
+            }
+            if (parsedDate > _today())
+            {
+                MarkFailed(record, "FutureDateOfBirth");
                 LogOutcome(recordLabel, record);
                 continue;
             }
@@ -86,6 +99,17 @@ public sealed class CohortPhisSearchRunner
 
             MarkFailed(record, candidates.Active.Count == 0 ? "NoActiveClientFoundInPhis" : "NameMatchBelowThreshold");
             LogOutcome(recordLabel, record);
+            }
+            catch (Exception ex)
+            {
+                MarkFailed(record, $"PhisSearchFailed: {ex.Message}");
+                LoggerService.LogWarning($"   {recordLabel}: PHIS search failed; marked for manual review and continuing. {ex.Message}");
+                LogOutcome(recordLabel, record);
+            }
+            finally
+            {
+                if (onRecordCompleted is not null) await onRecordCompleted(record);
+            }
         }
         return records;
     }

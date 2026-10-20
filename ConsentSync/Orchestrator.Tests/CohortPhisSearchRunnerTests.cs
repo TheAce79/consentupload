@@ -229,19 +229,51 @@ public sealed class CohortPhisSearchRunnerTests
     }
 
     [Fact]
-    public async Task ExecuteSearchAsync_FailedSearchThrowsAndDoesNotContinue()
+    public async Task ExecuteSearchAsync_FailedSearchNeedsManualReviewAndContinues()
     {
         var search = new FakeSearch { Dob = SearchResult.Failed("timeout") };
-        await Assert.ThrowsAsync<InvalidOperationException>(() => new CohortPhisSearchRunner(search).ExecuteSearchAsync([
-            new ClinicPdfClientRecord { FullName = "A", DateOfBirth = "2017/10/01" }]));
+        var record = new ClinicPdfClientRecord { FullName = "A", DateOfBirth = "2017/10/01" };
+        await new CohortPhisSearchRunner(search).ExecuteSearchAsync([record]);
+        Assert.Equal(ClientIdStatus.NeedsManualReview, record.ClientIdStatus);
+        Assert.Contains("PhisSearchFailed", record.ErrorDetails);
     }
 
     [Fact]
-    public async Task ExecuteSearchAsync_IncompleteResultsThrowAndDoNotResolve()
+    public async Task ExecuteSearchAsync_IncompleteResultsNeedManualReview()
     {
         var incomplete = SearchResult.IsSuccess([Active("1", "A", "B")], resultsComplete: false);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => new CohortPhisSearchRunner(new FakeSearch { Dob = incomplete }).ExecuteSearchAsync([
-            new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01" }]));
+        var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2017/10/01" };
+        await new CohortPhisSearchRunner(new FakeSearch { Dob = incomplete }).ExecuteSearchAsync([record]);
+        Assert.Equal(ClientIdStatus.NeedsManualReview, record.ClientIdStatus);
+        Assert.Null(record.ClientId);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_ContinuesAfterFailureAndInvokesCheckpointForEveryRecord()
+    {
+        var search = new FakeSearch { DobSequence = new Queue<SearchResult>([Success(Active("1", "A", "ONE")), SearchResult.Failed("timeout"), Success(Active("3", "C", "THREE"))]) };
+        var records = new List<ClinicPdfClientRecord>
+        {
+            new() { FullName = "A One", DateOfBirth = "2017/10/01" },
+            new() { FullName = "B Two", DateOfBirth = "2017/10/02" },
+            new() { FullName = "C Three", DateOfBirth = "2017/10/03" }
+        };
+        int completed = 0;
+        await new CohortPhisSearchRunner(search, 75).ExecuteSearchAsync(records, onRecordCompleted: _ => { completed++; return Task.CompletedTask; });
+        Assert.Equal(3, completed);
+        Assert.Equal(ClientIdStatus.Found, records[0].ClientIdStatus);
+        Assert.Equal(ClientIdStatus.NeedsManualReview, records[1].ClientIdStatus);
+        Assert.Equal(ClientIdStatus.Found, records[2].ClientIdStatus);
+    }
+
+    [Fact]
+    public async Task ExecuteSearchAsync_FutureDobNeedsManualReviewWithoutPhisSearch()
+    {
+        var search = new FakeSearch();
+        var record = new ClinicPdfClientRecord { FullName = "A B", DateOfBirth = "2026/12/18" };
+        await new CohortPhisSearchRunner(search, 75, () => new DateOnly(2026, 10, 20)).ExecuteSearchAsync([record]);
+        Assert.Equal("FutureDateOfBirth", record.ErrorDetails);
+        Assert.Empty(search.DobSearches);
     }
 
     [Fact]
@@ -359,13 +391,14 @@ public sealed class CohortPhisSearchRunnerTests
         public SearchResult Dob { get; init; } = SearchResult.NoResults();
         public SearchResult Medicare { get; init; } = SearchResult.NoResults();
         public SearchResult Email { get; init; } = SearchResult.NoResults();
+        public Queue<SearchResult>? DobSequence { get; init; }
         public int MedicareCalls { get; private set; }
         public List<string> DobSearches { get; } = [];
         public int EmailCalls { get; private set; }
         public bool ThrowOnEmailSearch { get; init; }
         public int PreviewCalls { get; private set; }
         public PhisClientPreview? Preview { get; init; }
-        public Task<SearchResult> SearchByDobAsync(string dateOfBirth, string? expectedFirstName = null, string? expectedLastName = null, string? expectedMedicare = null) { DobSearches.Add(dateOfBirth); return Task.FromResult(Dob); }
+        public Task<SearchResult> SearchByDobAsync(string dateOfBirth, string? expectedFirstName = null, string? expectedLastName = null, string? expectedMedicare = null) { DobSearches.Add(dateOfBirth); return Task.FromResult(DobSequence is { Count: > 0 } ? DobSequence.Dequeue() : Dob); }
         public Task<SearchResult> SearchByMedicareAsync(string medicareNumber) { MedicareCalls++; return Task.FromResult(Medicare); }
         public Task<SearchResult> SearchByEmailAsync(string email) { EmailCalls++; if (ThrowOnEmailSearch) throw new InvalidOperationException("browser failure"); return Task.FromResult(Email); }
         public Task<PhisClientPreview?> GetClientPreviewAsync(string clientId) { PreviewCalls++; return Task.FromResult(Preview); }

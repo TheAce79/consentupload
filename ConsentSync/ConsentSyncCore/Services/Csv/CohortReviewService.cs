@@ -145,6 +145,23 @@ public sealed class CohortReviewService
         return true;
     }
 
+    /// <summary>Keeps a saved manual review attached when CohortUi updates the same roster in place.</summary>
+    public static void RefreshSavedReviewFingerprintAfterAutomatedUpdate(string reviewPath, string priorSourceFingerprint, string updatedSourcePath)
+    {
+        if (!File.Exists(reviewPath)) return;
+        string contents = File.ReadAllText(reviewPath);
+        ReviewDocument? saved = JsonSerializer.Deserialize<ReviewDocument>(contents);
+        if (saved is null || saved.Version != 1 || saved.Rows is null ||
+            !string.Equals(saved.SourceFingerprint, priorSourceFingerprint, StringComparison.Ordinal)) return;
+
+        List<ClinicPdfClientRecord> updatedRows = CsvImporterService.ReadFromCsv(updatedSourcePath);
+        if (saved.Rows.Count != updatedRows.Count || saved.Rows.Where((row, index) => row is null || row.RowNumber != index + 1).Any())
+            throw new InvalidDataException("The saved review no longer matches the updated PHIS roster.");
+
+        saved.SourceFingerprint = Fingerprint(updatedSourcePath);
+        WriteReviewDocument(reviewPath, saved);
+    }
+
     public void Save()
     {
         EnsureSourceUnchanged();
