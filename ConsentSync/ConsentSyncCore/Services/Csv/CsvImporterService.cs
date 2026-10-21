@@ -192,7 +192,7 @@ public static class CsvImporterService
         return new ClinicPdfClientRecord
         {
             ClientId = null, FullName = Get(csv, fields, "FullName").Trim(), DateOfBirth = dateOfBirth?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty,
-            Medicare = NullIfEmptyOrNaN(Get(csv, fields, "Medicare")), ClientIdStatus = ClientIdStatus.NeedsManualReview, ErrorDetails = string.Empty, BestMatch = string.Empty,
+            Medicare = NullIfEmptyOrNaN(Get(csv, fields, "Medicare")), ClientIdStatus = ClientIdStatus.NotProcessed, ErrorDetails = string.Empty, BestMatch = string.Empty,
             Phone = NullIfEmptyOrNaN(Get(csv, fields, "Phone")), Email = NullIfEmpty(Get(csv, fields, "Email")), VaccineType = NormalizeCatalogItem(NullIfEmpty(Get(csv, fields, "CatalogItem")) ?? NullIfEmpty(Get(csv, fields, "AppointmentType"))),
             BookingId = NullIfEmpty(Get(csv, fields, "BookingId")), ClinicName = NullIfEmpty(Get(csv, fields, "ClinicName")), ClinicDate = parsedClinicDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), AppointmentType = NullIfEmpty(Get(csv, fields, "AppointmentType")), CatalogItem = NullIfEmpty(Get(csv, fields, "CatalogItem")), Timeslot = NullIfEmpty(Get(csv, fields, "Timeslot")), Comment = NullIfEmpty(Get(csv, fields, "Comment")), SdcId = NullIfEmpty(Get(csv, fields, "SdcId")), PreferredLanguage = NullIfEmpty(Get(csv, fields, "PreferredLanguage"))
         };

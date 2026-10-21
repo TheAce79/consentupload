@@ -76,7 +76,7 @@ public sealed class CsvImporterServiceTests : IDisposable
         File.WriteAllText(input, " BookingID ,Clinic Name,Clinic Date,Appointment Type,Catalog Item,Enrolled Person Name,Medicare Number,Email,Date of Birth,Phone,Timeslot,Comment,SDC Id,Preferred Language\nB-1,Clinique Étoile,2026-10-02,Catchup Appointment,\"\",\" AWE DJONYANG, BOUAGNI JEDIDJA \", NaN , parent@example.test ,2/3/2020,05065881736,09:00,Français,SDC-9,Français\n", Encoding.UTF8);
 
         ClinicPdfClientRecord record = Assert.Single(CsvImporterService.ReadFromCsv(input));
-        Assert.Null(record.ClientId); Assert.Equal(ClientIdStatus.NeedsManualReview, record.ClientIdStatus);
+        Assert.Null(record.ClientId); Assert.Equal(ClientIdStatus.NotProcessed, record.ClientIdStatus);
         Assert.Equal("AWE DJONYANG, BOUAGNI JEDIDJA", record.FullName); Assert.Equal("2020-02-03", record.DateOfBirth);
         Assert.Null(record.Medicare); Assert.Equal("05065881736", record.Phone); Assert.Equal("Other / Autre", record.VaccineType);
         Assert.Equal("B-1", record.BookingId); Assert.Equal("Clinique Étoile", record.ClinicName); Assert.Equal("Français", record.PreferredLanguage);

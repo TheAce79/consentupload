@@ -449,7 +449,14 @@ public partial class CohortContextForm : Form
                 }
                 catch (Exception ex) { LoggerService.LogWarning($"Saved cohort output could not be used for PHIS resume; checkpoint state will be used. {ex.Message}"); }
             }
-            LoggerService.LogInformation($"Resuming compatible PHIS progress: {records.Count(record => record.ClientIdStatus != ConsentSyncCore.Models.ClientIdStatus.NotProcessed)} completed record(s).");
+
+            int recoveredRows = CohortSearchCheckpoint.RecoverUnsearchedAbleAssessRows(records);
+            if (recoveredRows > 0)
+                LoggerService.LogInformation($"Recovered {recoveredRows} unsearched Able Assess record(s) from saved PHIS progress.");
+
+            int resumedCompleted = records.Count(record => record.ClientIdStatus != ConsentSyncCore.Models.ClientIdStatus.NotProcessed);
+            int resumedPending = records.Count - resumedCompleted;
+            LoggerService.LogInformation($"Resuming compatible PHIS progress: {resumedCompleted} completed record(s); {resumedPending} pending PHIS search.");
         }
 
         if (checkpoint is null)
@@ -499,6 +506,10 @@ public partial class CohortContextForm : Form
         try
         {
             List<ConsentSyncCore.Models.ClinicPdfClientRecord> remaining = records.Where(record => record.ClientIdStatus == ConsentSyncCore.Models.ClientIdStatus.NotProcessed).ToList();
+            if (remaining.Count == 0)
+                LoggerService.LogInformation("No PHIS search is needed; all cohort records are already complete. No PHIS session will be opened.");
+            else
+                LoggerService.LogInformation($"PHIS search pending: {remaining.Count} record(s).");
             List<ConsentSyncCore.Models.ClinicPdfClientRecord> updated = remaining.Count == 0 ? records : await Task.Run(async () =>
             {
                 IWebDriver driver = new ChromeDriverFactory(config).CreateDriver();

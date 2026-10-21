@@ -15,6 +15,31 @@ public sealed class CohortSearchCheckpoint
 
     public static string GetPath(string outputCsvPath) => outputCsvPath + ".search-progress.json";
 
+    /// <summary>
+    /// Repairs the transient state written by the initial Able Assess import. Those rows had not
+    /// been searched, but were incorrectly labelled as requiring manual review.
+    /// </summary>
+    public static int RecoverUnsearchedAbleAssessRows(IEnumerable<ClinicPdfClientRecord> records)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        int recovered = 0;
+        foreach (ClinicPdfClientRecord record in records)
+        {
+            if (string.IsNullOrWhiteSpace(record.BookingId) ||
+                record.ClientIdStatus != ClientIdStatus.NeedsManualReview ||
+                !string.IsNullOrWhiteSpace(record.ClientId) ||
+                !string.IsNullOrWhiteSpace(record.ErrorDetails) ||
+                !string.IsNullOrWhiteSpace(record.BestMatch))
+            {
+                continue;
+            }
+
+            record.ClientIdStatus = ClientIdStatus.NotProcessed;
+            recovered++;
+        }
+        return recovered;
+    }
+
     public static string Fingerprint(string path)
     {
         using var stream = File.OpenRead(path);
