@@ -50,7 +50,8 @@ public sealed class EligibilityCriteriaCatalogTests
         Assert.Equal("Manual Review", etsUnknown.MissingPhisHistoryAction);
         Assert.Contains("La date de la clinique", eighteenMonth.FrenchCalculationExplanation);
         Assert.Contains("180 jours", etsPlus.FrenchCalculationExplanation);
-        Assert.Contains("révision clinique", EligibilityCriteriaCatalog.All[10].FrenchCalculationExplanation);
+        Assert.Contains("28 jours", EligibilityCriteriaCatalog.All[10].FrenchCalculationExplanation);
+        Assert.Contains("56 jours", EligibilityCriteriaCatalog.All[11].FrenchCalculationExplanation);
         Assert.Contains("56 days", EligibilityCriteriaCatalog.All[11].RequiredInterval);
     }
 

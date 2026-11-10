@@ -111,17 +111,16 @@ public sealed class EligibilityEvaluationService
     {
         bool combo = string.Equals(category, VaccineTypeNormalizer.CovidAndInfluenza, StringComparison.OrdinalIgnoreCase);
         bool secondDose = !combo && Regex.IsMatch(booking ?? string.Empty, @"\b(?:2nd|2e|2ème|2eme|second(?:e)?)\s+dose\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        bool firstOnly = combo && Regex.IsMatch(booking ?? string.Empty, @"\b(?:1st|1er|1re|1ère|1ere|premi[eè]re?)\s+dose\s+(?:only|seulement|uniquement)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         if (!combo)
         {
             bool flu = string.Equals(category, VaccineTypeNormalizer.Influenza, StringComparison.OrdinalIgnoreCase);
-            var component = EvaluateRespiratoryComponent(history, dob, clinic, result.AgeMonths!.Value, flu, secondDose, false);
+            var component = EvaluateRespiratoryComponent(history, dob, clinic, result.AgeMonths!.Value, flu, secondDose);
             return Set(result, component.Status, component.Reason);
         }
 
-        var influenza = EvaluateRespiratoryComponent(history, dob, clinic, result.AgeMonths!.Value, true, false, firstOnly);
-        var covid = EvaluateRespiratoryComponent(history, dob, clinic, result.AgeMonths!.Value, false, false, firstOnly);
+        var influenza = EvaluateRespiratoryComponent(history, dob, clinic, result.AgeMonths!.Value, true, false);
+        var covid = EvaluateRespiratoryComponent(history, dob, clinic, result.AgeMonths!.Value, false, false);
         EligibilityStatus status = influenza.Status == EligibilityStatus.Eligible && covid.Status == EligibilityStatus.Eligible
             ? EligibilityStatus.Eligible
             : influenza.Status == EligibilityStatus.Ineligible && covid.Status == EligibilityStatus.Ineligible
@@ -130,7 +129,7 @@ public sealed class EligibilityEvaluationService
     }
 
     private static (EligibilityStatus Status, string Reason) EvaluateRespiratoryComponent(
-        ClientImmunizationHistory? history, DateTime dob, DateTime clinic, decimal ageMonths, bool flu, bool secondDose, bool firstOnly)
+        ClientImmunizationHistory? history, DateTime dob, DateTime clinic, decimal ageMonths, bool flu, bool secondDose)
     {
         string name = flu ? "Influenza" : "COVID-19";
         if (clinic < dob.AddMonths(6))
@@ -152,8 +151,9 @@ public sealed class EligibilityEvaluationService
 
         int days = (clinic - latest.Value).Days;
         int referenceDays = flu ? EligibilityCriteriaCatalog.InfluenzaReferenceIntervalDays : EligibilityCriteriaCatalog.CovidReferenceIntervalDays;
-        string mismatch = firstOnly ? " This first-dose-only booking conflicts with a prior recorded dose." : string.Empty;
-        return (EligibilityStatus.ManualReview, $"Latest {name} dose was recorded on {latest:yyyy/MM/dd}, {days} days before the clinic date (reference interval: {referenceDays} days).{mismatch} Review dose sequence, completion and vaccination eligibility with a clinician.");
+        return days >= referenceDays
+            ? (EligibilityStatus.Eligible, $"{name}: Eligible under the clinic interval rule. Prior dose was recorded on {latest:yyyy/MM/dd}, {days} days before the clinic date (>= {referenceDays} days required).")
+            : (EligibilityStatus.Ineligible, $"{name}: Ineligible under the clinic interval rule. Prior dose was recorded on {latest:yyyy/MM/dd}, {days} days before the clinic date (>= {referenceDays} days required).");
     }
 
     private static EligibilityEvaluationResult Evaluate18Month(EligibilityEvaluationResult result, ClientImmunizationHistory? history, DateTime dob, DateTime clinic)

@@ -20,20 +20,24 @@ public sealed class RespiratoryEligibilityTests
     }
 
     [Theory]
-    [InlineData("Influenza", "Influenza-quad", 27, 28)]
-    [InlineData("Influenza", "influenza-trivalent", 28, 28)]
-    [InlineData("Influenza", "Influenza-unspecified", 29, 28)]
-    [InlineData("COVID-19", "COVID19 -mRNA", 55, 56)]
-    [InlineData("COVID-19", "COVID-19 pediatric mRNA", 56, 56)]
-    [InlineData("COVID-19", "SARS-CoV-2", 57, 56)]
-    public void PriorDoseRequiresReviewOnBothSidesOfReferenceInterval(string category, string agent, int days, int reference)
+    [InlineData("Influenza", "Influenza-quad", 15, 28, EligibilityStatus.Ineligible)]
+    [InlineData("Influenza", "Influenza-quad", 27, 28, EligibilityStatus.Ineligible)]
+    [InlineData("Influenza", "influenza-trivalent", 28, 28, EligibilityStatus.Eligible)]
+    [InlineData("Influenza", "Influenza-unspecified", 29, 28, EligibilityStatus.Eligible)]
+    [InlineData("Influenza", "Influenza-quad", 368, 28, EligibilityStatus.Eligible)]
+    [InlineData("Influenza", "Influenza-quad", 380, 28, EligibilityStatus.Eligible)]
+    [InlineData("COVID-19", "COVID19 -mRNA", 30, 56, EligibilityStatus.Ineligible)]
+    [InlineData("COVID-19", "COVID19 -mRNA", 55, 56, EligibilityStatus.Ineligible)]
+    [InlineData("COVID-19", "COVID-19 pediatric mRNA", 56, 56, EligibilityStatus.Eligible)]
+    [InlineData("COVID-19", "SARS-CoV-2", 57, 56, EligibilityStatus.Eligible)]
+    public void PriorDoseUsesMinimumInterval(string category, string agent, int days, int reference, EligibilityStatus expected)
     {
         var history = History((agent, new DateTime(2026, 10, 1).AddDays(-days)));
         EligibilityEvaluationResult result = Evaluate(category, "2025-01-01", history);
-        Assert.Equal(EligibilityStatus.ManualReview, result.Status);
+        Assert.Equal(expected, result.Status);
         Assert.Contains($"{days} days", result.EvaluationReason);
-        Assert.Contains($"reference interval: {reference} days", result.EvaluationReason);
-        Assert.Contains("Review dose sequence", result.EvaluationReason);
+        Assert.Contains($">= {reference} days required", result.EvaluationReason);
+        Assert.Contains(new DateTime(2026, 10, 1).AddDays(-days).ToString("yyyy/MM/dd"), result.EvaluationReason);
     }
 
     [Fact]
@@ -41,7 +45,7 @@ public sealed class RespiratoryEligibilityTests
     {
         var history = History(("Influenza-quad", new DateTime(2026, 8, 1)), (" influenza-trivalent", new DateTime(2026, 9, 1)), ("Haemophilus influenzae", new DateTime(2026, 9, 30)));
         EligibilityEvaluationResult result = Evaluate(VaccineTypeNormalizer.Influenza, "2025-01-01", history);
-        Assert.Equal(EligibilityStatus.ManualReview, result.Status);
+        Assert.Equal(EligibilityStatus.Eligible, result.Status);
         Assert.Contains("2026/09/01", result.EvaluationReason);
     }
 
@@ -76,10 +80,10 @@ public sealed class RespiratoryEligibilityTests
     public void ComboUsesBothResultsAndExportsReasons()
     {
         const string booking = "COVID-19 & Influenza Vaccines (1st dose only)";
-        var history = History(("Influenza", new DateTime(2026, 9, 1)));
+        var history = History(("Influenza", new DateTime(2026, 9, 20)));
         EligibilityEvaluationResult result = Evaluate(VaccineTypeNormalizer.CovidAndInfluenza, "2025-01-01", history, booking);
         Assert.Equal(EligibilityStatus.ManualReview, result.Status);
-        Assert.Contains("first-dose-only booking conflicts", result.EvaluationReason);
+        Assert.Contains("Influenza: Ineligible", result.EvaluationReason);
         Assert.Contains("No prior COVID-19 dose", result.EvaluationReason);
         string directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -98,6 +102,22 @@ public sealed class RespiratoryEligibilityTests
         Assert.Equal(EligibilityStatus.Eligible, Evaluate(VaccineTypeNormalizer.CovidAndInfluenza, "2025-01-01", null).Status);
         EligibilityEvaluationResult result = Evaluate(VaccineTypeNormalizer.CovidAndInfluenza, "2021-10-01", null);
         Assert.Equal(EligibilityStatus.Ineligible, result.Status);
+        Assert.Contains("Influenza:", result.EvaluationReason);
+        Assert.Contains("COVID-19:", result.EvaluationReason);
+    }
+
+    [Theory]
+    [InlineData(380, 365, EligibilityStatus.Eligible)]
+    [InlineData(15, 30, EligibilityStatus.Ineligible)]
+    [InlineData(15, 60, EligibilityStatus.ManualReview)]
+    [InlineData(30, -1, EligibilityStatus.ManualReview)]
+    [InlineData(15, -1, EligibilityStatus.ManualReview)]
+    public void ComboCombinesBothComponentStatusesEvenForFirstDoseOnlyBooking(int fluDays, int covidDays, EligibilityStatus expected)
+    {
+        var clinic = new DateTime(2026, 10, 1);
+        var history = History(("Influenza", clinic.AddDays(-fluDays)), ("COVID-19", clinic.AddDays(-covidDays)));
+        EligibilityEvaluationResult result = Evaluate(VaccineTypeNormalizer.CovidAndInfluenza, "2025-01-01", history, "COVID-19 & Influenza Vaccines (1st dose only)");
+        Assert.Equal(expected, result.Status);
         Assert.Contains("Influenza:", result.EvaluationReason);
         Assert.Contains("COVID-19:", result.EvaluationReason);
     }
