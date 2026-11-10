@@ -1,5 +1,6 @@
 using ConsentSyncCore.Models;
 using ConsentSyncCore.Services.Eligibility;
+using ConsentSyncCore.Services.Csv;
 using Xunit;
 
 namespace Orchestrator.Tests;
@@ -113,12 +114,12 @@ public sealed class EligibilityEvaluationServiceTests
         EligibilityEvaluationResult result = Evaluate(vaccineType, "2025-03-01", "2026-10-01", History(("BCG", new DateTime(2025, 4, 1))));
 
         Assert.Equal(expected, result.Status);
-        Assert.Contains("HTA (ETS+) criteria OK", result.EvaluationReason);
-        Assert.Contains("No prior MMRV dose found", result.EvaluationReason);
+        Assert.Contains("Booked as ETS+; validated as ETS+", result.EvaluationReason);
+        Assert.Contains("no prior MMR/MMRV history recorded", result.EvaluationReason);
     }
 
     [Theory]
-    [InlineData("2026-04-04", EligibilityStatus.Ineligible)]
+    [InlineData("2026-04-04", EligibilityStatus.ManualReview)]
     [InlineData("2026-04-03", EligibilityStatus.Eligible)]
     public void EtsPlus_RequiresStrictlyMoreThan180DaysSinceLatestMmrv(string priorDose, EligibilityStatus expected)
     {
@@ -126,7 +127,7 @@ public sealed class EligibilityEvaluationServiceTests
             ("MMRV", DateTime.Parse(priorDose)), ("MMR", new DateTime(2026, 1, 1))));
 
         Assert.Equal(expected, result.Status);
-        Assert.Contains($"Previous MMRV = {priorDose}", result.EvaluationReason);
+        Assert.Contains(priorDose, result.EvaluationReason);
     }
 
     [Theory]
@@ -174,7 +175,7 @@ public sealed class EligibilityEvaluationServiceTests
         EligibilityEvaluationResult result = Evaluate("ETS+", "2024-04-01", "2026-10-01", null);
 
         Assert.Equal(EligibilityStatus.Ineligible, result.Status);
-        Assert.Equal("HTA (ETS+) age criteria KO. Client age is 30m (must be >= 18m and < 24m for Healthy Toddler Assessment).", result.EvaluationReason);
+        Assert.Equal("Client is 30.0 months old. Ineligible for ETS/ETS+ (Maximum age boundary is 24.0 months).", result.EvaluationReason);
     }
 
     [Fact]
@@ -183,7 +184,7 @@ public sealed class EligibilityEvaluationServiceTests
         EligibilityEvaluationResult result = Evaluate("ETS+", "2025-01-01", "2026-10-01", History(("MMRV", new DateTime(2026, 3, 1))));
 
         Assert.Equal(EligibilityStatus.Eligible, result.Status);
-        Assert.Equal("HTA (ETS+) criteria OK. Age = 21m (18-23m). Previous MMRV = 2026-03-01, interval > 6 months.", result.EvaluationReason);
+        Assert.Contains("214 days since previous MMR/MMRV on 2026-03-01", result.EvaluationReason);
     }
 
     [Fact]
@@ -226,6 +227,74 @@ public sealed class EligibilityEvaluationServiceTests
         Assert.Contains("Previous MMRV = 2026-04-04", at180.EvaluationReason);
         Assert.Equal(EligibilityStatus.Eligible, at181.Status);
         Assert.Contains("Previous MMRV = 2026-04-03", at181.EvaluationReason);
+    }
+
+    [Theory]
+    [InlineData(90, EligibilityStatus.ManualReview)]
+    [InlineData(180, EligibilityStatus.ManualReview)]
+    [InlineData(181, EligibilityStatus.Eligible)]
+    [InlineData(220, EligibilityStatus.Eligible)]
+    public void AbleAssessAssessment_ExportsEtsPlusIntervalResult(int days, EligibilityStatus expected)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string input = Path.Combine(directory, "able.csv");
+            File.WriteAllText(input, "Booking ID,Enrolled Person Name,Date of Birth,Catalog Item,Appointment Type,Clinic Date\nB-1,Test Client,3/1/2025,Assessment (HTA) Appointment,18 Month Appointment,10/1/2026\n");
+            ClinicPdfClientRecord source = Assert.Single(CsvImporterService.ReadFromCsv(input));
+            var history = History(("MMR", new DateTime(2026, 10, 1).AddDays(-days)), ("MMRV", new DateTime(2026, 1, 1)));
+            EligibilityEvaluationResult result = _service.EvaluateRecord(new CohortReviewRow { Source = source }, history, default);
+
+            Assert.Equal("ETS+", source.VaccineType);
+            Assert.Equal(expected, result.Status);
+            Assert.Contains("Booked as ETS;", result.EvaluationReason);
+            Assert.Contains($"{days} days", result.EvaluationReason);
+            Assert.Contains(new DateTime(2026, 10, 1).AddDays(-days).ToString("yyyy-MM-dd"), result.EvaluationReason);
+            string output = Path.Combine(directory, "clinical.csv");
+            ClinicalCohortCsvExporterService.SaveToCsv([new ClinicalCohortExportRow("100", "Test Client", source.ClinicDate, source.DateOfBirth, null, source.VaccineType, result.Status, result.EvaluationReason)], output);
+            string csv = File.ReadAllText(output);
+            Assert.Contains(expected.ToString(), csv);
+            Assert.Contains(result.EvaluationReason, csv);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void EtsPlus_DoseAfterEighteenMonthsRequiresReviewEvenWhenIntervalExceeds180Days()
+    {
+        EligibilityEvaluationResult result = Evaluate("ETS+", "2024-10-01", "2026-09-30", History(("MMRV", new DateTime(2026, 4, 1))));
+        Assert.Equal(EligibilityStatus.ManualReview, result.Status);
+        Assert.Contains("2026-04-01", result.EvaluationReason);
+        Assert.Contains("may already have been given", result.EvaluationReason);
+    }
+
+    [Theory]
+    [InlineData("Assessment (HTA) Appointment", "Booked as ETS; validated as ETS+")]
+    [InlineData("Rendez-vous ÉTS (HTA)", "Booked as ETS; validated as ETS+")]
+    [InlineData("18 Month Appointment with Assessment (HTA)", "Booked as ETS+; validated as ETS+")]
+    public void AbleAssessHta_ReportsOriginalBookingForMissingHistory(string catalog, string expected)
+    {
+        var source = new ClinicPdfClientRecord { DateOfBirth = "2025-03-01", ClinicDate = "2026-10-01", VaccineType = CsvImporterService.NormalizeCatalogItem(catalog), CatalogItem = catalog };
+        EligibilityEvaluationResult result = _service.EvaluateRecord(new CohortReviewRow { Source = source }, null, default);
+        Assert.Equal(EligibilityStatus.Eligible, result.Status);
+        Assert.Contains(expected, result.EvaluationReason);
+    }
+
+    [Fact]
+    public void EtsPlus_FutureDoseRequiresReview()
+    {
+        EligibilityEvaluationResult result = Evaluate("ETS+", "2025-03-01", "2026-10-01", History(("MMR", new DateTime(2026, 10, 2))));
+        Assert.Equal(EligibilityStatus.ManualReview, result.Status);
+        Assert.Contains("after the clinic date", result.EvaluationReason);
+    }
+
+    [Fact]
+    public void EtsPlus_UnderAgeExplainsMinimumBoundary()
+    {
+        EligibilityEvaluationResult result = Evaluate("ETS+", "2025-04-02", "2026-10-01", History());
+        Assert.Equal(EligibilityStatus.Ineligible, result.Status);
+        Assert.Contains("Minimum age boundary is 18.0 months", result.EvaluationReason);
     }
 
     private EligibilityEvaluationResult Evaluate(string vaccineType, string dob, string? clinic, ClientImmunizationHistory? history, DateTime? cohortDate = null, string jurisdiction = "NB") =>

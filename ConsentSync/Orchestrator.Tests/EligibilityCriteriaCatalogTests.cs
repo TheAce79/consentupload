@@ -6,7 +6,7 @@ namespace Orchestrator.Tests;
 public sealed class EligibilityCriteriaCatalogTests
 {
     [Fact]
-    public void All_ContainsTheTenCriteriaExplorerRulesInDisplayOrder()
+    public void All_ContainsTheCriteriaExplorerRulesInDisplayOrder()
     {
         Assert.Equal(
         [
@@ -19,7 +19,10 @@ public sealed class EligibilityCriteriaCatalogTests
             "12 Month Appointment",
             "Preschool Appointment",
             "Other / Autre",
-            "ETS Unknown"
+            "ETS Unknown",
+            "Influenza",
+            "COVID-19",
+            "COVID-19 and Influenza"
         ], EligibilityCriteriaCatalog.All.Select(rule => rule.AppointmentMilestone));
     }
 
@@ -47,6 +50,8 @@ public sealed class EligibilityCriteriaCatalogTests
         Assert.Equal("Manual Review", etsUnknown.MissingPhisHistoryAction);
         Assert.Contains("La date de la clinique", eighteenMonth.FrenchCalculationExplanation);
         Assert.Contains("180 jours", etsPlus.FrenchCalculationExplanation);
+        Assert.Contains("révision clinique", EligibilityCriteriaCatalog.All[10].FrenchCalculationExplanation);
+        Assert.Contains("56 days", EligibilityCriteriaCatalog.All[11].RequiredInterval);
     }
 
     [Fact]

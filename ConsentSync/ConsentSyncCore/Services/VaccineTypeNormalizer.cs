@@ -5,6 +5,9 @@ namespace ConsentSyncCore.Services;
 /// <summary>Converts source-specific vaccine and appointment labels into eligibility categories.</summary>
 public static class VaccineTypeNormalizer
 {
+    public const string Influenza = "Influenza";
+    public const string Covid19 = "COVID-19";
+    public const string CovidAndInfluenza = "COVID-19 and Influenza";
     private const string Unknown = "Unknown";
     private const string Other = "Other / Autre";
 
@@ -16,6 +19,8 @@ public static class VaccineTypeNormalizer
         if (string.IsNullOrWhiteSpace(rawVaccineType)) return Unknown;
 
         string value = rawVaccineType.Trim();
+        string? respiratory = NormalizeRespiratory(value);
+        if (respiratory is not null) return respiratory;
         if (string.Equals(value, Unknown, StringComparison.OrdinalIgnoreCase)) return Unknown;
         if (string.Equals(value, "ETS Unknown", StringComparison.OrdinalIgnoreCase)) return "ETS Unknown";
         if (string.Equals(value, "Preschool Appointment", StringComparison.OrdinalIgnoreCase)) return "Preschool Appointment";
@@ -38,6 +43,18 @@ public static class VaccineTypeNormalizer
         if (OtherRegex.IsMatch(value)) return Other;
 
         return Other;
+    }
+
+    public static string? NormalizeRespiratory(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        bool flu = (value.Contains("influenza", StringComparison.OrdinalIgnoreCase) &&
+                    !value.Contains("haemophilus", StringComparison.OrdinalIgnoreCase)) ||
+                   value.Contains("grippe", StringComparison.OrdinalIgnoreCase);
+        bool covid = value.Contains("covid", StringComparison.OrdinalIgnoreCase);
+        if (flu && covid) return CovidAndInfluenza;
+        if (flu) return Influenza;
+        return covid ? Covid19 : null;
     }
 
     private static bool MatchesMilestone(string value, int months) => Regex.IsMatch(

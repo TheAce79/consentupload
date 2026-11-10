@@ -202,11 +202,12 @@ public static class CsvImporterService
     {
         if (string.IsNullOrWhiteSpace(rawCatalogItem)) return "Unknown";
 
+        string? respiratory = VaccineTypeNormalizer.NormalizeRespiratory(rawCatalogItem);
+        if (respiratory is not null) return respiratory;
         string catalog = rawCatalogItem.Trim().ToLowerInvariant();
+        if (IsAssessmentOnlyHtaCatalogItem(rawCatalogItem)) return "ETS+";
         if (catalog.Contains("18") && (catalog.Contains("hta") || catalog.Contains("ets")) &&
             (catalog.Contains("with") || catalog.Contains("w/") || catalog.Contains("avec"))) return "ETS+";
-        if ((catalog.Contains("assessment") || catalog.Contains("évaluation") || catalog.Contains("evaluation")) &&
-            (catalog.Contains("hta") || catalog.Contains("ets")) && !catalog.Contains("18")) return "ETS";
         if (catalog.Contains("18") && (catalog.Contains("month") || catalog.Contains("mois") || catalog.Contains("appt"))) return "18 Month Appointment";
         if (catalog.StartsWith("12 ") || catalog.Contains("12 month") || catalog.Contains("12 mois")) return "12 Month Appointment";
         if (catalog.StartsWith("6 ") || catalog.Contains("6 month") || catalog.Contains("6 mois")) return "6 Month Appointment";
@@ -215,6 +216,16 @@ public static class CsvImporterService
         if (catalog.Contains("preschool") || catalog.Contains("préscolaire") || catalog.StartsWith("ps ")) return "Preschool Appointment";
         if (catalog.Contains("catch") || catalog.Contains("rattrapage") || catalog.Contains("newcomer") || catalog.Contains("adolescent")) return "Other / Autre";
         return VaccineTypeNormalizer.Normalize(rawCatalogItem);
+    }
+
+    public static bool IsAssessmentOnlyHtaCatalogItem(string? rawCatalogItem)
+    {
+        if (string.IsNullOrWhiteSpace(rawCatalogItem)) return false;
+        string catalog = rawCatalogItem.Trim().ToLowerInvariant();
+        return !catalog.Contains("18") &&
+            (((catalog.Contains("assessment") || catalog.Contains("évaluation") || catalog.Contains("evaluation")) &&
+              (catalog.Contains("hta") || catalog.Contains("ets") || catalog.Contains("éts"))) ||
+             (catalog.Contains("rendez-vous") && catalog.Contains("éts") && catalog.Contains("hta")));
     }
 
     private static DateOnly? ParseAbleAssessDate(string value, string fieldName, string[] dateFormats)

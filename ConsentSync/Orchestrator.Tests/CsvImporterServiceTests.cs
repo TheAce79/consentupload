@@ -128,7 +128,7 @@ public sealed class CsvImporterServiceTests : IDisposable
 
         List<ClinicPdfClientRecord> records = CsvImporterService.ReadFromCsv(input);
 
-        Assert.Equal(["ETS", "ETS+", "18 Month Appointment"], records.Select(record => record.VaccineType));
+        Assert.Equal(["ETS+", "ETS+", "18 Month Appointment"], records.Select(record => record.VaccineType));
         Assert.Equal("Assessment (HTA) Appointment", records[0].CatalogItem);
         Assert.Equal("18 Month Appointment", records[0].AppointmentType);
     }
@@ -137,8 +137,10 @@ public sealed class CsvImporterServiceTests : IDisposable
     [InlineData("18 Month Appointment with Assessment (HTA)", "ETS+")]
     [InlineData("Rendez-vous de 18 mois avec évaluation (ETS)", "ETS+")]
     [InlineData("18 mois appt w/ HTA", "ETS+")]
-    [InlineData("Assessment (HTA) appt", "ETS")]
-    [InlineData("Rendez-vous de Évaluation (ETS)", "ETS")]
+    [InlineData("Assessment (HTA) appt", "ETS+")]
+    [InlineData("Rendez-vous de Évaluation (ETS)", "ETS+")]
+    [InlineData("Rendez-vous 18 mois avec ÉTS (HTA)", "ETS+")]
+    [InlineData("Rendez-vous ÉTS (HTA)", "ETS+")]
     [InlineData("18 mois appt", "18 Month Appointment")]
     [InlineData("Rendez-vous de 2 mois", "2 Month Appointment")]
     [InlineData("Rendez-vous de 4 mois", "4 Month Appointment")]
@@ -149,8 +151,39 @@ public sealed class CsvImporterServiceTests : IDisposable
     [InlineData("Rendez-vous rattrapage", "Other / Autre")]
     [InlineData("Newcomer appt", "Other / Autre")]
     [InlineData("Adolescent appt", "Other / Autre")]
+    [InlineData("Influenza Vaccine (Public Health Office)", "Influenza")]
+    [InlineData("Influenza Vaccine", "Influenza")]
+    [InlineData("Standard Dose Influenza Vaccine", "Influenza")]
+    [InlineData("2nd dose Influenza Vaccine: Children 6 months to 8 years 11 months who are receiving the Influenza vaccine for the 1st time", "Influenza")]
+    [InlineData("Vaccin contre la grippe (Bureau de santé publique)", "Influenza")]
+    [InlineData("2e dose du vaccin contre la grippe", "Influenza")]
+    [InlineData("COVID-19 Vaccine for Infants/Toddlers aged 6 months to 4 years 11 months", "COVID-19")]
+    [InlineData("Vaccin contre la COVID-19 pour nourrissons/tout-petits (6 mois à 4 ans)", "COVID-19")]
+    [InlineData("COVID-19 & Influenza Vaccines (1st dose only)", "COVID-19 and Influenza")]
+    [InlineData("Standard Dose Influenza Vaccine, COVID-19 Vaccine for Infants/Toddlers aged 6 months to 4 years 11 months", "COVID-19 and Influenza")]
     public void NormalizeCatalogItem_MapsAbleAssessCatalogVariations(string source, string expected) =>
         Assert.Equal(expected, CsvImporterService.NormalizeCatalogItem(source));
+
+    [Fact]
+    public void AbleAssessRespiratoryBookings_MapAndRoundTripWithoutLosingBookingDetails()
+    {
+        string input = Path.Combine(_directory, "respiratory.csv");
+        var lines = new List<string> { "Booking ID,Enrolled Person Name,Date of Birth,Catalog Item,Appointment Type" };
+        string[] catalogs = ["2nd dose Influenza Vaccine: Children 6 months to 8 years 11 months who are receiving the Influenza vaccine for the 1st time", "COVID-19 & Influenza Vaccines (1st dose only)", "Influenza Vaccine", "Influenza Vaccine (Public Health Office)"];
+        int[] counts = [2, 2, 1, 12];
+        for (int i = 0; i < catalogs.Length; i++)
+            for (int n = 0; n < counts[i]; n++) lines.Add($"B-{i}-{n},Synthetic Client,1/1/2025,{catalogs[i]},2 Month Appointment");
+        File.WriteAllLines(input, lines, Encoding.UTF8);
+        List<ClinicPdfClientRecord> records = CsvImporterService.ReadFromCsv(input);
+        Assert.Equal(17, records.Count);
+        Assert.Equal(15, records.Count(record => record.VaccineType == "Influenza"));
+        Assert.Equal(2, records.Count(record => record.VaccineType == "COVID-19 and Influenza"));
+        string output = Path.Combine(_directory, "respiratory-output.csv");
+        CsvExporterService.SaveToCsv(records, output);
+        List<ClinicPdfClientRecord> reread = CsvImporterService.ReadFromCsv(output);
+        Assert.Equal(records.Select(row => row.VaccineType), reread.Select(row => row.VaccineType));
+        Assert.Equal(records.Select(row => row.CatalogItem), reread.Select(row => row.CatalogItem));
+    }
 
     [Fact]
     public void ReadFromCsv_CanonicalEtsUnknownRoundTrips()

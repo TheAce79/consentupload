@@ -103,7 +103,8 @@ public partial class CohortContextForm
     [
         "2 Month Appointment", "4 Month Appointment", "6 Month Appointment", "12 Month Appointment",
         "18 Month Appointment", "Preschool Appointment", "ETS", "ETS+", "ETS Unknown", "Other / Autre",
-        "Catchup Appointment", "Unknown"
+        "Catchup Appointment", VaccineTypeNormalizer.Influenza, VaccineTypeNormalizer.Covid19,
+        VaccineTypeNormalizer.CovidAndInfluenza, "Unknown"
     ];
     private readonly Button _evaluateEligibility = new() { Text = "Evaluate Eligibility", AutoSize = true, Enabled = false };
     private readonly Button _exportFinalCohortCsv = new() { Text = "Export Final Cohort CSV", AutoSize = true, Enabled = false };

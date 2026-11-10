@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using ConsentSyncCore.Models;
+using ConsentSyncCore.Services.Csv;
 
 namespace ConsentSyncCore.Services.Eligibility;
 
@@ -48,10 +50,15 @@ public sealed class EligibilityEvaluationService
 
         DateTime dob = dateOfBirth.Value.Date;
         DateTime clinic = clinicDate.Value.Date;
+        if (string.Equals(vaccineType, VaccineTypeNormalizer.Influenza, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(vaccineType, VaccineTypeNormalizer.Covid19, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(vaccineType, VaccineTypeNormalizer.CovidAndInfluenza, StringComparison.OrdinalIgnoreCase))
+            return EvaluateRespiratory(result, history, dob, clinic, vaccineType,
+                string.IsNullOrWhiteSpace(record.Source.CatalogItem) ? record.Source.AppointmentType : record.Source.CatalogItem);
         if (IsEtsUnknown(vaccineType))
             return ManualReview(result, "Unrecognized or ambiguous ETS appointment type. Manual review required.");
         if (IsEtsPlus(vaccineType) || IsHtaEtsPlus(vaccineType))
-            return EvaluateEtsPlus(result, history, dob, clinic);
+            return EvaluateEtsPlus(result, history, dob, clinic, record.Source.CatalogItem);
         if (IsEts(vaccineType) || IsHtaEts(vaccineType))
             return EvaluateEts(result, dob, clinic);
         if (IsAmbiguousEts(vaccineType))
@@ -100,6 +107,55 @@ public sealed class EligibilityEvaluationService
             : Ineligible(result, $"HTA (ETS) Assessment age criteria KO. Client age is {age}m (must be >= 18m and < 24m).");
     }
 
+    private static EligibilityEvaluationResult EvaluateRespiratory(EligibilityEvaluationResult result, ClientImmunizationHistory? history, DateTime dob, DateTime clinic, string category, string? booking)
+    {
+        bool combo = string.Equals(category, VaccineTypeNormalizer.CovidAndInfluenza, StringComparison.OrdinalIgnoreCase);
+        bool secondDose = !combo && Regex.IsMatch(booking ?? string.Empty, @"\b(?:2nd|2e|2ème|2eme|second(?:e)?)\s+dose\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        bool firstOnly = combo && Regex.IsMatch(booking ?? string.Empty, @"\b(?:1st|1er|1re|1ère|1ere|premi[eè]re?)\s+dose\s+(?:only|seulement|uniquement)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        if (!combo)
+        {
+            bool flu = string.Equals(category, VaccineTypeNormalizer.Influenza, StringComparison.OrdinalIgnoreCase);
+            var component = EvaluateRespiratoryComponent(history, dob, clinic, result.AgeMonths!.Value, flu, secondDose, false);
+            return Set(result, component.Status, component.Reason);
+        }
+
+        var influenza = EvaluateRespiratoryComponent(history, dob, clinic, result.AgeMonths!.Value, true, false, firstOnly);
+        var covid = EvaluateRespiratoryComponent(history, dob, clinic, result.AgeMonths!.Value, false, false, firstOnly);
+        EligibilityStatus status = influenza.Status == EligibilityStatus.Eligible && covid.Status == EligibilityStatus.Eligible
+            ? EligibilityStatus.Eligible
+            : influenza.Status == EligibilityStatus.Ineligible && covid.Status == EligibilityStatus.Ineligible
+                ? EligibilityStatus.Ineligible : EligibilityStatus.ManualReview;
+        return Set(result, status, $"Influenza: {influenza.Reason} | COVID-19: {covid.Reason}");
+    }
+
+    private static (EligibilityStatus Status, string Reason) EvaluateRespiratoryComponent(
+        ClientImmunizationHistory? history, DateTime dob, DateTime clinic, decimal ageMonths, bool flu, bool secondDose, bool firstOnly)
+    {
+        string name = flu ? "Influenza" : "COVID-19";
+        if (clinic < dob.AddMonths(6))
+            return (EligibilityStatus.Ineligible, $"Age is {ageMonths.ToString("F1", CultureInfo.InvariantCulture)} months; below the 6-month {name} clinic screening boundary.");
+        if (clinic >= dob.AddYears(5))
+            return (EligibilityStatus.Ineligible, $"Age is {(ageMonths / 12m).ToString("F1", CultureInfo.InvariantCulture)} years; at or above the 5-year {name} clinic screening boundary.");
+
+        string[] prefixes = flu ? ["Influenza"] : ["COVID", "SARS-CoV-2"];
+        DateTime? latest = history?.Records
+            .Where(item => prefixes.Any(prefix => item.Agent.TrimStart().StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            .Select(item => (DateTime?)item.AdministeredDate.Date).Max();
+        if (!latest.HasValue)
+            return secondDose
+                ? (EligibilityStatus.ManualReview, $"Booked for a second {name} dose, but no prior {name} dose is recorded in PHIS. Review the booking and immunization history before vaccination.")
+                : (EligibilityStatus.Eligible, $"No prior {name} dose recorded in PHIS; within the pediatric clinic screening age window.");
+
+        if (latest.Value > clinic)
+            return (EligibilityStatus.ManualReview, $"A {name} dose is recorded on {latest:yyyy/MM/dd}, after the clinic date. Review the immunization history before vaccination.");
+
+        int days = (clinic - latest.Value).Days;
+        int referenceDays = flu ? EligibilityCriteriaCatalog.InfluenzaReferenceIntervalDays : EligibilityCriteriaCatalog.CovidReferenceIntervalDays;
+        string mismatch = firstOnly ? " This first-dose-only booking conflicts with a prior recorded dose." : string.Empty;
+        return (EligibilityStatus.ManualReview, $"Latest {name} dose was recorded on {latest:yyyy/MM/dd}, {days} days before the clinic date (reference interval: {referenceDays} days).{mismatch} Review dose sequence, completion and vaccination eligibility with a clinician.");
+    }
+
     private static EligibilityEvaluationResult Evaluate18Month(EligibilityEvaluationResult result, ClientImmunizationHistory? history, DateTime dob, DateTime clinic)
     {
         string age = FormatAgeMonths(result.AgeMonths);
@@ -116,20 +172,32 @@ public sealed class EligibilityEvaluationService
             : Ineligible(result, $"18m Appointment dose interval KO. Previous MMRV = {priorDose:yyyy-MM-dd}, Clinic Date = {clinic:yyyy-MM-dd}. Interval <= 6 months.");
     }
 
-    private static EligibilityEvaluationResult EvaluateEtsPlus(EligibilityEvaluationResult result, ClientImmunizationHistory? history, DateTime dob, DateTime clinic)
+    private static EligibilityEvaluationResult EvaluateEtsPlus(EligibilityEvaluationResult result, ClientImmunizationHistory? history, DateTime dob, DateTime clinic, string? catalogItem)
     {
-        string age = FormatAgeMonths(result.AgeMonths);
-        if (clinic < dob.AddMonths(18) || clinic >= dob.AddMonths(24))
-            return Ineligible(result, $"HTA (ETS+) age criteria KO. Client age is {age}m (must be >= 18m and < 24m for Healthy Toddler Assessment).");
+        string age = result.AgeMonths!.Value.ToString("F1", CultureInfo.InvariantCulture);
+        if (clinic < dob.AddMonths(18))
+            return Ineligible(result, $"Client is {age} months old. Ineligible for ETS/ETS+ (Minimum age boundary is 18.0 months).");
+        if (clinic >= dob.AddMonths(24))
+            return Ineligible(result, $"Client is {age} months old. Ineligible for ETS/ETS+ (Maximum age boundary is 24.0 months).");
+
+        bool bookedAsEts = CsvImporterService.IsAssessmentOnlyHtaCatalogItem(catalogItem);
+        string evaluated = bookedAsEts ? "Booked as ETS; evaluated as ETS+ (HTA + Vaccine)." : "Booked as ETS+; evaluated as ETS+ (HTA + Vaccine).";
+        string validated = bookedAsEts ? "Booked as ETS; validated as ETS+ (HTA + Vaccine)." : "Booked as ETS+; validated as ETS+ (HTA + Vaccine).";
 
         DateTime? priorDose = history.GetMaxAgentDate("MMR", "MMRV");
         if (!priorDose.HasValue)
-            return Eligible(result, $"HTA (ETS+) criteria OK. Age = {age}m (18-23m). No prior MMRV dose found in PHIS history.");
+            return Eligible(result, $"{validated} Within the 18–24 month age window and no prior MMR/MMRV history recorded. Eligible for HTA and vaccination.");
+
+        if (priorDose.Value.Date > clinic)
+            return ManualReview(result, $"{evaluated} An MMR/MMRV dose is recorded on {priorDose:yyyy-MM-dd}, after the clinic date. Review the immunization history before vaccination; the Healthy Toddler Assessment may proceed.");
+
+        if (priorDose.Value.Date >= dob.AddMonths(18))
+            return ManualReview(result, $"{evaluated} An MMR/MMRV dose was already administered on {priorDose:yyyy-MM-dd} (at or after 18 months). The 18-month vaccination may already have been given. Review client history before vaccination; proceed with Healthy Toddler Assessment.");
 
         int interval = (clinic - priorDose.Value.Date).Days;
         return interval > EligibilityCriteriaCatalog.MmrMmrvMinimumIntervalDays
-            ? Eligible(result, $"HTA (ETS+) criteria OK. Age = {age}m (18-23m). Previous MMRV = {priorDose:yyyy-MM-dd}, interval > 6 months.")
-            : Ineligible(result, $"HTA (ETS+) dose interval KO. Previous MMRV = {priorDose:yyyy-MM-dd}, Clinic Date = {clinic:yyyy-MM-dd}. Interval <= 6 months.");
+            ? Eligible(result, $"{validated} Interval is {interval} days since previous MMR/MMRV on {priorDose:yyyy-MM-dd} (> 180 days required). Eligible for HTA and vaccination.")
+            : ManualReview(result, $"{evaluated} Latest MMR/MMRV was administered {interval} days ago on {priorDose:yyyy-MM-dd} (> 180 days required). Vaccine is deferred; proceed with Healthy Toddler Assessment only.");
     }
 
     private static EligibilityEvaluationResult AgeRule(EligibilityEvaluationResult result, bool eligible, string requiredAge, DateTime dob, DateTime clinic) =>

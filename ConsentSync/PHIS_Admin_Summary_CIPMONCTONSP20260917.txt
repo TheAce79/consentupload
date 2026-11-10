@@ -1,0 +1,9 @@
+PHIS Cohort / Client List Summary
+
+Cohort ID: 24260
+Cohort Name: CIPMONCTONSP20260917
+Client List Name / ID: CIPMONCTONSP20260917 / 24189
+Clients in PHIS client list: 22
+
+Source: supplied PHIS Update Cohort page capture, September 13, 2026.
+The capture confirms 22 clients in the attached list; it does not establish how many were newly added by a particular automation run.
