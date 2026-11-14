@@ -643,6 +643,109 @@ public partial class CohortContextForm : Form
     private async void btn_LoadContext_Click(object? sender, EventArgs e) =>
         await LoadSelectedCohortContextAsync();
 
+    private string? SelectedDeletableList()
+    {
+        string name = cb_SearchClientListName.Text.Trim();
+        string? match = cb_SearchClientListName.Items.Cast<string>()
+            .FirstOrDefault(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase));
+        if (match is null) return null;
+        try
+        {
+            CohortDeletionService.ValidateTarget(ConfigurationService.GetConfiguration(), match);
+            return match;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private void cb_SearchClientListName_TextChanged(object? sender, EventArgs e) => UpdateDeleteAvailability();
+
+    private void UpdateDeleteAvailability()
+    {
+        bt_DeleteCohort.Enabled = !_formBusy && !_isPhase2Running && _dbManager is not null && SelectedDeletableList() is not null;
+    }
+
+    private async void bt_DeleteCohort_Click(object? sender, EventArgs e)
+    {
+        if (_formBusy || _isPhase2Running || _dbManager is null) return;
+        string? name = SelectedDeletableList();
+        if (name is null) return;
+        bool isActive = string.Equals(_activeContext?.ClientListName, name, StringComparison.OrdinalIgnoreCase);
+        if (isActive && !ConfirmNextCohortTransition()) return;
+        if (MessageBox.Show(this,
+            $"Are you sure you want to delete cohort '{name}'? This will permanently delete its folder and cohort records from the database. Cached Client IDs will be preserved for future local lookups.",
+            "Delete Cohort", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+
+        SetFormEnabled(false);
+        bool directoryRemoved = false;
+        bool databaseRemoved = false;
+        try
+        {
+            var context = await _dbManager.GetCohortContextByListNameAsync(name);
+            if (context is null) throw new InvalidOperationException("The selected saved cohort no longer exists.");
+            CohortDeletionService.DeleteDirectory(ConfigurationService.GetConfiguration(), name);
+            directoryRemoved = true;
+            if (!await _dbManager.DeleteCohortContextAsync(context.CohortContextId, context.ClientListName))
+                throw new InvalidOperationException("The selected cohort changed or no longer exists in the database.");
+            databaseRemoved = true;
+
+            if (isActive)
+            {
+                var defaults = CreateNextCohortDefaults();
+                DisposeCohortPhisSession();
+                ResetReviewForNextCohort();
+                BindNewContext(defaults);
+                pb_Phase2.Minimum = 0;
+                pb_Phase2.Maximum = 1;
+                pb_Phase2.Value = 0;
+                lbl_Phase2Progress.Text = "0 / 0";
+                lbl_Phase2Status.Text = "Ready";
+                _workflowTabs.SelectedIndex = 0;
+            }
+
+            string? settingsWarning = null;
+            try { ClearDeletedCohortSettings(context); }
+            catch (Exception ex) { settingsWarning = $"The last-cohort settings could not be cleared: {ex.Message}"; }
+            await RefreshClientListSearchAsync(string.Empty);
+            string message = $"Cohort '{name}' deleted (Client ID cache preserved).";
+            LoggerService.LogInformation(message);
+            MessageBox.Show(this, settingsWarning is null ? message : $"{message}\n\n{settingsWarning}",
+                "Cohort Deleted", MessageBoxButtons.OK, settingsWarning is null ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+        catch (Exception ex)
+        {
+            string detail = databaseRemoved
+                ? "The cohort folder and database records were deleted, but the workspace could not be refreshed. Restart the application."
+                : directoryRemoved
+                ? "The cohort folder was removed, but database cleanup failed. The saved list remains available for retry."
+                : ex is IOException or UnauthorizedAccessException
+                    ? "Close any open cohort files and check permissions, then retry. Some files may already have been removed; database records were retained."
+                    : "The cohort could not be deleted. Database records were retained.";
+            LoggerService.LogError("Cohort deletion failed.", ex);
+            MessageBox.Show(this, $"{detail}\n\n{ex.Message}", "Delete Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally { SetFormEnabled(true); }
+    }
+
+    private static void ClearDeletedCohortSettings(CohortContextEntity context)
+    {
+        JsonNode node = JsonNode.Parse(File.ReadAllText(AppSettingsPath))
+            ?? throw new InvalidOperationException("appsettings.json is empty or invalid.");
+        if (node["CohortContext"] is not JsonObject cohort) return;
+        string? savedName = cohort["LastClientListName"]?.GetValue<string>();
+        int? savedId = cohort["LastCohortContextId"]?.GetValue<int>();
+        if (savedId != context.CohortContextId && !string.Equals(savedName, context.ClientListName, StringComparison.OrdinalIgnoreCase)) return;
+        cohort["LastCohortContextId"] = 0;
+        cohort["LastClientListName"] = string.Empty;
+        cohort["CohortDate"] = string.Empty;
+        string json = node.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(AppSettingsPath, json);
+        SyncToSourceAppsettings(json);
+        ConfigurationService.ReloadConfiguration();
+    }
+
     private void btn_NextCohort_Click(object? sender, EventArgs e)
     {
         if (_formBusy || _isPhase2Running || _isStartingNextCohort)
@@ -1007,6 +1110,7 @@ public partial class CohortContextForm : Form
         grp_PhisSearch.Enabled = enabled && _hasSavedContext;
         btn_SaveCohortContext.Enabled = enabled;
         _nextCohortButton.Enabled = enabled && !_isPhase2Running && !_isStartingNextCohort;
+        UpdateDeleteAvailability();
         UpdateReviewAvailability();
     }
 
@@ -1168,6 +1272,8 @@ public partial class CohortContextForm : Form
 
         foreach (string clientListName in savedLists
             .Where(clientListName => !string.IsNullOrWhiteSpace(clientListName))
+            .Where(clientListName => !clientListName.Equals("1. InputFolder", StringComparison.OrdinalIgnoreCase) &&
+                                     !clientListName.Equals("2. OutputFolder", StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase))
         {
             cb_SearchClientListName.Items.Add(clientListName);

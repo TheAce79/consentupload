@@ -26,6 +26,8 @@ public interface IConsentSyncRepository
         string clientListName,
         CancellationToken cancellationToken = default);
 
+    Task<bool> DeleteCohortContextAsync(int cohortContextId, string clientListName, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<string>> GetRecentClientListNamesAsync(
         int take = 20,
         CancellationToken cancellationToken = default);

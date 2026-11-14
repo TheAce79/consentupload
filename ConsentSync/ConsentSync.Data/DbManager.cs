@@ -281,6 +281,20 @@ public sealed class DbManager : IConsentSyncRepository
             new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
     }
 
+    public async Task<bool> DeleteCohortContextAsync(int cohortContextId, string clientListName, CancellationToken cancellationToken = default)
+    {
+        if (cohortContextId <= 0) throw new ArgumentOutOfRangeException(nameof(cohortContextId));
+        string name = NormalizeRequiredText(clientListName, nameof(clientListName));
+        await InitializeAsync(cancellationToken);
+        await using SqliteConnection connection = OpenSqliteConnection();
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        int deleted = await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM CohortContexts WHERE CohortContextId = @cohortContextId AND ClientListName = @name COLLATE NOCASE;",
+            new { cohortContextId, name }, transaction, cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+        return deleted == 1;
+    }
+
     public async Task<IReadOnlyList<string>> GetRecentClientListNamesAsync(
         int take = 20,
         CancellationToken cancellationToken = default)

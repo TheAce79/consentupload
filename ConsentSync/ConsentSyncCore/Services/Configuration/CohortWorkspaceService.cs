@@ -81,6 +81,9 @@ public static class CohortWorkspaceService
         return (paths.InputCsvDir, paths.InputPdfDir, paths.OutputCsvDir);
     }
 
+    public static string ResolveCohortDirectory(IConfiguration config, string clientListName)
+        => ResolveWorkspacePathsCore(config, clientListName).CohortDir;
+
     private static WorkspacePaths ResolveWorkspacePathsCore(IConfiguration config, string? clientListName)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -119,7 +122,7 @@ public static class CohortWorkspaceService
         string outputCsvDir = ResolveChildPath(outputFolder, config[$"{WorkspaceSection}:SubFolders:OutputCsv"] ?? DefaultOutputCsvFolder, "SubFolders:OutputCsv");
         string criteriaDir = ResolveChildPath(cohortPath, config[$"{WorkspaceSection}:CriteriaFolder"] ?? DefaultCriteriaFolder, "CriteriaFolder");
 
-        return new WorkspacePaths(inputCsvDir, inputPdfDir, outputCsvDir, criteriaDir);
+        return new WorkspacePaths(cohortPath, inputCsvDir, inputPdfDir, outputCsvDir, criteriaDir);
     }
 
     private static string NormalizeClientListName(string? clientListName)
@@ -166,5 +169,5 @@ public static class CohortWorkspaceService
         }
     }
 
-    private sealed record WorkspacePaths(string InputCsvDir, string InputPdfDir, string OutputCsvDir, string CriteriaDir);
+    private sealed record WorkspacePaths(string CohortDir, string InputCsvDir, string InputPdfDir, string OutputCsvDir, string CriteriaDir);
 }

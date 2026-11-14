@@ -21,6 +21,7 @@ partial class CohortContextForm
     {
         grp_CohortContext = new LavenderGroupBox();
         btn_LoadContext = new Button();
+        bt_DeleteCohort = new Button();
         cb_SearchClientListName = new ComboBox();
         lbl_SearchClientListName = new Label();
         btn_SaveCohortContext = new Button();
@@ -61,6 +62,7 @@ partial class CohortContextForm
         // grp_CohortContext
         // 
         grp_CohortContext.Controls.Add(btn_LoadContext);
+        grp_CohortContext.Controls.Add(bt_DeleteCohort);
         grp_CohortContext.Controls.Add(cb_SearchClientListName);
         grp_CohortContext.Controls.Add(lbl_SearchClientListName);
         grp_CohortContext.Controls.Add(btn_OpenCohortExplorer);
@@ -99,6 +101,14 @@ partial class CohortContextForm
         btn_LoadContext.Text = "Load";
         btn_LoadContext.UseVisualStyleBackColor = true;
         btn_LoadContext.Click += btn_LoadContext_Click;
+        // bt_DeleteCohort
+        bt_DeleteCohort.Location = new Point(570, 38);
+        bt_DeleteCohort.Name = "bt_DeleteCohort";
+        bt_DeleteCohort.Size = new Size(105, 30);
+        bt_DeleteCohort.Text = "Delete";
+        bt_DeleteCohort.Enabled = false;
+        bt_DeleteCohort.UseVisualStyleBackColor = true;
+        bt_DeleteCohort.Click += bt_DeleteCohort_Click;
         // 
         // cb_SearchClientListName
         // 
@@ -110,6 +120,8 @@ partial class CohortContextForm
         cb_SearchClientListName.Size = new Size(280, 28);
         cb_SearchClientListName.TabIndex = 1;
         cb_SearchClientListName.KeyDown += cb_SearchClientListName_KeyDown;
+        cb_SearchClientListName.TextChanged += cb_SearchClientListName_TextChanged;
+        cb_SearchClientListName.SelectedIndexChanged += cb_SearchClientListName_TextChanged;
         // 
         // lbl_SearchClientListName
         // 
@@ -428,6 +440,7 @@ partial class CohortContextForm
     private ComboBox cb_SearchClientListName;
     private Label lbl_SearchClientListName;
     private Button btn_LoadContext;
+    private Button bt_DeleteCohort;
     private ComboBox cb_Prefix;
     private Label lbl_Prefix;
     private ComboBox cb_Location;
